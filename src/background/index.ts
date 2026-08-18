@@ -7,6 +7,8 @@ import {
   isPanelAutomationDefaultsUpdate,
   isPanelAutomationPolicyUpdate,
   isPanelEmergencyPauseUpdate,
+  isPanelOverviewRequest,
+  isPanelProviderSettingsUpdate,
   isPanelStatusRequest,
   type AutomationPolicyResponse,
   type ContentAgentAck,
@@ -15,17 +17,22 @@ import {
   type ContentObservation,
   type ContentUserInteraction,
   type GuardianResponse,
+  type ManagedChatStatus,
   type PanelAutomationDefaultsUpdate,
   type PanelAutomationPolicyUpdate,
   type PanelEmergencyPauseUpdate,
+  type PanelOverviewResponse,
+  type PanelProviderSettingsUpdate,
   type PanelStatusResponse,
   type ProtocolErrorResponse,
+  type ProviderSettingsResponse,
 } from "../shared/protocol.js";
 import {
   SessionRegistry,
   type SessionMutationResult,
   type SessionRegistryState,
 } from "../core/session-registry.js";
+import { redactProviderProfile } from "../providers/settings.js";
 import {
   createEphemeralStorage,
   restrictDurableStorageToTrustedContexts,
@@ -196,7 +203,8 @@ async function handleInteraction(message: ContentUserInteraction, sender: chrome
   }
 }
 
-async function handlePanelStatusRequest(tabId: number): Promise<GuardianResponse> {
+async function handlePanelStatusRequest(tabId: number, sender: chrome.runtime.MessageSender): Promise<GuardianResponse> {
+  if (!trustedExtensionSender(sender)) return protocolError("INVALID_SENDER", "Only trusted extension pages may read managed-chat status.");
   try {
     await registryReady;
     await mutationQueue;
@@ -212,7 +220,6 @@ async function handlePanelStatusRequest(tabId: number): Promise<GuardianResponse
         documentId: session.documentId,
         ...(session.conversationId === undefined ? {} : { conversationId: session.conversationId }),
         controlEligibility: session.controlEligibility,
-        session,
         lastSeenAt: session.lastSeenAt,
       }),
       ...(automationStatus.policy === undefined ? {} : { automationPolicy: automationStatus.policy }),
@@ -221,6 +228,46 @@ async function handlePanelStatusRequest(tabId: number): Promise<GuardianResponse
     return response;
   } catch {
     return protocolError("STORAGE_FAILURE", "Unable to read session/automation state.");
+  }
+}
+
+async function handleOverview(sender: chrome.runtime.MessageSender): Promise<GuardianResponse> {
+  if (!trustedExtensionSender(sender)) return protocolError("INVALID_SENDER", "Only trusted extension pages may read the management overview.");
+  try {
+    await registryReady;
+    await mutationQueue;
+    await automation.ready();
+    const policyState = automation.policySnapshot();
+    const providerSettings = await automation.providerSettings();
+    const chats: ManagedChatStatus[] = [];
+    for (const session of registry.list()) {
+      const status = await automation.status(session.tabId);
+      chats.push({
+        tabId: session.tabId,
+        ...(session.conversationId === undefined ? {} : { conversationId: session.conversationId }),
+        routeKey: session.routeKey,
+        controlEligibility: session.controlEligibility,
+        lastSeenAt: session.lastSeenAt,
+        ...(session.observation === undefined ? {} : { generation: session.observation.generation }),
+        ...(status.policy === undefined ? {} : { policy: status.policy }),
+        ...(status.runtime === undefined ? {} : { runtime: status.runtime }),
+      });
+    }
+    const response: PanelOverviewResponse = {
+      type: "background:overview",
+      protocolVersion: PROTOCOL_VERSION,
+      policyRevision: policyState.revision,
+      emergencyPaused: policyState.emergencyPaused,
+      defaults: policyState.defaults,
+      chats,
+      providers: {
+        profiles: providerSettings.profiles.map(redactProviderProfile),
+        order: [...providerSettings.order],
+      },
+    };
+    return response;
+  } catch {
+    return protocolError("STORAGE_FAILURE", "Unable to read the management overview.");
   }
 }
 
@@ -279,15 +326,35 @@ async function handleEmergencyPauseUpdate(message: PanelEmergencyPauseUpdate, se
   }
 }
 
+async function handleProviderSettingsUpdate(message: PanelProviderSettingsUpdate, sender: chrome.runtime.MessageSender): Promise<GuardianResponse> {
+  if (!trustedExtensionSender(sender)) return protocolError("INVALID_SENDER", "Only trusted extension pages may change provider settings.");
+  try {
+    const saved = await automation.updateProviderSettings(message.settings);
+    const response: ProviderSettingsResponse = {
+      type: "background:provider-settings",
+      protocolVersion: PROTOCOL_VERSION,
+      providers: {
+        profiles: saved.profiles.map(redactProviderProfile),
+        order: [...saved.order],
+      },
+    };
+    return response;
+  } catch {
+    return protocolError("STORAGE_FAILURE", "Unable to persist provider settings.");
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (isContentHello(message)) { void handleContentHello(message, sender).then(sendResponse); return true; }
   if (isContentNavigation(message)) { void handleNavigation(message, sender).then(sendResponse); return true; }
   if (isContentObservation(message)) { void handleObservation(message, sender).then(sendResponse); return true; }
   if (isContentUserInteraction(message)) { void handleInteraction(message, sender).then(sendResponse); return true; }
-  if (isPanelStatusRequest(message)) { void handlePanelStatusRequest(message.tabId).then(sendResponse); return true; }
+  if (isPanelStatusRequest(message)) { void handlePanelStatusRequest(message.tabId, sender).then(sendResponse); return true; }
+  if (isPanelOverviewRequest(message)) { void handleOverview(sender).then(sendResponse); return true; }
   if (isPanelAutomationPolicyUpdate(message)) { void handlePolicyUpdate(message, sender).then(sendResponse); return true; }
   if (isPanelAutomationDefaultsUpdate(message)) { void handleDefaultsUpdate(message, sender).then(sendResponse); return true; }
   if (isPanelEmergencyPauseUpdate(message)) { void handleEmergencyPauseUpdate(message, sender).then(sendResponse); return true; }
+  if (isPanelProviderSettingsUpdate(message)) { void handleProviderSettingsUpdate(message, sender).then(sendResponse); return true; }
   return false;
 });
 
