@@ -21,8 +21,6 @@ export interface AutomationWriteJournalPersistence {
   save(state: AutomationWriteJournalState): Promise<void>;
 }
 
-const MAX_RECORDS = 64;
-
 function validRecord(record: WriteGuardRecord): boolean {
   return (
     typeof record.conversationId === "string" &&
@@ -42,7 +40,7 @@ function normalizeState(state: AutomationWriteJournalState | undefined): Automat
   if (state?.version !== 1 || !Array.isArray(state.records)) return { version: 1, records: [] };
   return {
     version: 1,
-    records: state.records.filter(validRecord).slice(-MAX_RECORDS).map((record) => ({ ...record })),
+    records: state.records.filter(validRecord).map((record) => ({ ...record })),
   };
 }
 
@@ -82,7 +80,7 @@ export class AutomationWriteJournal {
       };
       const next: AutomationWriteJournalState = {
         version: 1,
-        records: [...this.#state.records, record].slice(-MAX_RECORDS),
+        records: [...this.#state.records, record],
       };
       await this.#persistence.save(next);
       this.#state = next;
@@ -93,7 +91,7 @@ export class AutomationWriteJournal {
   mark(decisionId: string, disposition: Exclude<WriteGuardDisposition, "ATTEMPTED">): Promise<void> {
     return this.#enqueue(async () => {
       const index = this.#state.records.findIndex((record) => record.decisionId === decisionId);
-      if (index < 0) return;
+      if (index < 0) throw new Error("Write guard disappeared before outcome reconciliation.");
       const records = this.#state.records.map((record, recordIndex) =>
         recordIndex === index ? { ...record, disposition } : { ...record },
       );
