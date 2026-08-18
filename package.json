@@ -1,0 +1,21 @@
+{
+  "name": "chat-turn-guardian",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/dev.mjs",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit",
+    "lint": "node scripts/lint.mjs",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "validate": "npm run typecheck && npm run lint && npm test",
+    "smoke:extension": "node scripts/smoke-extension.mjs"
+  },
+  "devDependencies": {
+    "typescript": "5.8.3"
+  }
+}

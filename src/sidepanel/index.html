@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chat Turn Guardian</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">Foundation status</p>
+        <h1>Chat Turn Guardian</h1>
+        <p>
+          This build verifies the Manifest V3 service worker, ChatGPT content agent,
+          and Side Panel message boundary. Automatic continuation is not enabled yet.
+        </p>
+      </header>
+
+      <section class="status-card" aria-live="polite">
+        <strong data-status>Checking current tab...</strong>
+        <span data-details>Waiting for the service worker.</span>
+      </section>
+
+      <button type="button" data-refresh>Refresh status</button>
+    </main>
+
+    <script type="module" src="./index.js"></script>
+  </body>
+</html>
