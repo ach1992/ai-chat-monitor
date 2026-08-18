@@ -409,6 +409,7 @@ export class AutomationCoordinator {
         ? {}
         : { lastUserInteractionAt: postClassification.session.lastUserInteractionAt }),
       policyRevision: postClassification.policy.revision,
+      evidenceKey: postClassification.evidenceKey,
       classification,
       continuationText: postClassification.policy.continuationText,
       createdAt,
@@ -688,21 +689,21 @@ export class AutomationCoordinator {
     const conversationId = session.conversationId;
     if (assistant === undefined || conversationId === undefined) return undefined;
     const latestUser = observation?.latestUser;
-    const evidenceKey = [
+    const evidenceKey = JSON.stringify([
       session.tabId,
       session.documentId,
       session.agentInstanceId,
       session.pageEpoch,
       conversationId,
       session.routeKey,
-      latestUser?.domMessageId ?? "",
-      latestUser?.normalizedText ?? "",
+      latestUser?.domMessageId ?? null,
+      latestUser?.normalizedText ?? null,
       assistant.fingerprint,
-      assistant.domMessageId ?? "",
-      session.lastUserInteractionAt ?? "",
+      assistant.domMessageId ?? null,
+      session.lastUserInteractionAt ?? null,
       policy.revision,
       policy.mode,
-    ].join(":");
+    ]);
     return {
       session,
       policy,
@@ -756,7 +757,8 @@ export class AutomationCoordinator {
     ) {
       return undefined;
     }
-    return this.#candidateEvidence(fresh, policy);
+    const candidate = this.#candidateEvidence(fresh, policy);
+    return candidate?.evidenceKey === envelope.evidenceKey ? candidate : undefined;
   }
 
   #staleRuntime(runtime: RuntimeEntry, evidence: CandidateEvidence, reason: string): void {
