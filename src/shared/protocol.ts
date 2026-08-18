@@ -1,9 +1,23 @@
 import { isPageObservation, type PageObservation } from "./observation.js";
 import type { ControlEligibility, SessionView } from "../core/session-registry.js";
+import type {
+  AutomationPolicyDefaults,
+  ChatAutomationPolicyPatch,
+} from "../automation/policy.js";
+import type {
+  AutomationRuntimeStatus,
+  ResolvedAutomationPolicy,
+} from "../automation/types.js";
 
 export const PROTOCOL_VERSION = 2 as const;
 
-export type UserInteractionKind = "COMPOSER_INPUT" | "COMPOSER_FOCUS" | "MANUAL_SEND";
+export type UserInteractionKind =
+  | "COMPOSER_INPUT"
+  | "COMPOSER_FOCUS"
+  | "MANUAL_SEND"
+  | "STOP_GENERATION"
+  | "EDIT_TURN"
+  | "BLOCKING_INTERACTION";
 
 interface ContentSessionBase {
   protocolVersion: typeof PROTOCOL_VERSION;
@@ -41,6 +55,25 @@ export interface PanelStatusRequest {
   tabId: number;
 }
 
+export interface PanelAutomationPolicyUpdate {
+  type: "panel:automation-policy-update";
+  protocolVersion: typeof PROTOCOL_VERSION;
+  tabId: number;
+  patch: ChatAutomationPolicyPatch;
+}
+
+export interface PanelAutomationDefaultsUpdate {
+  type: "panel:automation-defaults-update";
+  protocolVersion: typeof PROTOCOL_VERSION;
+  patch: Partial<AutomationPolicyDefaults>;
+}
+
+export interface PanelEmergencyPauseUpdate {
+  type: "panel:emergency-pause-update";
+  protocolVersion: typeof PROTOCOL_VERSION;
+  paused: boolean;
+}
+
 export interface ContentAgentAck {
   type: "background:agent-ack";
   protocolVersion: typeof PROTOCOL_VERSION;
@@ -59,7 +92,19 @@ export interface PanelStatusResponse {
   conversationId?: string;
   controlEligibility?: ControlEligibility;
   session?: SessionView;
+  automationPolicy?: ResolvedAutomationPolicy;
+  automationRuntime?: AutomationRuntimeStatus;
   lastSeenAt?: number;
+}
+
+export interface AutomationPolicyResponse {
+  type: "background:automation-policy";
+  protocolVersion: typeof PROTOCOL_VERSION;
+  revision: number;
+  emergencyPaused: boolean;
+  tabId?: number;
+  policy?: ResolvedAutomationPolicy;
+  runtime?: AutomationRuntimeStatus;
 }
 
 export interface ProtocolErrorResponse {
@@ -74,9 +119,12 @@ export type GuardianRequest =
   | ContentNavigation
   | ContentObservation
   | ContentUserInteraction
-  | PanelStatusRequest;
+  | PanelStatusRequest
+  | PanelAutomationPolicyUpdate
+  | PanelAutomationDefaultsUpdate
+  | PanelEmergencyPauseUpdate;
 
-export type GuardianResponse = ContentAgentAck | PanelStatusResponse | ProtocolErrorResponse;
+export type GuardianResponse = ContentAgentAck | PanelStatusResponse | AutomationPolicyResponse | ProtocolErrorResponse;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -89,25 +137,58 @@ function hasProtocolVersion(value: Record<string, unknown>): boolean {
 function isSessionBase(value: Record<string, unknown>): boolean {
   return (
     hasProtocolVersion(value) &&
-    typeof value.agentInstanceId === "string" &&
-    value.agentInstanceId.length > 0 &&
-    value.agentInstanceId.length <= 128 &&
-    typeof value.pageEpoch === "number" &&
-    Number.isInteger(value.pageEpoch) &&
-    value.pageEpoch >= 1 &&
-    typeof value.sequence === "number" &&
-    Number.isInteger(value.sequence) &&
-    value.sequence >= 1 &&
-    typeof value.sentAt === "number" &&
-    Number.isFinite(value.sentAt)
+    typeof value.agentInstanceId === "string" && value.agentInstanceId.length > 0 && value.agentInstanceId.length <= 128 &&
+    typeof value.pageEpoch === "number" && Number.isInteger(value.pageEpoch) && value.pageEpoch >= 1 &&
+    typeof value.sequence === "number" && Number.isInteger(value.sequence) && value.sequence >= 1 &&
+    typeof value.sentAt === "number" && Number.isFinite(value.sentAt)
   );
 }
 
 function hasRouteIdentity(value: Record<string, unknown>): boolean {
+  return typeof value.routeKey === "string" && value.routeKey.length > 0 &&
+    (value.conversationId === undefined || typeof value.conversationId === "string");
+}
+
+function isTabId(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+function validMode(value: unknown): boolean {
+  return value === "OFF" || value === "OBSERVE" || value === "AUTO" || value === "NOTIFY_ONLY";
+}
+
+function validDelayPatch(value: unknown, maximum: number): boolean {
+  return value === undefined || value === null || (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= maximum);
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {
+  return Object.keys(value).every((key) => allowed.has(key));
+}
+
+function isChatPolicyPatch(value: unknown): value is ChatAutomationPolicyPatch {
+  if (!isRecord(value)) return false;
+  const allowed = new Set(["mode", "settleDelayMs", "continueDelayMs", "cooldownMs", "continuationText"]);
+  if (!hasOnlyKeys(value, allowed) || Object.keys(value).length === 0) return false;
   return (
-    typeof value.routeKey === "string" &&
-    value.routeKey.length > 0 &&
-    (value.conversationId === undefined || typeof value.conversationId === "string")
+    (value.mode === undefined || validMode(value.mode)) &&
+    validDelayPatch(value.settleDelayMs, 60_000) &&
+    validDelayPatch(value.continueDelayMs, 60_000) &&
+    validDelayPatch(value.cooldownMs, 300_000) &&
+    (value.continuationText === undefined || value.continuationText === null ||
+      (typeof value.continuationText === "string" && value.continuationText.trim().length > 0 && value.continuationText.length <= 200))
+  );
+}
+
+function isDefaultsPatch(value: unknown): value is Partial<AutomationPolicyDefaults> {
+  if (!isRecord(value)) return false;
+  const allowed = new Set(["settleDelayMs", "continueDelayMs", "cooldownMs", "continuationText"]);
+  if (!hasOnlyKeys(value, allowed) || Object.keys(value).length === 0) return false;
+  return (
+    (value.settleDelayMs === undefined || validDelayPatch(value.settleDelayMs, 60_000)) && value.settleDelayMs !== null &&
+    (value.continueDelayMs === undefined || validDelayPatch(value.continueDelayMs, 60_000)) && value.continueDelayMs !== null &&
+    (value.cooldownMs === undefined || validDelayPatch(value.cooldownMs, 300_000)) && value.cooldownMs !== null &&
+    (value.continuationText === undefined ||
+      (typeof value.continuationText === "string" && value.continuationText.trim().length > 0 && value.continuationText.length <= 200))
   );
 }
 
@@ -125,22 +206,28 @@ export function isContentObservation(value: unknown): value is ContentObservatio
 
 export function isContentUserInteraction(value: unknown): value is ContentUserInteraction {
   return (
-    isRecord(value) &&
-    value.type === "content:user-interaction" &&
-    isSessionBase(value) &&
+    isRecord(value) && value.type === "content:user-interaction" && isSessionBase(value) &&
     (value.interaction === "COMPOSER_INPUT" ||
       value.interaction === "COMPOSER_FOCUS" ||
-      value.interaction === "MANUAL_SEND")
+      value.interaction === "MANUAL_SEND" ||
+      value.interaction === "STOP_GENERATION" ||
+      value.interaction === "EDIT_TURN" ||
+      value.interaction === "BLOCKING_INTERACTION")
   );
 }
 
 export function isPanelStatusRequest(value: unknown): value is PanelStatusRequest {
-  return (
-    isRecord(value) &&
-    hasProtocolVersion(value) &&
-    value.type === "panel:status-request" &&
-    typeof value.tabId === "number" &&
-    Number.isInteger(value.tabId) &&
-    value.tabId >= 0
-  );
+  return isRecord(value) && hasProtocolVersion(value) && value.type === "panel:status-request" && isTabId(value.tabId);
+}
+
+export function isPanelAutomationPolicyUpdate(value: unknown): value is PanelAutomationPolicyUpdate {
+  return isRecord(value) && hasProtocolVersion(value) && value.type === "panel:automation-policy-update" && isTabId(value.tabId) && isChatPolicyPatch(value.patch);
+}
+
+export function isPanelAutomationDefaultsUpdate(value: unknown): value is PanelAutomationDefaultsUpdate {
+  return isRecord(value) && hasProtocolVersion(value) && value.type === "panel:automation-defaults-update" && isDefaultsPatch(value.patch);
+}
+
+export function isPanelEmergencyPauseUpdate(value: unknown): value is PanelEmergencyPauseUpdate {
+  return isRecord(value) && hasProtocolVersion(value) && value.type === "panel:emergency-pause-update" && typeof value.paused === "boolean";
 }
