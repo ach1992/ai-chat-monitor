@@ -17,6 +17,11 @@ namespace GuardianContent {
     conversationId?: string;
     routeKey: string;
     generation: GenerationState;
+    latestUser?: {
+      normalizedText: string;
+      textLength: number;
+      domMessageId?: string;
+    };
     latestAssistant?: {
       normalizedText: string;
       textLength: number;
@@ -135,6 +140,20 @@ namespace GuardianContent {
   function assistantMatches(document: Document): Element[] { return allMatches(document, ASSISTANT_SELECTORS); }
   function userMatches(document: Document): Element[] { return allMatches(document, USER_SELECTORS); }
 
+  function latestUserBeforeAssistant(document: Document, assistant: Element): Element | undefined {
+    const users = userMatches(document);
+    for (let index = users.length - 1; index >= 0; index -= 1) {
+      const user = users[index];
+      if (user === undefined) continue;
+      try {
+        if ((user.compareDocumentPosition(assistant) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0) return user;
+      } catch {
+        // DOM drift must not guess at turn ordering.
+      }
+    }
+    return undefined;
+  }
+
   function elementText(element: Element): string {
     if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) return element.value;
     return element.textContent ?? "";
@@ -241,6 +260,9 @@ namespace GuardianContent {
       const composer = firstMatch<HTMLElement>(this.#document, COMPOSER_SELECTORS);
       const stopControl = firstMatch<HTMLElement>(this.#document, STOP_SELECTORS);
       const latestAssistantElement = assistantMatches(this.#document).at(-1);
+      const latestUserElement = latestAssistantElement === undefined
+        ? undefined
+        : latestUserBeforeAssistant(this.#document, latestAssistantElement);
       const blockingSurfaces = allMatches(this.#document, BLOCKING_SELECTORS);
       const reasons = new Set<BlockingReason>();
       for (const surface of blockingSurfaces) {
@@ -260,6 +282,17 @@ namespace GuardianContent {
         observedAt,
         ...(conversationId === undefined ? {} : { conversationId }),
       };
+      if (latestUserElement !== undefined) {
+        const normalizedText = normalizeAssistantText(elementText(latestUserElement));
+        if (normalizedText.length > 0) {
+          const domMessageId = readMessageId(latestUserElement);
+          observation.latestUser = {
+            normalizedText: normalizedText.slice(0, MAX_NORMALIZED_RESPONSE_CHARS),
+            textLength: normalizedText.length,
+            ...(domMessageId === undefined ? {} : { domMessageId }),
+          };
+        }
+      }
       if (latestAssistantElement !== undefined) {
         const normalizedText = normalizeAssistantText(elementText(latestAssistantElement));
         if (normalizedText.length > 0) {
