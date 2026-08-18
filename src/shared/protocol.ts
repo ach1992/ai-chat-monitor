@@ -10,10 +10,10 @@ import type {
   ResolvedAutomationPolicy,
 } from "../automation/types.js";
 import {
-  isProviderSettingsState,
+  isProviderProfile,
   type RedactedProviderProfile,
 } from "../providers/settings.js";
-import type { ProviderSettingsState } from "../providers/types.js";
+import type { ProviderProfile } from "../providers/types.js";
 
 export const PROTOCOL_VERSION = 2 as const;
 
@@ -86,10 +86,23 @@ export interface PanelEmergencyPauseUpdate {
   paused: boolean;
 }
 
-export interface PanelProviderSettingsUpdate {
-  type: "panel:provider-settings-update";
+export interface PanelProviderProfileUpsert {
+  type: "panel:provider-profile-upsert";
   protocolVersion: typeof PROTOCOL_VERSION;
-  settings: ProviderSettingsState;
+  profile: ProviderProfile;
+  makePrimary?: boolean;
+}
+
+export interface PanelProviderProfileRemove {
+  type: "panel:provider-profile-remove";
+  protocolVersion: typeof PROTOCOL_VERSION;
+  providerId: string;
+}
+
+export interface PanelProviderOrderUpdate {
+  type: "panel:provider-order-update";
+  protocolVersion: typeof PROTOCOL_VERSION;
+  order: string[];
 }
 
 export interface ContentAgentAck {
@@ -174,7 +187,9 @@ export type GuardianRequest =
   | PanelAutomationPolicyUpdate
   | PanelAutomationDefaultsUpdate
   | PanelEmergencyPauseUpdate
-  | PanelProviderSettingsUpdate;
+  | PanelProviderProfileUpsert
+  | PanelProviderProfileRemove
+  | PanelProviderOrderUpdate;
 
 export type GuardianResponse =
   | ContentAgentAck
@@ -229,6 +244,17 @@ function validNotificationTriggers(value: unknown, allowNull: boolean): value is
 
 function hasOnlyKeys(value: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {
   return Object.keys(value).every((key) => allowed.has(key));
+}
+
+function isProviderId(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value);
+}
+
+function isProviderOrder(value: unknown): value is string[] {
+  return Array.isArray(value) &&
+    value.length <= 32 &&
+    value.every(isProviderId) &&
+    new Set(value).size === value.length;
 }
 
 function isChatPolicyPatch(value: unknown): value is ChatAutomationPolicyPatch {
@@ -325,11 +351,20 @@ export function isPanelEmergencyPauseUpdate(value: unknown): value is PanelEmerg
   return isRecord(value) && hasProtocolVersion(value) && value.type === "panel:emergency-pause-update" && typeof value.paused === "boolean";
 }
 
-export function isPanelProviderSettingsUpdate(value: unknown): value is PanelProviderSettingsUpdate {
+export function isPanelProviderProfileUpsert(value: unknown): value is PanelProviderProfileUpsert {
   return (
     isRecord(value) &&
     hasProtocolVersion(value) &&
-    value.type === "panel:provider-settings-update" &&
-    isProviderSettingsState(value.settings)
+    value.type === "panel:provider-profile-upsert" &&
+    isProviderProfile(value.profile) &&
+    (value.makePrimary === undefined || typeof value.makePrimary === "boolean")
   );
+}
+
+export function isPanelProviderProfileRemove(value: unknown): value is PanelProviderProfileRemove {
+  return isRecord(value) && hasProtocolVersion(value) && value.type === "panel:provider-profile-remove" && isProviderId(value.providerId);
+}
+
+export function isPanelProviderOrderUpdate(value: unknown): value is PanelProviderOrderUpdate {
+  return isRecord(value) && hasProtocolVersion(value) && value.type === "panel:provider-order-update" && isProviderOrder(value.order);
 }
