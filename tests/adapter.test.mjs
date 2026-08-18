@@ -5,18 +5,26 @@ import vm from "node:vm";
 import { webcrypto } from "node:crypto";
 
 class FakeNode {
+  static DOCUMENT_POSITION_FOLLOWING = 4;
   parent = null;
+  order = 0;
+
   contains(node) {
     return node === this;
+  }
+
+  compareDocumentPosition(node) {
+    return this.order < node.order ? FakeNode.DOCUMENT_POSITION_FOLLOWING : 0;
   }
 }
 
 class FakeElement extends FakeNode {
-  constructor({ textContent = "", attrs = {}, value = "" } = {}) {
+  constructor({ textContent = "", attrs = {}, value = "", order = 0 } = {}) {
     super();
     this.textContent = textContent;
     this.attrs = new Map(Object.entries(attrs));
     this.value = value;
+    this.order = order;
   }
 
   getAttribute(name) {
@@ -111,6 +119,32 @@ test("adapter normalizes and fingerprints assistant text without DOM payloads", 
   assert.equal(result.latestAssistant.textLength, "Hello world\n\nDone".length);
   assert.match(result.latestAssistant.fingerprint, /^[a-f0-9]{64}$/);
   assert.equal(Object.hasOwn(result.latestAssistant, "outerHTML"), false);
+});
+
+test("adapter exposes only the latest user turn preceding the observed assistant", async () => {
+  const GuardianContent = await loadAdapter();
+  const precedingTurn = new FakeElement({ attrs: { "data-testid": "conversation-turn-user-1" } });
+  const assistantTurn = new FakeElement({ attrs: { "data-testid": "conversation-turn-assistant-1" } });
+  const laterTurn = new FakeElement({ attrs: { "data-testid": "conversation-turn-user-2" } });
+  const precedingUser = new FakeElement({ textContent: "Please finish the remaining safe work.", order: 1 });
+  const assistant = new FakeElement({ textContent: "I can continue with the implementation.", order: 2 });
+  const laterUser = new FakeElement({ textContent: "This newer prompt must not be paired with the old assistant.", order: 3 });
+  precedingUser.parent = precedingTurn;
+  assistant.parent = assistantTurn;
+  laterUser.parent = laterTurn;
+  const composer = new FakeTextAreaElement({ value: "", order: 4 });
+  const document = new FakeDocument([
+    ['[data-message-author-role="user"]', [precedingUser, laterUser]],
+    ['[data-message-author-role="assistant"]', [assistant]],
+    ["#prompt-textarea", [composer]],
+  ]);
+  const adapter = new GuardianContent.BrowserChatGPTAdapter(document, { pathname: "/c/abc-1234" });
+  const result = await adapter.observe(4321);
+
+  assert.equal(result.latestUser.normalizedText, "Please finish the remaining safe work.");
+  assert.equal(result.latestUser.textLength, "Please finish the remaining safe work.".length);
+  assert.equal(result.latestUser.domMessageId, "user-1");
+  assert.equal(result.latestAssistant.normalizedText, "I can continue with the implementation.");
 });
 
 test("adapter represents blocking conditions conservatively", async () => {
