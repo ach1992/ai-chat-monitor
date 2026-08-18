@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Chat Turn Guardian",
+  "version": "0.1.0",
+  "description": "Safely supervises explicitly selected ChatGPT conversations without bypassing human or platform boundaries.",
+  "minimum_chrome_version": "114",
+  "permissions": ["storage", "sidePanel"],
+  "background": {
+    "service_worker": "background/index.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "sidepanel/index.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
+      "js": ["content/index.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
