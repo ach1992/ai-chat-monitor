@@ -37,9 +37,10 @@ const registryStorage = createEphemeralStorage<SessionRegistryState>("session-re
 let registry = new SessionRegistry();
 let mutationQueue: Promise<void> = Promise.resolve();
 
-const automation = new AutomationService((tabId) => registry.getTab(tabId));
+const durableStorageReady = restrictDurableStorageToTrustedContexts();
+const automation = new AutomationService((tabId) => registry.getTab(tabId), durableStorageReady);
 const registryReady = Promise.all([
-  restrictDurableStorageToTrustedContexts(),
+  durableStorageReady,
   registryStorage.get(REGISTRY_KEY),
 ]).then(([, state]) => {
   registry = SessionRegistry.fromState(state, { invalidateObservations: true });
