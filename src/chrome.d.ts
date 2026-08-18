@@ -39,6 +39,11 @@ declare namespace chrome {
       ): void;
     }
 
+    interface MessageSendOptions {
+      documentId?: string;
+      frameId?: number;
+    }
+
     const onRemoved: RemovedEvent;
     const onUpdated: UpdatedEvent;
 
@@ -46,6 +51,12 @@ declare namespace chrome {
       active?: boolean;
       currentWindow?: boolean;
     }): Promise<Tab[]>;
+
+    function sendMessage<TResponse = unknown>(
+      tabId: number,
+      message: unknown,
+      options?: MessageSendOptions,
+    ): Promise<TResponse>;
   }
 
   namespace storage {
