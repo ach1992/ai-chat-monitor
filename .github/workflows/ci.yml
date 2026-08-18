@@ -19,3 +19,4 @@ jobs:
           package-manager-cache: false
       - run: npm ci
       - run: npm run validate
+      - run: npm run smoke:extension
