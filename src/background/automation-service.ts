@@ -120,34 +120,36 @@ export class AutomationService {
     if (session?.conversationId !== expectedConversationId) {
       throw new Error("Tab conversation identity changed before the policy update.");
     }
-    return this.#withPolicyWrite(async () => {
+    const policy = await this.#withPolicyWrite(async () => {
       this.#coordinator.invalidateConversation(
         expectedConversationId,
         "Policy update requested; pending automation was cancelled before persistence.",
       );
-      const policy = await this.#policies.updateChat(expectedConversationId, patch);
-      const fresh = this.#getSession(tabId);
-      if (fresh?.conversationId === expectedConversationId) this.#coordinator.handleSession(fresh);
-      return policy;
+      return this.#policies.updateChat(expectedConversationId, patch);
     });
+    this.#rehydrateKnownSessions();
+    return policy;
   }
 
   async updateDefaults(patch: Partial<AutomationPolicyDefaults>): Promise<AutomationPolicyState> {
     await this.#ready;
-    return this.#withPolicyWrite(async () => {
+    const state = await this.#withPolicyWrite(async () => {
       this.#invalidateAll("Global automation defaults update requested; pending decisions were cancelled before persistence.");
       return this.#policies.updateDefaults(patch);
     });
+    this.#rehydrateKnownSessions();
+    return state;
   }
 
   async setEmergencyPaused(paused: boolean): Promise<AutomationPolicyState> {
     await this.#ready;
-    return this.#withPolicyWrite(async () => {
+    const state = await this.#withPolicyWrite(async () => {
       this.#invalidateAll("Emergency-pause change requested; pending decisions were cancelled before persistence.");
-      const state = await this.#policies.setEmergencyPaused(paused);
-      this.#coordinator.emergencyPauseChanged();
-      return state;
+      return this.#policies.setEmergencyPaused(paused);
     });
+    if (this.#policyWritesInFlight === 0) this.#coordinator.emergencyPauseChanged();
+    this.#rehydrateKnownSessions();
+    return state;
   }
 
   async status(tabId: number): Promise<AutomationServiceStatus> {
@@ -171,6 +173,15 @@ export class AutomationService {
         .filter((value): value is string => value !== undefined),
     );
     for (const conversationId of conversations) this.#coordinator.invalidateConversation(conversationId, reason);
+  }
+
+  #rehydrateKnownSessions(): void {
+    if (this.#policyWritesInFlight > 0) return;
+    const tabIds = new Set(this.#coordinator.statuses().map((status) => status.tabId));
+    for (const tabId of tabIds) {
+      const session = this.#getSession(tabId);
+      if (session !== undefined) this.#coordinator.handleSession(session);
+    }
   }
 
   async #withPolicyWrite<T>(operation: () => Promise<T>): Promise<T> {
