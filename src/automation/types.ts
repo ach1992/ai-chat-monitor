@@ -43,6 +43,7 @@ export interface AutomationDecisionEnvelope {
   assistantDomMessageId?: string;
   lastUserInteractionAt?: number;
   policyRevision: number;
+  evidenceKey: string;
   classification: ClassificationResult;
   continuationText: string;
   createdAt: number;
