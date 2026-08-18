@@ -107,8 +107,11 @@ export class AutomationService {
     if (session?.conversationId !== expectedConversationId) {
       throw new Error("Tab conversation identity changed before the policy update.");
     }
+    this.#coordinator.invalidateConversation(
+      expectedConversationId,
+      "Policy update requested; pending automation was cancelled before persistence.",
+    );
     const policy = await this.#policies.updateChat(expectedConversationId, patch);
-    this.#coordinator.invalidateConversation(expectedConversationId);
     const fresh = this.#getSession(tabId);
     if (fresh !== undefined) this.#coordinator.handleSession(fresh);
     return policy;
@@ -116,13 +119,13 @@ export class AutomationService {
 
   async updateDefaults(patch: Partial<AutomationPolicyDefaults>): Promise<AutomationPolicyState> {
     await this.#ready;
-    const state = await this.#policies.updateDefaults(patch);
-    this.#invalidateAll("Global automation defaults changed; pending decisions were cancelled.");
-    return state;
+    this.#invalidateAll("Global automation defaults update requested; pending decisions were cancelled before persistence.");
+    return this.#policies.updateDefaults(patch);
   }
 
   async setEmergencyPaused(paused: boolean): Promise<AutomationPolicyState> {
     await this.#ready;
+    this.#invalidateAll("Emergency-pause change requested; pending decisions were cancelled before persistence.");
     const state = await this.#policies.setEmergencyPaused(paused);
     this.#coordinator.emergencyPauseChanged();
     return state;
