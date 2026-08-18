@@ -72,7 +72,7 @@ function isOptionalString(value: unknown): boolean {
   return value === undefined || typeof value === "string";
 }
 
-function isTurnSnapshot(value: unknown): value is UserTurnSnapshot {
+function isTurnSnapshot(value: unknown): boolean {
   if (!isRecord(value)) return false;
   return (
     typeof value.normalizedText === "string" &&
@@ -113,7 +113,7 @@ export function isPageObservation(value: unknown): value is PageObservation {
   if (value.latestUser !== undefined && !isTurnSnapshot(value.latestUser)) return false;
 
   if (value.latestAssistant !== undefined) {
-    if (!isTurnSnapshot(value.latestAssistant)) return false;
+    if (!isRecord(value.latestAssistant) || !isTurnSnapshot(value.latestAssistant)) return false;
     if (
       typeof value.latestAssistant.fingerprint !== "string" ||
       !/^[a-f0-9]{64}$/.test(value.latestAssistant.fingerprint)
