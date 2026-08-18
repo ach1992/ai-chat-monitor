@@ -97,12 +97,18 @@ export class AutomationService {
     this.#coordinator.invalidateTab(tabId, reason);
   }
 
-  async updateChat(tabId: number, patch: ChatAutomationPolicyPatch): Promise<ResolvedAutomationPolicy> {
+  async updateChat(
+    tabId: number,
+    expectedConversationId: string,
+    patch: ChatAutomationPolicyPatch,
+  ): Promise<ResolvedAutomationPolicy> {
     await this.#ready;
     const session = this.#getSession(tabId);
-    if (session?.conversationId === undefined) throw new Error("Tab has no current conversation identity.");
-    const policy = await this.#policies.updateChat(session.conversationId, patch);
-    this.#coordinator.invalidateConversation(session.conversationId);
+    if (session?.conversationId !== expectedConversationId) {
+      throw new Error("Tab conversation identity changed before the policy update.");
+    }
+    const policy = await this.#policies.updateChat(expectedConversationId, patch);
+    this.#coordinator.invalidateConversation(expectedConversationId);
     const fresh = this.#getSession(tabId);
     if (fresh !== undefined) this.#coordinator.handleSession(fresh);
     return policy;
