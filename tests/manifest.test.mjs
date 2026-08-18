@@ -8,6 +8,8 @@ test("manifest is MV3 with the expected Side Panel and storage permissions", () 
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.minimum_chrome_version, "114");
   assert.deepEqual([...manifest.permissions].sort(), ["sidePanel", "storage"]);
+  assert.deepEqual(manifest.optional_host_permissions, ["https://*/*"]);
+  assert.equal("host_permissions" in manifest, false);
   assert.equal(manifest.side_panel.default_path, "sidepanel/index.html");
 });
 
@@ -17,5 +19,4 @@ test("content scripts are constrained to ChatGPT hosts and load the adapter befo
     "https://chat.openai.com/*",
   ]);
   assert.deepEqual(manifest.content_scripts[0].js, ["content/adapter.js", "content/index.js"]);
-  assert.equal("host_permissions" in manifest, false);
 });
