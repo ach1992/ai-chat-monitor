@@ -11,6 +11,7 @@ import { ConservativeStopClassifier } from "../classification/classifier.js";
 import type { SessionView } from "../core/session-registry.js";
 import { createProviderManager } from "../providers/manager.js";
 import { ProviderSettingsStore } from "../providers/settings-store.js";
+import type { ProviderSettingsState } from "../providers/types.js";
 import { createDurableStorage, createEphemeralStorage } from "../storage/index.js";
 
 const POLICY_KEY = "config";
@@ -150,6 +151,22 @@ export class AutomationService {
     if (this.#policyWritesInFlight === 0) this.#coordinator.emergencyPauseChanged();
     this.#rehydrateKnownSessions();
     return state;
+  }
+
+  async providerSettings(): Promise<ProviderSettingsState> {
+    await this.#ready;
+    return this.#providerSettings.load();
+  }
+
+  async updateProviderSettings(settings: ProviderSettingsState): Promise<ProviderSettingsState> {
+    await this.#ready;
+    const saved = await this.#withPolicyWrite(async () => {
+      this.#invalidateAll("Provider settings changed; pending classifier decisions were cancelled before persistence.");
+      await this.#providerSettings.save(settings);
+      return this.#providerSettings.load();
+    });
+    this.#rehydrateKnownSessions();
+    return saved;
   }
 
   async status(tabId: number): Promise<AutomationServiceStatus> {
