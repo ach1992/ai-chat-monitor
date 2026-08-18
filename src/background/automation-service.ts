@@ -30,7 +30,10 @@ export class AutomationService {
   readonly #ready: Promise<void>;
   #policyWritesInFlight = 0;
 
-  constructor(getSession: (tabId: number) => SessionView | undefined) {
+  constructor(
+    getSession: (tabId: number) => SessionView | undefined,
+    durableStorageReady: Promise<unknown> = Promise.resolve(),
+  ) {
     this.#getSession = getSession;
     const policyStorage = createDurableStorage<AutomationPolicyState>("automation-policy");
     const journalStorage = createEphemeralStorage<AutomationWriteJournalState>("automation-write-journal");
@@ -78,7 +81,9 @@ export class AutomationService {
         },
       },
     });
-    this.#ready = Promise.all([this.#policies.restore(), this.#journal.restore()]).then(() => undefined);
+    this.#ready = durableStorageReady.then(async () => {
+      await Promise.all([this.#policies.restore(), this.#journal.restore()]);
+    });
   }
 
   ready(): Promise<void> { return this.#ready; }
