@@ -10,7 +10,7 @@ import type {
 } from "./types.js";
 
 export interface AutomationClassifier {
-  classify(input: { turns: Array<{ role: "assistant"; content: string }> }): Promise<ClassificationResult>;
+  classify(input: { turns: Array<{ role: "user" | "assistant"; content: string }> }): Promise<ClassificationResult>;
 }
 
 export interface AutomationSessionSource {
@@ -331,9 +331,14 @@ export class AutomationCoordinator {
 
     let classification: ClassificationResult;
     try {
-      classification = await this.#classifier.classify({
-        turns: [{ role: "assistant", content: fresh.session.observation?.latestAssistant?.normalizedText ?? "" }],
-      });
+      const observation = fresh.session.observation;
+      const turns: Array<{ role: "user" | "assistant"; content: string }> = [];
+      const latestUser = observation?.latestUser?.normalizedText;
+      if (latestUser !== undefined && latestUser.length > 0) {
+        turns.push({ role: "user", content: latestUser });
+      }
+      turns.push({ role: "assistant", content: observation?.latestAssistant?.normalizedText ?? "" });
+      classification = await this.#classifier.classify({ turns });
     } catch {
       classification = {
         decision: "UNSURE",
@@ -678,9 +683,11 @@ export class AutomationCoordinator {
   }
 
   #candidateEvidence(session: SessionView, policy: ResolvedAutomationPolicy): CandidateEvidence | undefined {
-    const assistant = session.observation?.latestAssistant;
+    const observation = session.observation;
+    const assistant = observation?.latestAssistant;
     const conversationId = session.conversationId;
     if (assistant === undefined || conversationId === undefined) return undefined;
+    const latestUser = observation?.latestUser;
     const evidenceKey = [
       session.tabId,
       session.documentId,
@@ -688,6 +695,8 @@ export class AutomationCoordinator {
       session.pageEpoch,
       conversationId,
       session.routeKey,
+      latestUser?.domMessageId ?? "",
+      latestUser?.normalizedText ?? "",
       assistant.fingerprint,
       assistant.domMessageId ?? "",
       session.lastUserInteractionAt ?? "",
