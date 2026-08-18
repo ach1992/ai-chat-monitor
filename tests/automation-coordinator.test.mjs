@@ -225,6 +225,24 @@ test("a changed preceding user turn stales a delayed provider result even when a
   assert.match(harness.coordinator.status(7).reason, /bound evidence changed/i);
 });
 
+test("a changed preceding user turn during continue delay invalidates the decision envelope", async () => {
+  const harness = makeHarness();
+  await reachPostClassification(harness);
+  assert.equal(harness.coordinator.status(7).phase, "WAITING_TO_CONTINUE");
+
+  harness.setSession(makeSession({
+    user: "Wait for me before doing anything else.",
+    userMessageId: "user-2",
+    fingerprint: "a".repeat(64),
+  }));
+  harness.clock.advance(20);
+  await flushAsync();
+
+  assert.equal(harness.sendCalls.length, 0);
+  assert.equal(harness.coordinator.status(7).phase, "HOLD");
+  assert.match(harness.coordinator.status(7).reason, /pre-send revalidation/i);
+});
+
 test("AUTO sends only after settle and continue delays with the exact bound identity", async () => {
   const harness = makeHarness();
   await reachPostClassification(harness);
@@ -243,6 +261,7 @@ test("AUTO sends only after settle and continue delays with the exact bound iden
   assert.equal(harness.sendCalls[0].conversationId, "chat-1");
   assert.equal(harness.sendCalls[0].assistantFingerprint, "a".repeat(64));
   assert.equal(harness.sendCalls[0].policyRevision, 11);
+  assert.equal(typeof harness.sendCalls[0].evidenceKey, "string");
   assert.equal(harness.coordinator.status(7).phase, "COOLDOWN");
 });
 
