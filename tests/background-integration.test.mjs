@@ -85,6 +85,12 @@ test("background persists concurrent tab registrations without cross-tab loss", 
   assert.equal(first.type, "background:agent-ack");
   assert.equal(second.type, "background:agent-ack");
 
+  const persisted = values["guardian:session-registry:runtime"];
+  assert.deepEqual(
+    persisted.sessions.map((session) => session.tabId).sort((left, right) => left - right),
+    [1, 2],
+  );
+
   const status1 = await dispatch(
     { type: "panel:status-request", protocolVersion: 2, tabId: 1 },
     99,
