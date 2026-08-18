@@ -1,14 +1,19 @@
 export type GenerationState = "IDLE" | "GENERATING" | "UNKNOWN";
+export type ObservationConfidence = "HIGH" | "LOW";
 
 export type BlockingReason =
   | "MODAL"
   | "RATE_LIMIT"
   | "AUTH"
   | "NETWORK"
-  | "ERROR";
+  | "ERROR"
+  | "CAPTCHA"
+  | "ACCOUNT_VERIFICATION"
+  | "CONFIRMATION_REQUIRED";
 
 export interface AssistantResponseSnapshot {
-  text: string;
+  normalizedText: string;
+  textLength: number;
   fingerprint: string;
   domMessageId?: string;
 }
@@ -22,7 +27,6 @@ export interface ComposerSnapshot {
 export interface BlockingSnapshot {
   blocked: boolean;
   reasons: BlockingReason[];
-  summary?: string;
 }
 
 export interface PageObservation {
@@ -32,6 +36,7 @@ export interface PageObservation {
   latestAssistant?: AssistantResponseSnapshot;
   composer: ComposerSnapshot;
   blocking: BlockingSnapshot;
+  confidence: ObservationConfidence;
   observedAt: number;
 }
 
@@ -49,7 +54,10 @@ function isBlockingReason(value: unknown): value is BlockingReason {
     value === "RATE_LIMIT" ||
     value === "AUTH" ||
     value === "NETWORK" ||
-    value === "ERROR"
+    value === "ERROR" ||
+    value === "CAPTCHA" ||
+    value === "ACCOUNT_VERIFICATION" ||
+    value === "CONFIRMATION_REQUIRED"
   );
 }
 
@@ -58,23 +66,19 @@ function isOptionalString(value: unknown): boolean {
 }
 
 export function isPageObservation(value: unknown): value is PageObservation {
-  if (!isRecord(value)) {
-    return false;
-  }
-
+  if (!isRecord(value)) return false;
   if (
     !isOptionalString(value.conversationId) ||
     typeof value.routeKey !== "string" ||
     value.routeKey.length === 0 ||
     !isGenerationState(value.generation) ||
+    (value.confidence !== "HIGH" && value.confidence !== "LOW") ||
     !Number.isFinite(value.observedAt)
   ) {
     return false;
   }
 
-  if (!isRecord(value.composer)) {
-    return false;
-  }
+  if (!isRecord(value.composer)) return false;
   if (
     typeof value.composer.present !== "boolean" ||
     typeof value.composer.hasText !== "boolean" ||
@@ -83,25 +87,20 @@ export function isPageObservation(value: unknown): value is PageObservation {
     return false;
   }
 
-  if (!isRecord(value.blocking) || typeof value.blocking.blocked !== "boolean") {
-    return false;
-  }
-  if (
-    !Array.isArray(value.blocking.reasons) ||
-    !value.blocking.reasons.every(isBlockingReason) ||
-    !isOptionalString(value.blocking.summary)
-  ) {
+  if (!isRecord(value.blocking) || typeof value.blocking.blocked !== "boolean") return false;
+  if (!Array.isArray(value.blocking.reasons) || !value.blocking.reasons.every(isBlockingReason)) {
     return false;
   }
 
   if (value.latestAssistant !== undefined) {
-    if (!isRecord(value.latestAssistant)) {
-      return false;
-    }
+    if (!isRecord(value.latestAssistant)) return false;
     if (
-      typeof value.latestAssistant.text !== "string" ||
+      typeof value.latestAssistant.normalizedText !== "string" ||
+      typeof value.latestAssistant.textLength !== "number" ||
+      !Number.isInteger(value.latestAssistant.textLength) ||
+      value.latestAssistant.textLength < value.latestAssistant.normalizedText.length ||
       typeof value.latestAssistant.fingerprint !== "string" ||
-      value.latestAssistant.fingerprint.length !== 64 ||
+      !/^[a-f0-9]{64}$/.test(value.latestAssistant.fingerprint) ||
       !isOptionalString(value.latestAssistant.domMessageId)
     ) {
       return false;
