@@ -127,3 +127,35 @@ test("valid semantic UNSURE is terminal and does not ask a fallback provider to 
   assert.equal(result.decision, "UNSURE");
   assert.equal(fallbackCalls, 0);
 });
+
+test("timeout remains active while reading the response body", async () => {
+  const stalledBody = provider(
+    async (_url, init) => ({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      async text() {
+        return new Promise((_resolve, reject) => {
+          init.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+        });
+      },
+    }),
+    { timeoutMs: 1000 },
+  );
+  const result = await new ProviderManager([stalledBody]).classify(request);
+  assert.equal(result.decision, "UNSURE");
+  assert.equal(result.reasonCode, "PROVIDER_FAILURE");
+});
+
+test("oversized provider response is rejected before classification", async () => {
+  const oversized = provider(async () =>
+    new Response("x".repeat(64_001), {
+      status: 200,
+      headers: { "Content-Length": "64001" },
+    }),
+  );
+  await assert.rejects(
+    oversized.classify(request),
+    (error) => error instanceof ProviderFailure && error.code === "INVALID_RESPONSE",
+  );
+});
