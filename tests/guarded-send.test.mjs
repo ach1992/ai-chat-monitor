@@ -1,0 +1,216 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import vm from "node:vm";
+import { webcrypto } from "node:crypto";
+
+class FakeNode {
+  static DOCUMENT_POSITION_FOLLOWING = 4;
+  parent = null;
+  order = 0;
+
+  contains(node) { return node === this; }
+  compareDocumentPosition(node) {
+    return this.order < node.order ? FakeNode.DOCUMENT_POSITION_FOLLOWING : 0;
+  }
+}
+
+class FakeElement extends FakeNode {
+  constructor({ textContent = "", attrs = {}, value = "", order = 0, onClick } = {}) {
+    super();
+    this.textContent = textContent;
+    this.attrs = new Map(Object.entries(attrs));
+    this.value = value;
+    this.order = order;
+    this.onClick = onClick;
+    this.isContentEditable = false;
+  }
+
+  getAttribute(name) { return this.attrs.get(name) ?? null; }
+  dispatchEvent() { return true; }
+  click() { this.onClick?.(); }
+
+  matches(selector) {
+    if (selector === 'button[data-testid="send-button"]') {
+      return this.getAttribute("data-testid") === "send-button";
+    }
+    if (selector === 'button[data-testid="stop-button"]') {
+      return this.getAttribute("data-testid") === "stop-button";
+    }
+    return false;
+  }
+
+  closest(selector) {
+    let node = this;
+    while (node) {
+      if (selector === '[data-testid^="conversation-turn-"]') {
+        if ((node.getAttribute?.("data-testid") ?? "").startsWith("conversation-turn-")) return node;
+      } else if (node.matches?.(selector)) {
+        return node;
+      }
+      node = node.parent;
+    }
+    return null;
+  }
+}
+
+class FakeTextAreaElement extends FakeElement {}
+class FakeInputElement extends FakeElement {}
+class FakeButtonElement extends FakeElement {
+  disabled = false;
+}
+class FakeEvent {
+  constructor(type, init = {}) { this.type = type; Object.assign(this, init); }
+}
+class FakeInputEvent extends FakeEvent {}
+class FakeMutationObserver {
+  constructor(callback) { this.callback = callback; }
+  observe() {}
+  disconnect() {}
+}
+
+class FakeDocument {
+  constructor() {
+    this.entries = new Map();
+    this.activeElement = null;
+    this.documentElement = new FakeElement();
+  }
+
+  set(selector, elements) { this.entries.set(selector, elements); }
+  querySelector(selector) { return this.entries.get(selector)?.[0] ?? null; }
+  querySelectorAll(selector) { return this.entries.get(selector) ?? []; }
+}
+
+async function sha256(value) {
+  const digest = await webcrypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function loadAdapter(crypto = webcrypto) {
+  const source = await readFile(new URL("../dist/content/adapter.js", import.meta.url), "utf8");
+  const context = {
+    crypto,
+    TextEncoder,
+    Uint8Array,
+    Set,
+    Date,
+    Node: FakeNode,
+    Element: FakeElement,
+    HTMLElement: FakeElement,
+    HTMLTextAreaElement: FakeTextAreaElement,
+    HTMLInputElement: FakeInputElement,
+    HTMLButtonElement: FakeButtonElement,
+    Event: FakeEvent,
+    InputEvent: FakeInputEvent,
+    MutationObserver: FakeMutationObserver,
+    setTimeout,
+    clearTimeout,
+  };
+  vm.createContext(context);
+  vm.runInContext(source, context);
+  return context.GuardianContent;
+}
+
+function createSafePage({ onSend } = {}) {
+  const document = new FakeDocument();
+  const userTurn = new FakeElement({ attrs: { "data-testid": "conversation-turn-user-1" } });
+  const assistantTurn = new FakeElement({ attrs: { "data-testid": "conversation-turn-assistant-1" } });
+  const user = new FakeElement({ textContent: "Continue the implementation safely.", order: 1 });
+  const assistant = new FakeElement({
+    textContent: "I still have bounded implementation work I can perform.",
+    attrs: { "data-message-id": "assistant-1" },
+    order: 2,
+  });
+  user.parent = userTurn;
+  assistant.parent = assistantTurn;
+  const composer = new FakeTextAreaElement({ value: "", order: 3 });
+  const send = new FakeButtonElement({
+    attrs: { "data-testid": "send-button" },
+    order: 4,
+    onClick: () => onSend?.({ document, composer }),
+  });
+
+  document.set('[data-message-author-role="user"]', [user]);
+  document.set('[data-message-author-role="assistant"]', [assistant]);
+  document.set("#prompt-textarea", [composer]);
+  document.set('button[data-testid="send-button"]', [send]);
+  return { document, composer, send, assistant };
+}
+
+test("guarded send rejects human typing that occurs during the final assistant fingerprint await", async () => {
+  let digestCall = 0;
+  let releaseSecondDigest;
+  const controlledCrypto = {
+    subtle: {
+      digest(algorithm, data) {
+        digestCall += 1;
+        if (digestCall !== 2) return webcrypto.subtle.digest(algorithm, data);
+        return new Promise((resolve, reject) => {
+          releaseSecondDigest = () => {
+            webcrypto.subtle.digest(algorithm, data).then(resolve, reject);
+          };
+        });
+      },
+    },
+  };
+  const GuardianContent = await loadAdapter(controlledCrypto);
+  let clicks = 0;
+  const page = createSafePage({ onSend: () => { clicks += 1; } });
+  const assistantFingerprint = await sha256(page.assistant.textContent);
+  const adapter = new GuardianContent.BrowserChatGPTAdapter(page.document, { pathname: "/c/chat-1" });
+
+  const resultPromise = adapter.guardedSend({
+    decisionId: "decision-race",
+    conversationId: "chat-1",
+    routeKey: "/c/chat-1",
+    assistantFingerprint,
+    assistantDomMessageId: "assistant-1",
+    continuationText: "Continue.",
+  });
+
+  while (releaseSecondDigest === undefined) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  page.composer.value = "Human typing wins";
+  releaseSecondDigest();
+  const result = await resultPromise;
+
+  assert.equal(result.status, "NOT_STARTED");
+  assert.match(result.reason, /synchronous pre-mutation revalidation/i);
+  assert.equal(page.composer.value, "Human typing wins");
+  assert.equal(clicks, 0);
+});
+
+test("guarded send reports VERIFIED only when the intended user turn appears and generation starts", async () => {
+  const GuardianContent = await loadAdapter();
+  let clicks = 0;
+  const page = createSafePage({
+    onSend: ({ document, composer }) => {
+      clicks += 1;
+      const sentTurn = new FakeElement({ attrs: { "data-testid": "conversation-turn-user-2" } });
+      const sentUser = new FakeElement({ textContent: composer.value, order: 5 });
+      sentUser.parent = sentTurn;
+      const existingUsers = document.querySelectorAll('[data-message-author-role="user"]');
+      document.set('[data-message-author-role="user"]', [...existingUsers, sentUser]);
+      document.set('button[data-testid="stop-button"]', [
+        new FakeButtonElement({ attrs: { "data-testid": "stop-button" }, order: 6 }),
+      ]);
+    },
+  });
+  const assistantFingerprint = await sha256(page.assistant.textContent);
+  const adapter = new GuardianContent.BrowserChatGPTAdapter(page.document, { pathname: "/c/chat-1" });
+
+  const result = await adapter.guardedSend({
+    decisionId: "decision-verified",
+    conversationId: "chat-1",
+    routeKey: "/c/chat-1",
+    assistantFingerprint,
+    assistantDomMessageId: "assistant-1",
+    continuationText: "Continue.",
+  });
+
+  assert.equal(clicks, 1);
+  assert.equal(result.status, "VERIFIED");
+  assert.equal(result.observedConversationId, "chat-1");
+  assert.equal(result.observedAssistantFingerprint, assistantFingerprint);
+});
