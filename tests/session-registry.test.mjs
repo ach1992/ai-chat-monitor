@@ -39,13 +39,17 @@ function observe(registry, tabId, conversationId, sequence = 2, generation = "ID
   });
 }
 
-test("several tabs retain independent generation state", () => {
+test("several tabs retain independent state during concurrent generation", () => {
   const registry = new SessionRegistry();
   assert.equal(register(registry, 1, "conv-a").accepted, true);
   assert.equal(register(registry, 2, "conv-b").accepted, true);
   assert.equal(observe(registry, 1, "conv-a", 2, "GENERATING").accepted, true);
-  assert.equal(observe(registry, 2, "conv-b", 2, "IDLE").accepted, true);
+  assert.equal(observe(registry, 2, "conv-b", 2, "GENERATING").accepted, true);
 
+  assert.equal(registry.getTab(1)?.observation?.generation, "GENERATING");
+  assert.equal(registry.getTab(2)?.observation?.generation, "GENERATING");
+
+  assert.equal(observe(registry, 2, "conv-b", 3, "IDLE").accepted, true);
   assert.equal(registry.getTab(1)?.observation?.generation, "GENERATING");
   assert.equal(registry.getTab(2)?.observation?.generation, "IDLE");
   assert.equal(registry.getTab(1)?.controlEligibility, "OWNER");
