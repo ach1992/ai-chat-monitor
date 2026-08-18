@@ -111,7 +111,7 @@ async function loadAdapter(crypto = webcrypto) {
   return context.GuardianContent;
 }
 
-function createSafePage({ onSend } = {}) {
+function createSafePage({ onSend, sendInitiallyDisabled = false } = {}) {
   const document = new FakeDocument();
   const userTurn = new FakeElement({ attrs: { "data-testid": "conversation-turn-user-1" } });
   const assistantTurn = new FakeElement({ attrs: { "data-testid": "conversation-turn-assistant-1" } });
@@ -129,6 +129,13 @@ function createSafePage({ onSend } = {}) {
     order: 4,
     onClick: () => onSend?.({ document, composer }),
   });
+  send.disabled = sendInitiallyDisabled;
+  if (sendInitiallyDisabled) {
+    composer.dispatchEvent = () => {
+      send.disabled = false;
+      return true;
+    };
+  }
 
   document.set('[data-message-author-role="user"]', [user]);
   document.set('[data-message-author-role="assistant"]', [assistant]);
@@ -181,10 +188,11 @@ test("guarded send rejects human typing that occurs during the final assistant f
   assert.equal(clicks, 0);
 });
 
-test("guarded send reports VERIFIED only when the intended user turn appears and generation starts", async () => {
+test("guarded send can activate a send control that is disabled while the composer is empty", async () => {
   const GuardianContent = await loadAdapter();
   let clicks = 0;
   const page = createSafePage({
+    sendInitiallyDisabled: true,
     onSend: ({ document, composer }) => {
       clicks += 1;
       const sentTurn = new FakeElement({ attrs: { "data-testid": "conversation-turn-user-2" } });
