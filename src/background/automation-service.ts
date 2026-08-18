@@ -28,6 +28,7 @@ export class AutomationService {
   readonly #getSession: (tabId: number) => SessionView | undefined;
   readonly #providerSettings = new ProviderSettingsStore();
   readonly #ready: Promise<void>;
+  #policyWritesInFlight = 0;
 
   constructor(getSession: (tabId: number) => SessionView | undefined) {
     this.#getSession = getSession;
@@ -84,6 +85,13 @@ export class AutomationService {
 
   async handleSession(session: SessionView): Promise<void> {
     await this.#ready;
+    if (this.#policyWritesInFlight > 0) {
+      this.#coordinator.invalidateTab(
+        session.tabId,
+        "Automation policy persistence is in progress; fresh observation is required after it completes.",
+      );
+      return;
+    }
     this.#coordinator.handleSession(session);
   }
 
@@ -107,28 +115,34 @@ export class AutomationService {
     if (session?.conversationId !== expectedConversationId) {
       throw new Error("Tab conversation identity changed before the policy update.");
     }
-    this.#coordinator.invalidateConversation(
-      expectedConversationId,
-      "Policy update requested; pending automation was cancelled before persistence.",
-    );
-    const policy = await this.#policies.updateChat(expectedConversationId, patch);
-    const fresh = this.#getSession(tabId);
-    if (fresh !== undefined) this.#coordinator.handleSession(fresh);
-    return policy;
+    return this.#withPolicyWrite(async () => {
+      this.#coordinator.invalidateConversation(
+        expectedConversationId,
+        "Policy update requested; pending automation was cancelled before persistence.",
+      );
+      const policy = await this.#policies.updateChat(expectedConversationId, patch);
+      const fresh = this.#getSession(tabId);
+      if (fresh?.conversationId === expectedConversationId) this.#coordinator.handleSession(fresh);
+      return policy;
+    });
   }
 
   async updateDefaults(patch: Partial<AutomationPolicyDefaults>): Promise<AutomationPolicyState> {
     await this.#ready;
-    this.#invalidateAll("Global automation defaults update requested; pending decisions were cancelled before persistence.");
-    return this.#policies.updateDefaults(patch);
+    return this.#withPolicyWrite(async () => {
+      this.#invalidateAll("Global automation defaults update requested; pending decisions were cancelled before persistence.");
+      return this.#policies.updateDefaults(patch);
+    });
   }
 
   async setEmergencyPaused(paused: boolean): Promise<AutomationPolicyState> {
     await this.#ready;
-    this.#invalidateAll("Emergency-pause change requested; pending decisions were cancelled before persistence.");
-    const state = await this.#policies.setEmergencyPaused(paused);
-    this.#coordinator.emergencyPauseChanged();
-    return state;
+    return this.#withPolicyWrite(async () => {
+      this.#invalidateAll("Emergency-pause change requested; pending decisions were cancelled before persistence.");
+      const state = await this.#policies.setEmergencyPaused(paused);
+      this.#coordinator.emergencyPauseChanged();
+      return state;
+    });
   }
 
   async status(tabId: number): Promise<AutomationServiceStatus> {
@@ -152,5 +166,14 @@ export class AutomationService {
         .filter((value): value is string => value !== undefined),
     );
     for (const conversationId of conversations) this.#coordinator.invalidateConversation(conversationId, reason);
+  }
+
+  async #withPolicyWrite<T>(operation: () => Promise<T>): Promise<T> {
+    this.#policyWritesInFlight += 1;
+    try {
+      return await operation();
+    } finally {
+      this.#policyWritesInFlight -= 1;
+    }
   }
 }
