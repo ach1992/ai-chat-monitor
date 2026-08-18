@@ -10,25 +10,44 @@ const watchers = staticFiles.map(([source]) =>
   }),
 );
 
-const compiler = spawn("tsc", ["-p", "tsconfig.build.json", "--watch", "--preserveWatchOutput"], {
-  cwd: new URL("..", import.meta.url),
-  stdio: "inherit",
-  shell: process.platform === "win32",
-});
+const compilerProjects = ["tsconfig.build.json", "tsconfig.content.json"];
+const compilers = compilerProjects.map((project) =>
+  spawn("tsc", ["-p", project, "--watch", "--preserveWatchOutput"], {
+    cwd: new URL("..", import.meta.url),
+    stdio: "inherit",
+    shell: process.platform === "win32",
+  }),
+);
+
+let remainingCompilers = compilers.length;
+let exitCode = 0;
+let shuttingDown = false;
+
+function closeWatchers() {
+  for (const watcher of watchers) watcher.close();
+}
 
 function shutdown(signal) {
-  for (const watcher of watchers) {
-    watcher.close();
-  }
-  compiler.kill(signal);
+  if (shuttingDown) return;
+  shuttingDown = true;
+  closeWatchers();
+  for (const compiler of compilers) compiler.kill(signal);
 }
 
 process.once("SIGINT", () => shutdown("SIGINT"));
 process.once("SIGTERM", () => shutdown("SIGTERM"));
 
-compiler.once("exit", (code) => {
-  for (const watcher of watchers) {
-    watcher.close();
-  }
-  process.exit(code ?? 0);
-});
+for (const compiler of compilers) {
+  compiler.once("error", () => {
+    exitCode = 1;
+    shutdown("SIGTERM");
+  });
+  compiler.once("exit", (code) => {
+    if (code !== null && code !== 0) exitCode = code;
+    remainingCompilers -= 1;
+    if (remainingCompilers === 0) {
+      closeWatchers();
+      process.exit(exitCode);
+    }
+  });
+}

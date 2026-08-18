@@ -11,10 +11,11 @@ test("manifest is MV3 with the expected Side Panel and storage permissions", () 
   assert.equal(manifest.side_panel.default_path, "sidepanel/index.html");
 });
 
-test("content scripts are constrained to ChatGPT hosts and no provider host permissions exist yet", () => {
+test("content scripts are constrained to ChatGPT hosts and load the adapter before the agent", () => {
   assert.deepEqual(manifest.content_scripts[0].matches, [
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
   ]);
+  assert.deepEqual(manifest.content_scripts[0].js, ["content/adapter.js", "content/index.js"]);
   assert.equal("host_permissions" in manifest, false);
 });
