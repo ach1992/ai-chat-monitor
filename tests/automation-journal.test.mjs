@@ -1,0 +1,84 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { AutomationWriteJournal } from "../dist/automation/journal.js";
+
+function fingerprint(index) {
+  return index.toString(16).padStart(64, "0").slice(-64);
+}
+
+function envelope({ decisionId, assistantFingerprint = fingerprint(1) }) {
+  return {
+    decisionId,
+    tabId: 1,
+    documentId: "doc-1",
+    agentInstanceId: "agent-1",
+    pageEpoch: 1,
+    conversationId: "chat-1",
+    routeKey: "/c/chat-1",
+    assistantFingerprint,
+    policyRevision: 1,
+    classification: {
+      decision: "CONTINUE",
+      reasonCode: "NEEDLESS_TURN_BOUNDARY",
+      reason: "Continue.",
+      source: "PROVIDER",
+    },
+    continuationText: "Continue.",
+    createdAt: 100,
+    expiresAt: 1_000,
+  };
+}
+
+function persistence(initial) {
+  let state = initial;
+  return {
+    async load() { return state === undefined ? undefined : structuredClone(state); },
+    async save(next) { state = structuredClone(next); },
+    snapshot() { return state === undefined ? undefined : structuredClone(state); },
+  };
+}
+
+test("journal preserves no-retry guards beyond the former 64-record cap", async () => {
+  const records = Array.from({ length: 80 }, (_, index) => ({
+    conversationId: `chat-${index}`,
+    assistantFingerprint: fingerprint(index + 1),
+    decisionId: `decision-${index}`,
+    documentId: `doc-${index}`,
+    attemptedAt: index,
+    disposition: index % 2 === 0 ? "VERIFIED" : "AMBIGUOUS",
+  }));
+  const store = persistence({ version: 1, records });
+  const journal = new AutomationWriteJournal(store);
+
+  await journal.restore();
+
+  assert.equal(journal.snapshot().records.length, 80);
+  assert.equal(journal.hasGuard("chat-0", fingerprint(1)), true);
+  assert.equal(journal.hasGuard("chat-79", fingerprint(80)), true);
+});
+
+test("concurrent reservations for the same conversation fingerprint serialize to one write authority", async () => {
+  const store = persistence();
+  const journal = new AutomationWriteJournal(store);
+  await journal.restore();
+
+  const [first, second] = await Promise.all([
+    journal.reserve(envelope({ decisionId: "decision-a" })),
+    journal.reserve(envelope({ decisionId: "decision-b" })),
+  ]);
+
+  assert.deepEqual([first, second], [true, false]);
+  assert.equal(journal.snapshot().records.length, 1);
+  assert.equal(journal.hasGuard("chat-1", fingerprint(1)), true);
+});
+
+test("outcome reconciliation fails closed if its reserved guard is unexpectedly missing", async () => {
+  const store = persistence();
+  const journal = new AutomationWriteJournal(store);
+  await journal.restore();
+
+  await assert.rejects(
+    journal.mark("missing-decision", "VERIFIED"),
+    /guard disappeared/i,
+  );
+});
