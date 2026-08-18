@@ -7,6 +7,7 @@ function delay(ms) {
 
 test("background persists concurrent tab registrations without cross-tab loss", async () => {
   const values = {};
+  const accessLevels = [];
   let messageListener;
   const fakeArea = {
     async get(keys) {
@@ -26,6 +27,9 @@ test("background persists concurrent tab registrations without cross-tab loss", 
     },
     async clear() {
       for (const key of Object.keys(values)) delete values[key];
+    },
+    async setAccessLevel(options) {
+      accessLevels.push(options.accessLevel);
     },
   };
 
@@ -84,6 +88,7 @@ test("background persists concurrent tab registrations without cross-tab loss", 
   ]);
   assert.equal(first.type, "background:agent-ack");
   assert.equal(second.type, "background:agent-ack");
+  assert.equal(accessLevels.includes("TRUSTED_CONTEXTS"), true);
 
   const persisted = values["guardian:session-registry:runtime"];
   assert.deepEqual(
