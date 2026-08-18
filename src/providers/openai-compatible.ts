@@ -135,7 +135,7 @@ export class OpenAICompatibleProvider implements AIProvider {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await this.#fetch(url, { ...init, signal: controller.signal });
+      const response = await this.#fetch(url, { ...init, redirect: "error", signal: controller.signal });
       this.#assertResponseStatus(response);
       const contentLength = Number(response.headers.get("content-length"));
       if (Number.isFinite(contentLength) && contentLength > MAX_PROVIDER_RESPONSE_CHARACTERS) {
@@ -158,7 +158,7 @@ export class OpenAICompatibleProvider implements AIProvider {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await this.#fetch(url, { ...init, signal: controller.signal });
+      const response = await this.#fetch(url, { ...init, redirect: "error", signal: controller.signal });
       this.#assertResponseStatus(response);
     } catch (error) {
       throw this.#normalizeRequestError(error, controller.signal.aborted);
