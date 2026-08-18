@@ -12,6 +12,8 @@ namespace GuardianContentAgent {
         message: string;
       };
 
+  type InteractionKind = "COMPOSER_INPUT" | "COMPOSER_FOCUS" | "MANUAL_SEND";
+
   const adapter = new GuardianContent.BrowserChatGPTAdapter(document, location);
   const agentInstanceId = crypto.randomUUID();
   let pageEpoch = 1;
@@ -41,6 +43,7 @@ namespace GuardianContentAgent {
   }
 
   async function announceAgent(): Promise<void> {
+    const conversationId = adapter.currentConversationId();
     await send({
       type: "content:hello",
       protocolVersion: GuardianContent.PROTOCOL_VERSION,
@@ -48,9 +51,7 @@ namespace GuardianContentAgent {
       pageEpoch,
       sequence: nextSequence(),
       routeKey: adapter.currentRouteKey(),
-      ...(adapter.currentConversationId() === undefined
-        ? {}
-        : { conversationId: adapter.currentConversationId() }),
+      ...(conversationId === undefined ? {} : { conversationId }),
       sentAt: Date.now(),
     });
   }
@@ -64,6 +65,7 @@ namespace GuardianContentAgent {
       observationTimer = undefined;
     }
 
+    const conversationId = adapter.currentConversationId();
     await send({
       type: "content:navigation",
       protocolVersion: GuardianContent.PROTOCOL_VERSION,
@@ -71,9 +73,7 @@ namespace GuardianContentAgent {
       pageEpoch,
       sequence: nextSequence(),
       routeKey: nextRouteKey,
-      ...(adapter.currentConversationId() === undefined
-        ? {}
-        : { conversationId: adapter.currentConversationId() }),
+      ...(conversationId === undefined ? {} : { conversationId }),
       sentAt: Date.now(),
     });
     scheduleObservation(0);
@@ -104,9 +104,7 @@ namespace GuardianContentAgent {
   function scheduleObservation(delayMs = 300): void {
     observationGeneration += 1;
     const expectedGeneration = observationGeneration;
-    if (observationTimer !== undefined) {
-      clearTimeout(observationTimer);
-    }
+    if (observationTimer !== undefined) clearTimeout(observationTimer);
     observationTimer = window.setTimeout(() => {
       observationTimer = undefined;
       void observe(expectedGeneration);
@@ -115,18 +113,17 @@ namespace GuardianContentAgent {
 
   function checkRoute(): void {
     const nextRouteKey = adapter.currentRouteKey();
-    if (nextRouteKey !== lastRouteKey) {
-      void emitNavigation(nextRouteKey);
-    }
+    if (nextRouteKey !== lastRouteKey) void emitNavigation(nextRouteKey);
   }
 
-  function emitUserInteraction(): void {
+  function emitUserInteraction(interaction: InteractionKind): void {
     void send({
       type: "content:user-interaction",
       protocolVersion: GuardianContent.PROTOCOL_VERSION,
       agentInstanceId,
       pageEpoch,
       sequence: nextSequence(),
+      interaction,
       sentAt: Date.now(),
     });
     scheduleObservation(0);
@@ -145,14 +142,44 @@ namespace GuardianContentAgent {
   });
 
   for (const eventName of ["beforeinput", "input", "paste", "compositionstart"] as const) {
-    document.addEventListener(eventName, emitUserInteraction, true);
+    document.addEventListener(
+      eventName,
+      (event) => {
+        if (adapter.isComposerTarget(event.target)) emitUserInteraction("COMPOSER_INPUT");
+      },
+      true,
+    );
   }
-  document.addEventListener("keydown", emitUserInteraction, true);
-  document.addEventListener("pointerdown", emitUserInteraction, true);
-  document.addEventListener("focusin", emitUserInteraction, true);
+  document.addEventListener(
+    "focusin",
+    (event) => {
+      if (adapter.isComposerTarget(event.target)) emitUserInteraction("COMPOSER_FOCUS");
+    },
+    true,
+  );
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      if (!adapter.isComposerTarget(event.target)) return;
+      if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+        emitUserInteraction("MANUAL_SEND");
+      } else {
+        emitUserInteraction("COMPOSER_INPUT");
+      }
+    },
+    true,
+  );
+  document.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (adapter.isManualSendTarget(event.target)) emitUserInteraction("MANUAL_SEND");
+    },
+    true,
+  );
+
   window.addEventListener("popstate", checkRoute);
   window.addEventListener("hashchange", checkRoute);
-  window.setInterval(checkRoute, 750);
+  window.setInterval(checkRoute, 500);
 
   void announceAgent().then(() => scheduleObservation(0));
 }
