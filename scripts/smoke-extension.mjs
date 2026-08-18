@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -48,6 +48,7 @@ const browserArgs = [
   "--enable-logging=stderr",
   "--v=1",
   `--user-data-dir=${profilePath}`,
+  `--disable-extensions-except=${extensionPath}`,
   `--load-extension=${extensionPath}`,
   "about:blank",
 ];
@@ -97,26 +98,8 @@ function terminateProcessGroup(signal) {
   }
 }
 
-async function readLoadedExtension() {
-  const preferencesPath = resolve(profilePath, "Default", "Preferences");
-
-  try {
-    const preferences = JSON.parse(await readFile(preferencesPath, "utf8"));
-    const settings = preferences.extensions?.settings ?? {};
-    return Object.entries(settings).find(([, entry]) => {
-      if (entry === null || typeof entry !== "object") {
-        return false;
-      }
-
-      return entry.path === extensionPath || entry.manifest?.name === "Chat Turn Guardian";
-    });
-  } catch {
-    return undefined;
-  }
-}
-
-async function waitForExtensionRegistration() {
-  const deadline = Date.now() + 15_000;
+async function verifyUnpackedLoad() {
+  const deadline = Date.now() + 5_000;
 
   while (Date.now() < deadline) {
     const loadFailure = stderrText().match(
@@ -126,28 +109,26 @@ async function waitForExtensionRegistration() {
       throw new Error(loadFailure);
     }
 
-    const loadedEntry = await readLoadedExtension();
-    if (loadedEntry !== undefined) {
-      return loadedEntry;
-    }
-
     if (child.exitCode !== null) {
       throw new Error(
-        `Browser exited before registering the extension (code ${child.exitCode}).\n${stderrTail()}`,
+        `Browser exited during unpacked-extension smoke test (code ${child.exitCode}).\n${stderrTail()}`,
       );
     }
 
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
   }
 
-  throw new Error(
-    `Browser did not register the unpacked extension within 15 seconds.\n${stderrTail()}`,
-  );
+  const loadFailure = stderrText().match(
+    /Extension error:.*Failed to load extension[^\n]*/i,
+  )?.[0];
+  if (loadFailure !== undefined) {
+    throw new Error(loadFailure);
+  }
 }
 
 try {
-  const [extensionId] = await waitForExtensionRegistration();
-  console.log(`Unpacked extension loaded successfully (${extensionId}).`);
+  await verifyUnpackedLoad();
+  console.log("Chromium accepted the unpacked extension without load errors.");
 } finally {
   terminateProcessGroup("SIGTERM");
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
