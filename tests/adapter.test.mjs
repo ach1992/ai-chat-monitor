@@ -147,6 +147,33 @@ test("adapter exposes only the latest user turn preceding the observed assistant
   assert.equal(result.latestAssistant.normalizedText, "I can continue with the implementation.");
 });
 
+test("bounded turn snapshots retain the recent tail of oversized user and assistant turns", async () => {
+  const GuardianContent = await loadAdapter();
+  const userTurn = new FakeElement({ attrs: { "data-testid": "conversation-turn-user-long" } });
+  const assistantTurn = new FakeElement({ attrs: { "data-testid": "conversation-turn-assistant-long" } });
+  const userText = `USER-START-${"u".repeat(12_500)}-USER-END`;
+  const assistantText = `ASSISTANT-START-${"a".repeat(12_500)}-ASSISTANT-END`;
+  const user = new FakeElement({ textContent: userText, order: 1 });
+  const assistant = new FakeElement({ textContent: assistantText, order: 2 });
+  user.parent = userTurn;
+  assistant.parent = assistantTurn;
+  const composer = new FakeTextAreaElement({ value: "", order: 3 });
+  const document = new FakeDocument([
+    ['[data-message-author-role="user"]', [user]],
+    ['[data-message-author-role="assistant"]', [assistant]],
+    ["#prompt-textarea", [composer]],
+  ]);
+  const adapter = new GuardianContent.BrowserChatGPTAdapter(document, { pathname: "/c/abc-1234" });
+  const result = await adapter.observe(5555);
+
+  assert.equal(result.latestUser.normalizedText.length, 12_000);
+  assert.equal(result.latestAssistant.normalizedText.length, 12_000);
+  assert.equal(result.latestUser.normalizedText.endsWith("-USER-END"), true);
+  assert.equal(result.latestAssistant.normalizedText.endsWith("-ASSISTANT-END"), true);
+  assert.equal(result.latestUser.textLength, userText.length);
+  assert.equal(result.latestAssistant.textLength, assistantText.length);
+});
+
 test("adapter represents blocking conditions conservatively", async () => {
   const GuardianContent = await loadAdapter();
   const alert = new FakeElement({
