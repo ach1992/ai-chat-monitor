@@ -19,14 +19,20 @@ import {
   type SessionMutationResult,
   type SessionRegistryState,
 } from "../core/session-registry.js";
-import { createEphemeralStorage } from "../storage/index.js";
+import {
+  createEphemeralStorage,
+  restrictDurableStorageToTrustedContexts,
+} from "../storage/index.js";
 
 const REGISTRY_KEY = "runtime";
 const registryStorage = createEphemeralStorage<SessionRegistryState>("session-registry");
 let registry = new SessionRegistry();
 let mutationQueue: Promise<void> = Promise.resolve();
 
-const registryReady = registryStorage.get(REGISTRY_KEY).then((state) => {
+const registryReady = Promise.all([
+  restrictDurableStorageToTrustedContexts(),
+  registryStorage.get(REGISTRY_KEY),
+]).then(([, state]) => {
   registry = SessionRegistry.fromState(state, { invalidateObservations: true });
 });
 
