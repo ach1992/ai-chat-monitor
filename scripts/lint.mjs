@@ -3,7 +3,7 @@ import { extname, resolve } from "node:path";
 
 const textExtensions = new Set([".ts", ".mjs", ".json", ".md", ".html", ".css", ".yml"]);
 const roots = ["src", "scripts", "tests", ".github"];
-const rootFiles = ["package.json", "package-lock.json", "tsconfig.json", "tsconfig.build.json", ".gitignore"];
+const rootFiles = ["package.json", "package-lock.json", "tsconfig.json", "tsconfig.build.json", "tsconfig.content.json", ".gitignore"];
 const failures = [];
 
 async function collect(path) {
