@@ -287,7 +287,7 @@ namespace GuardianContent {
         if (normalizedText.length > 0) {
           const domMessageId = readMessageId(latestUserElement);
           observation.latestUser = {
-            normalizedText: normalizedText.slice(0, MAX_NORMALIZED_RESPONSE_CHARS),
+            normalizedText: normalizedText.slice(-MAX_NORMALIZED_RESPONSE_CHARS),
             textLength: normalizedText.length,
             ...(domMessageId === undefined ? {} : { domMessageId }),
           };
@@ -298,7 +298,7 @@ namespace GuardianContent {
         if (normalizedText.length > 0) {
           const domMessageId = readMessageId(latestAssistantElement);
           observation.latestAssistant = {
-            normalizedText: normalizedText.slice(0, MAX_NORMALIZED_RESPONSE_CHARS),
+            normalizedText: normalizedText.slice(-MAX_NORMALIZED_RESPONSE_CHARS),
             textLength: normalizedText.length,
             fingerprint: await fingerprintText(normalizedText),
             ...(domMessageId === undefined ? {} : { domMessageId }),
@@ -334,7 +334,6 @@ namespace GuardianContent {
 
       const currentAssistant = assistantMatches(this.#document).at(-1);
       const composer = firstMatch<HTMLElement>(this.#document, COMPOSER_SELECTORS);
-      const sendControl = firstMatch<HTMLElement>(this.#document, SEND_SELECTORS);
       const currentAssistantText = currentAssistant === undefined ? "" : normalizeAssistantText(elementText(currentAssistant));
       const currentMessageId = currentAssistant === undefined ? undefined : readMessageId(currentAssistant);
       const activeElement = this.#document.activeElement;
@@ -353,9 +352,7 @@ namespace GuardianContent {
         normalizeAssistantText(elementText(composer)).length > 0 ||
         composerFocused ||
         firstMatch<HTMLElement>(this.#document, STOP_SELECTORS) !== undefined ||
-        pageHasBlockingUi(this.#document) ||
-        sendControl === undefined ||
-        !sendControlIsUsable(sendControl)
+        pageHasBlockingUi(this.#document)
       ) {
         return reject("Synchronous pre-mutation revalidation detected changed page or human state.");
       }
@@ -369,6 +366,7 @@ namespace GuardianContent {
       }
 
       const postMutationAssistant = assistantMatches(this.#document).at(-1);
+      const postMutationSendControl = firstMatch<HTMLElement>(this.#document, SEND_SELECTORS);
       if (
         this.currentConversationId() !== expectation.conversationId ||
         this.currentRouteKey() !== expectation.routeKey ||
@@ -376,13 +374,14 @@ namespace GuardianContent {
         normalizeAssistantText(elementText(postMutationAssistant)) !== capturedAssistantText ||
         firstMatch<HTMLElement>(this.#document, STOP_SELECTORS) !== undefined ||
         pageHasBlockingUi(this.#document) ||
-        !sendControlIsUsable(sendControl)
+        postMutationSendControl === undefined ||
+        !sendControlIsUsable(postMutationSendControl)
       ) {
         return ambiguous("Page safety state changed after composer mutation and before send.");
       }
 
       try {
-        sendControl.click();
+        postMutationSendControl.click();
       } catch {
         return ambiguous("Send control invocation failed after composer mutation.");
       }
