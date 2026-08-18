@@ -16,6 +16,7 @@ import {
   type ProviderProfile,
 } from "./types.js";
 
+const MAX_PROVIDER_RESPONSE_CHARACTERS = 64_000;
 const SYSTEM_PROMPT = `You classify whether a finished assistant turn can receive a generic continuation message without human involvement.
 Return exactly one JSON object and no markdown. The only schema is:
 {"decision":"CONTINUE|HOLD|UNSURE","reasonCode":"...","reason":"<=240 chars","confidence":0..1}
@@ -45,9 +46,9 @@ function requestHeaders(profile: ProviderProfile): Record<string, string> {
   return headers;
 }
 
-async function readJson(response: Response): Promise<unknown> {
+function parseJsonBody(raw: string): unknown {
   try {
-    return await response.json();
+    return JSON.parse(raw);
   } catch {
     throw new ProviderFailure("INVALID_RESPONSE", "Provider returned invalid JSON.");
   }
@@ -92,12 +93,12 @@ export class OpenAICompatibleProvider implements AIProvider {
       ],
     };
 
-    const response = await this.#request(joinEndpoint(this.#baseUrl, "chat/completions"), {
+    const raw = await this.#requestText(joinEndpoint(this.#baseUrl, "chat/completions"), {
       method: "POST",
       headers: requestHeaders(this.#profile),
       body: JSON.stringify(body),
     });
-    const payload = (await readJson(response)) as ChatCompletionResponse;
+    const payload = parseJsonBody(raw) as ChatCompletionResponse;
     const content = payload.choices?.[0]?.message?.content;
     if (typeof content !== "string") {
       throw new ProviderFailure("INVALID_RESPONSE", "Provider response did not contain text output.");
@@ -119,41 +120,65 @@ export class OpenAICompatibleProvider implements AIProvider {
 
   async testConnection(): Promise<ProviderHealth> {
     try {
-      const response = await this.#request(joinEndpoint(this.#baseUrl, "models"), {
+      await this.#requestStatus(joinEndpoint(this.#baseUrl, "models"), {
         method: "GET",
         headers: requestHeaders(this.#profile),
       });
-      const payload = await readJson(response);
-      if (typeof payload !== "object" || payload === null) {
-        return { ok: false, code: "INVALID_RESPONSE", message: "Provider models response was invalid." };
-      }
       return { ok: true, code: "OK", message: "Provider connection succeeded." };
     } catch (error) {
       return healthFromFailure(error);
     }
   }
 
-  async #request(url: string, init: RequestInit): Promise<Response> {
+  async #requestText(url: string, init: RequestInit): Promise<string> {
     const timeoutMs = this.#profile.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await this.#fetch(url, { ...init, signal: controller.signal });
-      if (response.status === 429) {
-        throw new ProviderFailure("RATE_LIMITED", "Provider rate limit was reached.");
+      this.#assertResponseStatus(response);
+      const contentLength = Number(response.headers.get("content-length"));
+      if (Number.isFinite(contentLength) && contentLength > MAX_PROVIDER_RESPONSE_CHARACTERS) {
+        throw new ProviderFailure("INVALID_RESPONSE", "Provider response exceeded the allowed size.");
       }
-      if (!response.ok) {
-        throw new ProviderFailure("HTTP_ERROR", `Provider request failed with HTTP ${response.status}.`);
+      const raw = await response.text();
+      if (raw.length > MAX_PROVIDER_RESPONSE_CHARACTERS) {
+        throw new ProviderFailure("INVALID_RESPONSE", "Provider response exceeded the allowed size.");
       }
-      return response;
+      return raw;
     } catch (error) {
-      if (error instanceof ProviderFailure) throw error;
-      if (controller.signal.aborted) {
-        throw new ProviderFailure("TIMEOUT", "Provider request timed out.");
-      }
-      throw new ProviderFailure("NETWORK_ERROR", "Provider network request failed.");
+      throw this.#normalizeRequestError(error, controller.signal.aborted);
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  async #requestStatus(url: string, init: RequestInit): Promise<void> {
+    const timeoutMs = this.#profile.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await this.#fetch(url, { ...init, signal: controller.signal });
+      this.#assertResponseStatus(response);
+    } catch (error) {
+      throw this.#normalizeRequestError(error, controller.signal.aborted);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  #assertResponseStatus(response: Response): void {
+    if (response.status === 429) {
+      throw new ProviderFailure("RATE_LIMITED", "Provider rate limit was reached.");
+    }
+    if (!response.ok) {
+      throw new ProviderFailure("HTTP_ERROR", `Provider request failed with HTTP ${response.status}.`);
+    }
+  }
+
+  #normalizeRequestError(error: unknown, timedOut: boolean): ProviderFailure {
+    if (error instanceof ProviderFailure) return error;
+    if (timedOut) return new ProviderFailure("TIMEOUT", "Provider request timed out.");
+    return new ProviderFailure("NETWORK_ERROR", "Provider network request failed.");
   }
 }
