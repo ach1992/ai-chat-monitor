@@ -18,6 +18,12 @@ export interface AssistantResponseSnapshot {
   domMessageId?: string;
 }
 
+export interface UserTurnSnapshot {
+  normalizedText: string;
+  textLength: number;
+  domMessageId?: string;
+}
+
 export interface ComposerSnapshot {
   present: boolean;
   hasText: boolean;
@@ -33,6 +39,7 @@ export interface PageObservation {
   conversationId?: string;
   routeKey: string;
   generation: GenerationState;
+  latestUser?: UserTurnSnapshot;
   latestAssistant?: AssistantResponseSnapshot;
   composer: ComposerSnapshot;
   blocking: BlockingSnapshot;
@@ -65,6 +72,17 @@ function isOptionalString(value: unknown): boolean {
   return value === undefined || typeof value === "string";
 }
 
+function isTurnSnapshot(value: unknown): value is UserTurnSnapshot {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.normalizedText === "string" &&
+    typeof value.textLength === "number" &&
+    Number.isInteger(value.textLength) &&
+    value.textLength >= value.normalizedText.length &&
+    isOptionalString(value.domMessageId)
+  );
+}
+
 export function isPageObservation(value: unknown): value is PageObservation {
   if (!isRecord(value)) return false;
   if (
@@ -92,16 +110,13 @@ export function isPageObservation(value: unknown): value is PageObservation {
     return false;
   }
 
+  if (value.latestUser !== undefined && !isTurnSnapshot(value.latestUser)) return false;
+
   if (value.latestAssistant !== undefined) {
-    if (!isRecord(value.latestAssistant)) return false;
+    if (!isTurnSnapshot(value.latestAssistant)) return false;
     if (
-      typeof value.latestAssistant.normalizedText !== "string" ||
-      typeof value.latestAssistant.textLength !== "number" ||
-      !Number.isInteger(value.latestAssistant.textLength) ||
-      value.latestAssistant.textLength < value.latestAssistant.normalizedText.length ||
       typeof value.latestAssistant.fingerprint !== "string" ||
-      !/^[a-f0-9]{64}$/.test(value.latestAssistant.fingerprint) ||
-      !isOptionalString(value.latestAssistant.domMessageId)
+      !/^[a-f0-9]{64}$/.test(value.latestAssistant.fingerprint)
     ) {
       return false;
     }
