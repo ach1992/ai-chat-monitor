@@ -2,6 +2,13 @@ import type { ClassificationResult } from "../classification/types.js";
 
 export type ChatAutomationMode = "OFF" | "OBSERVE" | "AUTO" | "NOTIFY_ONLY";
 
+export type NotificationTrigger =
+  | "RESPONSE_FINISHED"
+  | "HOLD"
+  | "UNSURE"
+  | "ERROR"
+  | "STAGNATION";
+
 export interface AutomationTiming {
   settleDelayMs: number;
   continueDelayMs: number;
@@ -14,6 +21,7 @@ export interface ResolvedAutomationPolicy {
   mode: ChatAutomationMode;
   timing: AutomationTiming;
   continuationText: string;
+  notificationTriggers: NotificationTrigger[];
   emergencyPaused: boolean;
 }
 
