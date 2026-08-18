@@ -59,6 +59,7 @@ export interface PanelAutomationPolicyUpdate {
   type: "panel:automation-policy-update";
   protocolVersion: typeof PROTOCOL_VERSION;
   tabId: number;
+  conversationId: string;
   patch: ChatAutomationPolicyPatch;
 }
 
@@ -221,7 +222,15 @@ export function isPanelStatusRequest(value: unknown): value is PanelStatusReques
 }
 
 export function isPanelAutomationPolicyUpdate(value: unknown): value is PanelAutomationPolicyUpdate {
-  return isRecord(value) && hasProtocolVersion(value) && value.type === "panel:automation-policy-update" && isTabId(value.tabId) && isChatPolicyPatch(value.patch);
+  return (
+    isRecord(value) &&
+    hasProtocolVersion(value) &&
+    value.type === "panel:automation-policy-update" &&
+    isTabId(value.tabId) &&
+    typeof value.conversationId === "string" &&
+    /^[A-Za-z0-9_-]{4,200}$/.test(value.conversationId) &&
+    isChatPolicyPatch(value.patch)
+  );
 }
 
 export function isPanelAutomationDefaultsUpdate(value: unknown): value is PanelAutomationDefaultsUpdate {
