@@ -15,6 +15,7 @@ import {
   type RedactedProviderProfile,
 } from "../providers/settings.js";
 import type { ProviderProfile } from "../providers/types.js";
+import type { AuditEvent } from "../reliability/audit.js";
 
 export const PROTOCOL_VERSION = 2 as const;
 
@@ -106,6 +107,11 @@ export interface PanelProviderOrderUpdate {
   order: string[];
 }
 
+export interface PanelAuditClear {
+  type: "panel:audit-clear";
+  protocolVersion: typeof PROTOCOL_VERSION;
+}
+
 export interface ContentAgentAck {
   type: "background:agent-ack";
   protocolVersion: typeof PROTOCOL_VERSION;
@@ -154,6 +160,7 @@ export interface PanelOverviewResponse {
   defaults: AutomationPolicyDefaults;
   chats: ManagedChatStatus[];
   providers: RedactedProviderSettings;
+  audit: AuditEvent[];
 }
 
 export interface AutomationPolicyResponse {
@@ -170,6 +177,11 @@ export interface ProviderSettingsResponse {
   type: "background:provider-settings";
   protocolVersion: typeof PROTOCOL_VERSION;
   providers: RedactedProviderSettings;
+}
+
+export interface AuditClearResponse {
+  type: "background:audit-cleared";
+  protocolVersion: typeof PROTOCOL_VERSION;
 }
 
 export interface ProtocolErrorResponse {
@@ -191,7 +203,8 @@ export type GuardianRequest =
   | PanelEmergencyPauseUpdate
   | PanelProviderProfileUpsert
   | PanelProviderProfileRemove
-  | PanelProviderOrderUpdate;
+  | PanelProviderOrderUpdate
+  | PanelAuditClear;
 
 export type GuardianResponse =
   | ContentAgentAck
@@ -199,6 +212,7 @@ export type GuardianResponse =
   | PanelOverviewResponse
   | AutomationPolicyResponse
   | ProviderSettingsResponse
+  | AuditClearResponse
   | ProtocolErrorResponse;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -237,6 +251,10 @@ function validDelayPatch(value: unknown, maximum: number): boolean {
   return value === undefined || value === null || (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= maximum);
 }
 
+function validHardFuse(value: unknown, allowNull: boolean): boolean {
+  return value === undefined || (allowNull && value === null) || (typeof value === "number" && Number.isInteger(value) && value >= 5 && value <= 500);
+}
+
 function validNotificationTriggers(value: unknown, allowNull: boolean): value is NotificationTrigger[] | null {
   if (value === null) return allowNull;
   if (!Array.isArray(value) || value.length > 5) return false;
@@ -268,6 +286,7 @@ function isChatPolicyPatch(value: unknown): value is ChatAutomationPolicyPatch {
     "cooldownMs",
     "continuationText",
     "notificationTriggers",
+    "hardFuseMaxAutoContinues",
   ]);
   if (!hasOnlyKeys(value, allowed) || Object.keys(value).length === 0) return false;
   return (
@@ -277,7 +296,8 @@ function isChatPolicyPatch(value: unknown): value is ChatAutomationPolicyPatch {
     validDelayPatch(value.cooldownMs, 300_000) &&
     (value.continuationText === undefined || value.continuationText === null ||
       (typeof value.continuationText === "string" && value.continuationText.trim().length > 0 && value.continuationText.length <= 200)) &&
-    (value.notificationTriggers === undefined || validNotificationTriggers(value.notificationTriggers, true))
+    (value.notificationTriggers === undefined || validNotificationTriggers(value.notificationTriggers, true)) &&
+    validHardFuse(value.hardFuseMaxAutoContinues, true)
   );
 }
 
@@ -289,6 +309,7 @@ function isDefaultsPatch(value: unknown): value is Partial<AutomationPolicyDefau
     "cooldownMs",
     "continuationText",
     "notificationTriggers",
+    "hardFuseMaxAutoContinues",
   ]);
   if (!hasOnlyKeys(value, allowed) || Object.keys(value).length === 0) return false;
   return (
@@ -297,7 +318,8 @@ function isDefaultsPatch(value: unknown): value is Partial<AutomationPolicyDefau
     (value.cooldownMs === undefined || validDelayPatch(value.cooldownMs, 300_000)) && value.cooldownMs !== null &&
     (value.continuationText === undefined ||
       (typeof value.continuationText === "string" && value.continuationText.trim().length > 0 && value.continuationText.length <= 200)) &&
-    (value.notificationTriggers === undefined || validNotificationTriggers(value.notificationTriggers, false))
+    (value.notificationTriggers === undefined || validNotificationTriggers(value.notificationTriggers, false)) &&
+    validHardFuse(value.hardFuseMaxAutoContinues, false)
   );
 }
 
@@ -369,4 +391,8 @@ export function isPanelProviderProfileRemove(value: unknown): value is PanelProv
 
 export function isPanelProviderOrderUpdate(value: unknown): value is PanelProviderOrderUpdate {
   return isRecord(value) && hasProtocolVersion(value) && value.type === "panel:provider-order-update" && isProviderOrder(value.order);
+}
+
+export function isPanelAuditClear(value: unknown): value is PanelAuditClear {
+  return isRecord(value) && hasProtocolVersion(value) && value.type === "panel:audit-clear";
 }

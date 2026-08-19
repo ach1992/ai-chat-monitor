@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Safely supervises explicitly selected ChatGPT conversations without bypassing human or platform boundaries.",
   "minimum_chrome_version": "114",
-  "permissions": ["storage", "sidePanel"],
+  "permissions": ["storage", "sidePanel", "notifications"],
   "optional_host_permissions": ["https://*/*"],
   "background": {
     "service_worker": "background/index.js",

@@ -22,6 +22,7 @@ export interface ResolvedAutomationPolicy {
   timing: AutomationTiming;
   continuationText: string;
   notificationTriggers: NotificationTrigger[];
+  hardFuseMaxAutoContinues: number;
   emergencyPaused: boolean;
 }
 

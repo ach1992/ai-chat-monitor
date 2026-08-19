@@ -33,6 +33,7 @@ export interface AutomationCoordinatorOptions {
   classifier: AutomationClassifier;
   sessions: AutomationSessionSource;
   sender: AutomationGuardedSender;
+  onStatusChange?: (status: AutomationRuntimeStatus) => void;
   clock?: AutomationClock;
   createDecisionId?: () => string;
 }
@@ -76,6 +77,7 @@ export class AutomationCoordinator {
   readonly #classifier: AutomationClassifier;
   readonly #sessions: AutomationSessionSource;
   readonly #sender: AutomationGuardedSender;
+  readonly #onStatusChange: ((status: AutomationRuntimeStatus) => void) | undefined;
   readonly #clock: AutomationClock;
   readonly #createDecisionId: () => string;
   readonly #runtime = new Map<number, RuntimeEntry>();
@@ -86,6 +88,7 @@ export class AutomationCoordinator {
     this.#classifier = options.classifier;
     this.#sessions = options.sessions;
     this.#sender = options.sender;
+    this.#onStatusChange = options.onStatusChange;
     this.#clock = options.clock ?? systemClock;
     this.#createDecisionId = options.createDecisionId ?? (() => crypto.randomUUID());
   }
@@ -334,9 +337,7 @@ export class AutomationCoordinator {
       const observation = fresh.session.observation;
       const turns: Array<{ role: "user" | "assistant"; content: string }> = [];
       const latestUser = observation?.latestUser?.normalizedText;
-      if (latestUser !== undefined && latestUser.length > 0) {
-        turns.push({ role: "user", content: latestUser });
-      }
+      if (latestUser !== undefined && latestUser.length > 0) turns.push({ role: "user", content: latestUser });
       turns.push({ role: "assistant", content: observation?.latestAssistant?.normalizedText ?? "" });
       classification = await this.#classifier.classify({ turns });
     } catch {
@@ -405,9 +406,7 @@ export class AutomationCoordinator {
       routeKey: postClassification.session.routeKey,
       assistantFingerprint: postClassification.fingerprint,
       ...(postClassification.domMessageId === undefined ? {} : { assistantDomMessageId: postClassification.domMessageId }),
-      ...(postClassification.session.lastUserInteractionAt === undefined
-        ? {}
-        : { lastUserInteractionAt: postClassification.session.lastUserInteractionAt }),
+      ...(postClassification.session.lastUserInteractionAt === undefined ? {} : { lastUserInteractionAt: postClassification.session.lastUserInteractionAt }),
       policyRevision: postClassification.policy.revision,
       evidenceKey: postClassification.evidenceKey,
       classification,
@@ -528,11 +527,7 @@ export class AutomationCoordinator {
     try {
       result = await this.#sender.send(envelope);
     } catch {
-      try {
-        await this.#journal.mark(envelope.decisionId, "AMBIGUOUS");
-      } catch {
-        // Keep the already-persisted ATTEMPTED record as a no-retry guard.
-      }
+      try { await this.#journal.mark(envelope.decisionId, "AMBIGUOUS"); } catch { /* persisted ATTEMPTED remains a guard */ }
       this.#setStatus(runtime, {
         mode: "AUTO",
         phase: "AMBIGUOUS_WRITE",
@@ -548,11 +543,7 @@ export class AutomationCoordinator {
 
     if (runtime.token !== token) return;
     if (result.decisionId !== envelope.decisionId) {
-      try {
-        await this.#journal.mark(envelope.decisionId, "AMBIGUOUS");
-      } catch {
-        // ATTEMPTED remains a guard.
-      }
+      try { await this.#journal.mark(envelope.decisionId, "AMBIGUOUS"); } catch { /* ATTEMPTED remains a guard */ }
       this.#setStatus(runtime, {
         mode: "AUTO",
         phase: "AMBIGUOUS_WRITE",
@@ -595,14 +586,9 @@ export class AutomationCoordinator {
 
     if (
       result.status === "VERIFIED" &&
-      (result.observedConversationId !== envelope.conversationId ||
-        result.observedAssistantFingerprint !== envelope.assistantFingerprint)
+      (result.observedConversationId !== envelope.conversationId || result.observedAssistantFingerprint !== envelope.assistantFingerprint)
     ) {
-      try {
-        await this.#journal.mark(envelope.decisionId, "AMBIGUOUS");
-      } catch {
-        // ATTEMPTED remains a guard.
-      }
+      try { await this.#journal.mark(envelope.decisionId, "AMBIGUOUS"); } catch { /* ATTEMPTED remains a guard */ }
       this.#setStatus(runtime, {
         mode: "AUTO",
         phase: "AMBIGUOUS_WRITE",
@@ -616,11 +602,7 @@ export class AutomationCoordinator {
     }
 
     if (result.status === "AMBIGUOUS") {
-      try {
-        await this.#journal.mark(envelope.decisionId, "AMBIGUOUS");
-      } catch {
-        // ATTEMPTED remains an equally conservative no-retry guard.
-      }
+      try { await this.#journal.mark(envelope.decisionId, "AMBIGUOUS"); } catch { /* ATTEMPTED remains a conservative no-retry guard */ }
       this.#setStatus(runtime, {
         mode: "AUTO",
         phase: "AMBIGUOUS_WRITE",
@@ -737,26 +719,20 @@ export class AutomationCoordinator {
       fresh.routeKey !== envelope.routeKey ||
       fresh.controlEligibility !== "OWNER" ||
       !optionalEqual(fresh.lastUserInteractionAt, envelope.lastUserInteractionAt)
-    ) {
-      return undefined;
-    }
+    ) return undefined;
     const assistant = fresh.observation?.latestAssistant;
     if (
       assistant === undefined ||
       assistant.fingerprint !== envelope.assistantFingerprint ||
       (envelope.assistantDomMessageId !== undefined && assistant.domMessageId !== envelope.assistantDomMessageId)
-    ) {
-      return undefined;
-    }
+    ) return undefined;
     const policy = this.#policies.resolve(envelope.conversationId);
     if (
       policy.revision !== envelope.policyRevision ||
       policy.mode !== "AUTO" ||
       policy.emergencyPaused ||
       policy.continuationText !== envelope.continuationText
-    ) {
-      return undefined;
-    }
+    ) return undefined;
     const candidate = this.#candidateEvidence(fresh, policy);
     return candidate?.evidenceKey === envelope.evidenceKey ? candidate : undefined;
   }
@@ -787,10 +763,21 @@ export class AutomationCoordinator {
       status: { tabId, updatedAt: this.#clock.now(), ...status },
     };
     this.#runtime.set(tabId, runtime);
+    this.#emitStatus(runtime.status);
     return runtime;
   }
 
   #setStatus(runtime: RuntimeEntry, status: Omit<AutomationRuntimeStatus, "tabId" | "updatedAt">): void {
     runtime.status = { tabId: runtime.status.tabId, updatedAt: this.#clock.now(), ...status };
+    this.#emitStatus(runtime.status);
+  }
+
+  #emitStatus(status: AutomationRuntimeStatus): void {
+    if (this.#onStatusChange === undefined) return;
+    try {
+      this.#onStatusChange(cloneStatus(status));
+    } catch {
+      // Observability must never influence automation decisions or page mutation.
+    }
   }
 }
