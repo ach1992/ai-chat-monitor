@@ -12,6 +12,7 @@ namespace GuardianContent {
     | "CAPTCHA"
     | "ACCOUNT_VERIFICATION"
     | "CONFIRMATION_REQUIRED";
+  export type GuardedHumanStateCheck = () => boolean;
 
   export interface PageObservation {
     conversationId?: string;
@@ -314,11 +315,15 @@ namespace GuardianContent {
       return observation;
     }
 
-    async guardedSend(expectation: GuardedContinuationExpectation): Promise<PageGuardedSendResult> {
+    async guardedSend(
+      expectation: GuardedContinuationExpectation,
+      humanStateIsCurrent: GuardedHumanStateCheck = () => true,
+    ): Promise<PageGuardedSendResult> {
       const reject = (reason: string): PageGuardedSendResult => ({ decisionId: expectation.decisionId, status: "NOT_STARTED", reason });
       const ambiguous = (reason: string): PageGuardedSendResult => ({ decisionId: expectation.decisionId, status: "AMBIGUOUS", reason });
       const observation = await this.observe();
       if (
+        !humanStateIsCurrent() ||
         observation.conversationId !== expectation.conversationId ||
         observation.routeKey !== expectation.routeKey ||
         observation.confidence !== "HIGH" ||
@@ -329,7 +334,7 @@ namespace GuardianContent {
         observation.latestAssistant?.fingerprint !== expectation.assistantFingerprint ||
         (expectation.assistantDomMessageId !== undefined && observation.latestAssistant.domMessageId !== expectation.assistantDomMessageId)
       ) {
-        return reject("Final page identity or UI safety guard did not match the decision envelope.");
+        return reject("Final page identity, human interaction, or UI safety guard did not match the decision envelope.");
       }
 
       const capturedAssistant = assistantMatches(this.#document).at(-1);
@@ -343,6 +348,7 @@ namespace GuardianContent {
       const currentMessageId = currentAssistant === undefined ? undefined : readMessageId(currentAssistant);
 
       if (
+        !humanStateIsCurrent() ||
         this.currentConversationId() !== expectation.conversationId ||
         this.currentRouteKey() !== expectation.routeKey ||
         capturedAssistantFingerprint !== expectation.assistantFingerprint ||
