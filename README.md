@@ -7,6 +7,7 @@ The extension is deliberately narrow. The chat's own agent, Skill, or workflow r
 ## MVP capabilities
 
 - Supervises multiple ChatGPT tabs/conversations independently.
+- Primary current-tab ON/OFF control with bounded one-action reconnect and reactive status.
 - Per-chat modes: `OFF`, `OBSERVE`, `AUTO`, and `NOTIFY_ONLY`.
 - Global timing defaults with per-chat settle/continue/cooldown overrides.
 - Configurable continuation text.
@@ -79,9 +80,19 @@ The ZIP contains the extension payload without TypeScript sources or source maps
 
 The extension starts fail-closed. Chats are not automatically controlled just because the extension is installed.
 
+The manifest keeps persistent host access limited to the two supported ChatGPT origins so the Side Panel can identify the active supported tab. Provider origins remain optional and are requested only for the exact configured endpoint origin.
+
 ## First-use configuration
 
-### 1. Configure a provider
+### 1. Turn Guardian ON for the current tab
+
+Open a ChatGPT conversation and use **Turn Guardian ON** in the primary current-tab card. If the supported tab has a stale or missing content agent after an extension update/reload, the same action first attempts a safe re-registration and otherwise reloads that tab once, then waits for a fresh exact conversation identity.
+
+Turning ON from `OFF` starts in `OBSERVE`. If the conversation is already in an advanced mode such as `AUTO` or `NOTIFY_ONLY`, turning it ON preserves that mode. **Turn Guardian OFF** always resolves the current exact tab/conversation identity before setting the conversation to `OFF`.
+
+The current-tab card refreshes automatically during normal use and shows connection state, `OWNER`/`MIRROR` eligibility, runtime phase, and the latest classifier decision when available.
+
+### 2. Configure a provider when AI classification is needed
 
 In the Side Panel, add either:
 
@@ -92,13 +103,11 @@ The browser asks for host access to the exact provider origin at configuration t
 
 Provider API keys are never returned in ordinary management/status responses.
 
-### 2. Start with `OBSERVE`
+### 3. Use advanced per-chat modes deliberately
 
-For a connected ChatGPT conversation, use `OBSERVE` first. The extension will settle and classify finished assistant turns but cannot enter the automatic send state.
+Expand **Open ChatGPT chats** for `OBSERVE`, `AUTO`, `NOTIFY_ONLY`, timing, notification, and per-conversation override controls.
 
-Use the Side Panel runtime state, last decision/reason, audit history, and notifications to confirm behavior on your workflow.
-
-### 3. Enable `AUTO` only for selected chats
+Start with `OBSERVE` when validating a workflow. The extension will settle and classify finished assistant turns but cannot enter the automatic send state.
 
 Set a conversation to `AUTO` only when you want guarded continuation for that exact chat. A `CONTINUE` classification is still only a candidate: the extension rechecks session identity, ownership, policy revision, assistant fingerprint, composer state, user interaction state, blocking UI, stagnation/fuse state, and expiration before the content agent is allowed to mutate the page.
 
@@ -133,6 +142,7 @@ Human interaction resets the relevant verified-auto continuation window used by 
 ## Provider and privacy behavior
 
 - Durable `chrome.storage.local` data is restricted to trusted extension contexts before policy/provider state is restored.
+- Persistent page host access is limited to `https://chatgpt.com/*` and `https://chat.openai.com/*`; the broad `tabs` permission is not requested.
 - Provider endpoints must use HTTPS. URL credentials, query strings, fragments, and sensitive header overrides are rejected.
 - Automatic redirects are refused for provider requests so credentials are not forwarded to an unexpected origin.
 - Provider requests are timeout-bounded and response-size-bounded.
@@ -152,9 +162,11 @@ The correct behavior is usually **no automatic action**. Typical Side Panel stat
 
 ## Troubleshooting
 
-### Side Panel says the tab is not connected
+### Current ChatGPT tab shows `Reconnect needed`
 
-Confirm the active tab is `https://chatgpt.com/...` (or the supported legacy ChatGPT host), then reload the tab after loading/updating the extension. A service-worker restart intentionally invalidates old observation authority until the content agent produces fresh evidence.
+Use **Reconnect** when Guardian is already ON, or **Turn Guardian ON** when it is OFF. Guardian first tries to re-register a reachable content agent; if none is reachable, it reloads that supported ChatGPT tab once and waits for fresh exact identity/state. A repeated manual reload + Side Panel refresh ritual should not be required for the normal stale-extension case.
+
+If recovery still fails, confirm the active tab is `https://chatgpt.com/...` (or the supported legacy ChatGPT host) and inspect the displayed recovery error rather than repeatedly reloading. Recovery is intentionally bounded and does not blind-retry page mutations.
 
 ### `AUTO` never sends
 
