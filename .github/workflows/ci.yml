@@ -11,8 +11,14 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    env:
+      VALIDATION_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.VALIDATION_SHA }}
+      - name: Verify exact validation SHA
+        run: test "$(git rev-parse HEAD)" = "$VALIDATION_SHA"
       - uses: actions/setup-node@v6
         with:
           node-version: 24
@@ -28,7 +34,7 @@ jobs:
           test "$(unzip -Z1 artifacts/chat-turn-guardian-*.zip | grep -Ec '\.(ts|map)$|(^|/)\.env($|\.)')" -eq 0
       - uses: actions/upload-artifact@v4
         with:
-          name: chat-turn-guardian-${{ github.sha }}
+          name: chat-turn-guardian-${{ env.VALIDATION_SHA }}
           path: artifacts/
           if-no-files-found: error
           retention-days: 14
