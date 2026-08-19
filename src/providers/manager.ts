@@ -47,7 +47,6 @@ export class ProviderManager {
       return unsureResult(
         "PROVIDER_FAILURE",
         `Provider ${lastFailure.providerId} failed (${lastFailure.code}): ${lastFailure.message}`,
-        { providerId: lastFailure.providerId },
       );
     }
     return unsureResult("PROVIDER_FAILURE", "No configured provider produced a valid classification.");
