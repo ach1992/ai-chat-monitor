@@ -59,6 +59,15 @@ function notificationTitle(kind: AuditEventKind): string {
   }
 }
 
+function responseCompleteKey(conversationId: string, fingerprint: string, domMessageId: string | undefined): string {
+  const boundedDomMessageId = domMessageId !== undefined && domMessageId.length > 0 && domMessageId.length <= 200
+    ? domMessageId
+    : undefined;
+  return boundedDomMessageId === undefined
+    ? `response:${conversationId}:fingerprint:${fingerprint}`
+    : `response:${conversationId}:dom:${boundedDomMessageId}:${fingerprint}`;
+}
+
 export class ReliabilityService {
   readonly #audit: AuditHistoryRepository;
   readonly #runtimePersistence: ReliabilityRuntimePersistence;
@@ -101,7 +110,7 @@ export class ReliabilityService {
       ) return;
       const policy = this.#resolvePolicy(conversationId);
       if (policy.mode === "OFF") return;
-      const key = `response:${conversationId}:${assistant.fingerprint}`;
+      const key = responseCompleteKey(conversationId, assistant.fingerprint, assistant.domMessageId);
       if (!(await this.#claimKey(key))) return;
       const event: AuditEvent = {
         id: key,
