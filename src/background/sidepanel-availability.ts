@@ -41,6 +41,21 @@ async function reannounceCompletedChatGptTab(tab: chrome.tabs.Tab): Promise<void
   }
 }
 
+async function initializeSidePanelAvailability(): Promise<void> {
+  try {
+    await chrome.sidePanel.setOptions({ enabled: false });
+  } catch {
+    // Keep the explicit per-tab deny path below even if the default update fails.
+  }
+
+  try {
+    const tabs = await chrome.tabs.query({});
+    await Promise.allSettled(tabs.map(syncSidePanelForTab));
+  } catch {
+    // Availability is UX-only. Later tab events will retry the relevant tab.
+  }
+}
+
 chrome.tabs.onActivated.addListener(({ tabId }) => {
   void chrome.tabs.get(tabId).then(syncSidePanelForTab, () => undefined);
 });
@@ -50,4 +65,4 @@ chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
   if (changeInfo.status === "complete") void reannounceCompletedChatGptTab(tab);
 });
 
-void chrome.tabs.query({}).then((tabs) => Promise.allSettled(tabs.map(syncSidePanelForTab))).catch(() => undefined);
+void initializeSidePanelAvailability();
