@@ -72,6 +72,18 @@ export function desiredCurrentTabMode(currentMode: ChatAutomationMode, enabled: 
   return currentMode === "OFF" ? "OBSERVE" : currentMode;
 }
 
+export function directCurrentTabMode(
+  currentMode: ChatAutomationMode,
+  enabled: boolean,
+  identityCurrent: boolean,
+  conversationId: string | undefined,
+): ChatAutomationMode | undefined {
+  if (conversationId === undefined) return undefined;
+  if (!enabled) return "OFF";
+  if (!identityCurrent) return undefined;
+  return desiredCurrentTabMode(currentMode, true);
+}
+
 export function shouldRefreshCurrentTabForUpdate(
   activeTabId: number | undefined,
   updatedTabId: number,
