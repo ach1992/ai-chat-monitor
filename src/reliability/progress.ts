@@ -4,6 +4,10 @@ const FNV_PRIME = 0x100000001b3n;
 const MAX_PROGRESS_TAIL = 3_000;
 const MAX_PROGRESS_TOKENS = 512;
 
+export type ProgressSafetyResult =
+  | { hold: false }
+  | { hold: true; reason: "REPEATED_OUTCOME" | "HARD_FUSE" };
+
 function normalizedProgressTail(value: string): string {
   return value
     .slice(-MAX_PROGRESS_TAIL)
@@ -30,6 +34,7 @@ export function outcomeSignature(value: string): string {
   const normalized = normalizedProgressTail(value);
   if (normalized.length === 0) return "0000000000000000";
   const tokens = normalized.split(" ").filter((token) => token.length >= 2).slice(-MAX_PROGRESS_TOKENS);
+  if (tokens.length === 0) return "0000000000000000";
   const weights = new Array<number>(64).fill(0);
   for (const token of tokens) {
     const hash = hashToken(token);
@@ -57,4 +62,21 @@ function hammingDistance(left: string, right: string): number {
 
 export function materiallySimilarOutcome(left: string, right: string): boolean {
   return hammingDistance(left, right) <= 5;
+}
+
+export function evaluateProgressSafety(
+  currentSignature: string,
+  priorSignatures: readonly string[],
+  verifiedCount: number,
+  hardFuseMaxAutoContinues: number,
+): ProgressSafetyResult {
+  const recentComparable = priorSignatures.filter((signature) => /^[a-f0-9]{16}$/.test(signature)).slice(-2);
+  if (
+    recentComparable.length === 2 &&
+    recentComparable.every((signature) => materiallySimilarOutcome(currentSignature, signature))
+  ) {
+    return { hold: true, reason: "REPEATED_OUTCOME" };
+  }
+  if (verifiedCount >= hardFuseMaxAutoContinues) return { hold: true, reason: "HARD_FUSE" };
+  return { hold: false };
 }
