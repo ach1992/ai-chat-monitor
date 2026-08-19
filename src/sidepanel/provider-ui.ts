@@ -89,9 +89,9 @@ function currentProfile(id: string): RedactedProviderProfile | undefined {
 
 function setBusy(next: boolean): void {
   busy = next;
-  for (const control of manager.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>("button, input, select")) {
+  manager.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>("button, input, select").forEach((control) => {
     control.disabled = next;
-  }
+  });
   if (!next && editingId !== undefined) idInput.readOnly = true;
 }
 
@@ -235,10 +235,8 @@ function mutationFromForm(): ProviderProfileMutation {
   return { kind, id, model, apiKey, baseUrl: baseUrlInput.value.trim() };
 }
 
-async function requestExactOrigin(spec: ProviderCatalogSpec): Promise<boolean> {
+function requestExactOrigin(spec: ProviderCatalogSpec): Promise<boolean> {
   const origin = providerCatalogOriginPattern(spec);
-  const alreadyGranted = await chrome.permissions.contains({ origins: [origin] });
-  if (alreadyGranted) return true;
   return chrome.permissions.request({ origins: [origin] });
 }
 
@@ -311,8 +309,8 @@ async function saveProvider(): Promise<void> {
     settings = response.providers;
     const savedId = mutation.id;
     const saved = currentProfile(savedId);
-    status(saved === undefined ? "Provider saved." : `Saved ${saved.id} with model ${saved.model}. Stored API key remains hidden.`);
     resetEditor();
+    status(saved === undefined ? "Provider saved." : `Saved ${saved.id} with model ${saved.model}. Stored API key remains hidden.`);
     renderProviderList();
   } catch (error) {
     status(error instanceof Error ? error.message : "Provider profile save failed.");
@@ -350,8 +348,12 @@ async function moveProvider(providerId: string, offset: -1 | 1): Promise<void> {
   const currentIndex = settings.order.indexOf(providerId);
   const nextIndex = currentIndex + offset;
   if (currentIndex < 0 || nextIndex < 0 || nextIndex >= settings.order.length) return;
+  const currentProvider = settings.order[currentIndex];
+  const nextProvider = settings.order[nextIndex];
+  if (currentProvider === undefined || nextProvider === undefined) return;
   const order = [...settings.order];
-  [order[currentIndex], order[nextIndex]] = [order[nextIndex], order[currentIndex]];
+  order[currentIndex] = nextProvider;
+  order[nextIndex] = currentProvider;
   setBusy(true);
   try {
     const request: PanelProviderOrderUpdate = {
