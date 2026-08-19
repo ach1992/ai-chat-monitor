@@ -121,20 +121,20 @@ test("adapter normalizes and fingerprints assistant text without DOM payloads", 
   assert.equal(Object.hasOwn(result.latestAssistant, "outerHTML"), false);
 });
 
-test("adapter exposes only the latest user turn preceding the observed assistant", async () => {
+test("adapter exposes the latest user turn preceding the current assistant", async () => {
   const GuardianContent = await loadAdapter();
+  const olderTurn = new FakeElement({ attrs: { "data-testid": "conversation-turn-user-0" } });
   const precedingTurn = new FakeElement({ attrs: { "data-testid": "conversation-turn-user-1" } });
   const assistantTurn = new FakeElement({ attrs: { "data-testid": "conversation-turn-assistant-1" } });
-  const laterTurn = new FakeElement({ attrs: { "data-testid": "conversation-turn-user-2" } });
+  const olderUser = new FakeElement({ textContent: "Earlier context that must not be paired.", order: 0 });
   const precedingUser = new FakeElement({ textContent: "Please finish the remaining safe work.", order: 1 });
   const assistant = new FakeElement({ textContent: "I can continue with the implementation.", order: 2 });
-  const laterUser = new FakeElement({ textContent: "This newer prompt must not be paired with the old assistant.", order: 3 });
+  olderUser.parent = olderTurn;
   precedingUser.parent = precedingTurn;
   assistant.parent = assistantTurn;
-  laterUser.parent = laterTurn;
-  const composer = new FakeTextAreaElement({ value: "", order: 4 });
+  const composer = new FakeTextAreaElement({ value: "", order: 3 });
   const document = new FakeDocument([
-    ['[data-message-author-role="user"]', [precedingUser, laterUser]],
+    ['[data-message-author-role="user"]', [olderUser, precedingUser]],
     ['[data-message-author-role="assistant"]', [assistant]],
     ["#prompt-textarea", [composer]],
   ]);
