@@ -8,7 +8,9 @@ import {
   isPanelAutomationPolicyUpdate,
   isPanelEmergencyPauseUpdate,
   isPanelOverviewRequest,
-  isPanelProviderSettingsUpdate,
+  isPanelProviderOrderUpdate,
+  isPanelProviderProfileRemove,
+  isPanelProviderProfileUpsert,
   isPanelStatusRequest,
   type AutomationPolicyResponse,
   type ContentAgentAck,
@@ -22,7 +24,9 @@ import {
   type PanelAutomationPolicyUpdate,
   type PanelEmergencyPauseUpdate,
   type PanelOverviewResponse,
-  type PanelProviderSettingsUpdate,
+  type PanelProviderOrderUpdate,
+  type PanelProviderProfileRemove,
+  type PanelProviderProfileUpsert,
   type PanelStatusResponse,
   type ProtocolErrorResponse,
   type ProviderSettingsResponse,
@@ -33,6 +37,7 @@ import {
   type SessionRegistryState,
 } from "../core/session-registry.js";
 import { redactProviderProfile } from "../providers/settings.js";
+import type { ProviderSettingsState } from "../providers/types.js";
 import {
   createEphemeralStorage,
   restrictDurableStorageToTrustedContexts,
@@ -242,13 +247,18 @@ async function handleOverview(sender: chrome.runtime.MessageSender): Promise<Gua
     const chats: ManagedChatStatus[] = [];
     for (const session of registry.list()) {
       const status = await automation.status(session.tabId);
+      const overrides = session.conversationId === undefined
+        ? undefined
+        : policyState.chats.find((chat) => chat.conversationId === session.conversationId);
       chats.push({
         tabId: session.tabId,
         ...(session.conversationId === undefined ? {} : { conversationId: session.conversationId }),
         routeKey: session.routeKey,
         controlEligibility: session.controlEligibility,
         lastSeenAt: session.lastSeenAt,
+        ...(session.observation?.pageTitle === undefined ? {} : { pageTitle: session.observation.pageTitle }),
         ...(session.observation === undefined ? {} : { generation: session.observation.generation }),
+        ...(overrides === undefined ? {} : { overrides: structuredClone(overrides) }),
         ...(status.policy === undefined ? {} : { policy: status.policy }),
         ...(status.runtime === undefined ? {} : { runtime: status.runtime }),
       });
@@ -260,10 +270,7 @@ async function handleOverview(sender: chrome.runtime.MessageSender): Promise<Gua
       emergencyPaused: policyState.emergencyPaused,
       defaults: policyState.defaults,
       chats,
-      providers: {
-        profiles: providerSettings.profiles.map(redactProviderProfile),
-        order: [...providerSettings.order],
-      },
+      providers: redactProviderSettings(providerSettings),
     };
     return response;
   } catch {
@@ -279,6 +286,21 @@ function policyResponse(tabId?: number): AutomationPolicyResponse {
     revision: state.revision,
     emergencyPaused: state.emergencyPaused,
     ...(tabId === undefined ? {} : { tabId }),
+  };
+}
+
+function redactProviderSettings(settings: ProviderSettingsState): ProviderSettingsResponse["providers"] {
+  return {
+    profiles: settings.profiles.map(redactProviderProfile),
+    order: [...settings.order],
+  };
+}
+
+function providerResponse(settings: ProviderSettingsState): ProviderSettingsResponse {
+  return {
+    type: "background:provider-settings",
+    protocolVersion: PROTOCOL_VERSION,
+    providers: redactProviderSettings(settings),
   };
 }
 
@@ -326,21 +348,33 @@ async function handleEmergencyPauseUpdate(message: PanelEmergencyPauseUpdate, se
   }
 }
 
-async function handleProviderSettingsUpdate(message: PanelProviderSettingsUpdate, sender: chrome.runtime.MessageSender): Promise<GuardianResponse> {
+async function handleProviderProfileUpsert(message: PanelProviderProfileUpsert, sender: chrome.runtime.MessageSender): Promise<GuardianResponse> {
   if (!trustedExtensionSender(sender)) return protocolError("INVALID_SENDER", "Only trusted extension pages may change provider settings.");
   try {
-    const saved = await automation.updateProviderSettings(message.settings);
-    const response: ProviderSettingsResponse = {
-      type: "background:provider-settings",
-      protocolVersion: PROTOCOL_VERSION,
-      providers: {
-        profiles: saved.profiles.map(redactProviderProfile),
-        order: [...saved.order],
-      },
-    };
-    return response;
+    const saved = await automation.upsertProviderProfile(message.profile, message.makePrimary ?? false);
+    return providerResponse(saved);
   } catch {
-    return protocolError("STORAGE_FAILURE", "Unable to persist provider settings.");
+    return protocolError("STORAGE_FAILURE", "Unable to persist provider profile.");
+  }
+}
+
+async function handleProviderProfileRemove(message: PanelProviderProfileRemove, sender: chrome.runtime.MessageSender): Promise<GuardianResponse> {
+  if (!trustedExtensionSender(sender)) return protocolError("INVALID_SENDER", "Only trusted extension pages may change provider settings.");
+  try {
+    const saved = await automation.removeProviderProfile(message.providerId);
+    return providerResponse(saved);
+  } catch {
+    return protocolError("STORAGE_FAILURE", "Unable to remove provider profile.");
+  }
+}
+
+async function handleProviderOrderUpdate(message: PanelProviderOrderUpdate, sender: chrome.runtime.MessageSender): Promise<GuardianResponse> {
+  if (!trustedExtensionSender(sender)) return protocolError("INVALID_SENDER", "Only trusted extension pages may change provider settings.");
+  try {
+    const saved = await automation.updateProviderOrder(message.order);
+    return providerResponse(saved);
+  } catch {
+    return protocolError("STORAGE_FAILURE", "Unable to persist provider priority.");
   }
 }
 
@@ -354,7 +388,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (isPanelAutomationPolicyUpdate(message)) { void handlePolicyUpdate(message, sender).then(sendResponse); return true; }
   if (isPanelAutomationDefaultsUpdate(message)) { void handleDefaultsUpdate(message, sender).then(sendResponse); return true; }
   if (isPanelEmergencyPauseUpdate(message)) { void handleEmergencyPauseUpdate(message, sender).then(sendResponse); return true; }
-  if (isPanelProviderSettingsUpdate(message)) { void handleProviderSettingsUpdate(message, sender).then(sendResponse); return true; }
+  if (isPanelProviderProfileUpsert(message)) { void handleProviderProfileUpsert(message, sender).then(sendResponse); return true; }
+  if (isPanelProviderProfileRemove(message)) { void handleProviderProfileRemove(message, sender).then(sendResponse); return true; }
+  if (isPanelProviderOrderUpdate(message)) { void handleProviderOrderUpdate(message, sender).then(sendResponse); return true; }
   return false;
 });
 
