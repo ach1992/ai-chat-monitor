@@ -166,10 +166,11 @@
               <span>API key</span>
               <input data-provider-api-key-v2 type="password" maxlength="4096" autocomplete="off" />
             </label>
-            <label class="wide model-field">
-              <span>Model</span>
+            <div class="wide model-field">
+              <label for="provider-model-v2">Model</label>
               <div class="model-combobox">
                 <input
+                  id="provider-model-v2"
                   data-provider-model-v2
                   type="text"
                   maxlength="200"
@@ -190,7 +191,7 @@
                   ></select>
                 </div>
               </div>
-            </label>
+            </div>
             <div class="wide catalog-controls">
               <button type="button" class="secondary" data-provider-load-models-v2>Load models</button>
               <label data-provider-filter-field-v2>
