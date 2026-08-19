@@ -10,7 +10,7 @@ import type {
 
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 export const NARAROUTER_BASE_URL = "https://router.bynara.id/v1";
-export const DEFAULT_PROVIDER_TIMEOUT_MS = 12_000;
+export const DEFAULT_PROVIDER_TIMEOUT_MS = 30_000;
 export const DEFAULT_PROVIDER_MIN_CONFIDENCE = 0.9;
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
