@@ -64,7 +64,7 @@ function responseCompleteKey(conversationId: string, fingerprint: string, domMes
     ? domMessageId
     : undefined;
   return boundedDomMessageId === undefined
-    ? `response:${conversationId}:fingerprint:${fingerprint}`
+    ? `response:${conversationId}:${fingerprint}`
     : `response:${conversationId}:dom:${boundedDomMessageId}:${fingerprint}`;
 }
 
