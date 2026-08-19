@@ -15,7 +15,7 @@ import {
   type PanelProviderProfileUpsert,
 } from "../shared/protocol.js";
 
-const NOTIFICATION_OPTIONS: ReadonlyArray<{ value: NotificationTrigger; label: string }> = [
+const NOTIFICATIONS: ReadonlyArray<{ value: NotificationTrigger; label: string }> = [
   { value: "RESPONSE_FINISHED", label: "Response finished" },
   { value: "HOLD", label: "Human attention / HOLD" },
   { value: "UNSURE", label: "UNSURE" },
@@ -23,69 +23,65 @@ const NOTIFICATION_OPTIONS: ReadonlyArray<{ value: NotificationTrigger; label: s
   { value: "STAGNATION", label: "Stagnation" },
 ];
 
-const MODE_OPTIONS: ReadonlyArray<{ value: ChatAutomationMode; label: string }> = [
+const MODES: ReadonlyArray<{ value: ChatAutomationMode; label: string }> = [
   { value: "OFF", label: "Off" },
   { value: "OBSERVE", label: "Observe" },
   { value: "AUTO", label: "Auto" },
   { value: "NOTIFY_ONLY", label: "Notify only" },
 ];
 
-function requireElement<T extends Element>(selector: string): T {
+function q<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector);
   if (element === null) throw new Error(`Side panel markup is missing required element: ${selector}`);
   return element;
 }
 
-function createElement<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  className?: string,
-  text?: string,
-): HTMLElementTagNameMap[K] {
+function e<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const element = document.createElement(tag);
   if (className !== undefined) element.className = className;
   if (text !== undefined) element.textContent = text;
   return element;
 }
 
-function shortConversationId(value: string | undefined): string {
+function badge(parent: Element, text: string, tone?: "ok" | "warn"): void {
+  const item = e("span", "badge", text);
+  if (tone !== undefined) item.dataset.tone = tone;
+  parent.append(item);
+}
+
+function shortId(value: string | undefined): string {
   if (value === undefined) return "no conversation id";
   return value.length <= 12 ? value : `${value.slice(0, 8)}…${value.slice(-4)}`;
 }
 
-function displayTitle(chat: ManagedChatStatus): string {
+function chatTitle(chat: ManagedChatStatus): string {
   const title = chat.pageTitle?.trim();
   if (title !== undefined && title.length > 0) return title;
-  return chat.conversationId === undefined ? `Tab ${chat.tabId}` : `Conversation ${shortConversationId(chat.conversationId)}`;
+  return chat.conversationId === undefined ? `Tab ${chat.tabId}` : `Conversation ${shortId(chat.conversationId)}`;
 }
 
-function modeLabel(mode: ChatAutomationMode | undefined): string {
-  return MODE_OPTIONS.find((entry) => entry.value === mode)?.label ?? "Off";
+function modeText(mode: ChatAutomationMode | undefined): string {
+  return MODES.find((candidate) => candidate.value === mode)?.label ?? "Off";
 }
 
-function addBadge(parent: Element, text: string, tone?: "ok" | "warn"): void {
-  const badge = createElement("span", "badge", text);
-  if (tone !== undefined) badge.dataset.tone = tone;
-  parent.append(badge);
-}
-
-const statusElement = requireElement<HTMLElement>("[data-status]");
-const detailsElement = requireElement<HTMLElement>("[data-details]");
-const refreshButton = requireElement<HTMLButtonElement>("[data-refresh]");
-const pauseAllButton = requireElement<HTMLButtonElement>("[data-pause-all]");
-const currentTabElement = requireElement<HTMLElement>("[data-current-tab]");
-const chatListElement = requireElement<HTMLElement>("[data-chat-list]");
-const chatCountElement = requireElement<HTMLElement>("[data-chat-count]");
-const defaultsForm = requireElement<HTMLFormElement>("[data-defaults-form]");
-const defaultNotificationsElement = requireElement<HTMLElement>("[data-default-notifications]");
-const providerListElement = requireElement<HTMLElement>("[data-provider-list]");
-const providerForm = requireElement<HTMLFormElement>("[data-provider-form]");
-const providerBaseUrlField = requireElement<HTMLElement>("[data-base-url-field]");
+const statusElement = q<HTMLElement>("[data-status]");
+const detailsElement = q<HTMLElement>("[data-details]");
+const refreshButton = q<HTMLButtonElement>("[data-refresh]");
+const pauseAllButton = q<HTMLButtonElement>("[data-pause-all]");
+const currentTabElement = q<HTMLElement>("[data-current-tab]");
+const chatListElement = q<HTMLElement>("[data-chat-list]");
+const chatCountElement = q<HTMLElement>("[data-chat-count]");
+const defaultsForm = q<HTMLFormElement>("[data-defaults-form]");
+const defaultNotificationsElement = q<HTMLElement>("[data-default-notifications]");
+const providerListElement = q<HTMLElement>("[data-provider-list]");
+const providerForm = q<HTMLFormElement>("[data-provider-form]");
+const providerBaseUrlField = q<HTMLElement>("[data-base-url-field]");
 
 let overview: PanelOverviewResponse | undefined;
 let activeTabId: number | undefined;
 let refreshing = false;
 
-function renderStatus(message: string, details: string): void {
+function status(message: string, details: string): void {
   statusElement.textContent = message;
   detailsElement.textContent = details;
 }
@@ -94,76 +90,87 @@ async function send(request: object): Promise<GuardianResponse> {
   return chrome.runtime.sendMessage<GuardianResponse>(request);
 }
 
-function assertSuccess(response: GuardianResponse): GuardianResponse {
+function requireSuccess(response: GuardianResponse): GuardianResponse {
   if (response.type === "background:error") throw new Error(response.message);
   return response;
 }
 
-async function mutate(request: object, progressMessage: string): Promise<void> {
-  renderStatus(progressMessage, "Pending automatic decisions remain fail-closed while configuration changes persist.");
-  const response = await send(request);
-  assertSuccess(response);
+async function mutate(request: object, message: string): Promise<void> {
+  status(message, "Pending automatic decisions remain fail-closed while configuration changes persist.");
+  requireSuccess(await send(request));
   await refreshOverview();
 }
 
-function createNotificationChecks(
-  selected: readonly NotificationTrigger[],
-  namePrefix: string,
-): HTMLInputElement[] {
-  const inputs: HTMLInputElement[] = [];
-  for (const option of NOTIFICATION_OPTIONS) {
-    const label = createElement("label");
-    const input = createElement("input");
-    input.type = "checkbox";
-    input.name = `${namePrefix}-${option.value}`;
-    input.value = option.value;
-    input.checked = selected.includes(option.value);
-    label.append(input, createElement("span", undefined, option.label));
-    inputs.push(input);
-    if (namePrefix === "default") defaultNotificationsElement.append(label);
-  }
-  return inputs;
-}
-
-function selectedNotifications(inputs: readonly HTMLInputElement[]): NotificationTrigger[] {
-  return inputs
-    .filter((input) => input.checked)
-    .map((input) => input.value as NotificationTrigger);
-}
-
-function getNamedInput(form: HTMLFormElement, name: string): HTMLInputElement {
+function namedInput(form: HTMLFormElement, name: string): HTMLInputElement {
   const control = form.elements.namedItem(name);
   if (!(control instanceof HTMLInputElement)) throw new Error(`Missing input ${name}.`);
   return control;
 }
 
-function getNamedSelect(form: HTMLFormElement, name: string): HTMLSelectElement {
+function namedSelect(form: HTMLFormElement, name: string): HTMLSelectElement {
   const control = form.elements.namedItem(name);
   if (!(control instanceof HTMLSelectElement)) throw new Error(`Missing select ${name}.`);
   return control;
 }
 
-function readRequiredInteger(form: HTMLFormElement, name: string): number {
-  const input = getNamedInput(form, name);
-  const value = Number(input.value);
+function requiredInteger(form: HTMLFormElement, name: string): number {
+  const value = Number(namedInput(form, name).value);
   if (!Number.isInteger(value)) throw new Error(`${name} must be an integer.`);
   return value;
 }
 
-function readOptionalInteger(input: HTMLInputElement): number | null {
-  const trimmed = input.value.trim();
-  if (trimmed.length === 0) return null;
-  const value = Number(trimmed);
+function optionalInteger(input: HTMLInputElement): number | null {
+  if (input.value.trim().length === 0) return null;
+  const value = Number(input.value);
   if (!Number.isInteger(value)) throw new Error("Timing override must be an integer or blank to inherit.");
   return value;
 }
 
-function primaryProviderLabel(): string {
+function checkedNotifications(inputs: readonly HTMLInputElement[]): NotificationTrigger[] {
+  return inputs.filter((input) => input.checked).map((input) => input.value as NotificationTrigger);
+}
+
+function primaryProviderText(): string {
   const state = overview?.providers;
-  const primaryId = state?.order[0];
+  if (state === undefined || state.order.length === 0) return "No AI provider configured";
+  const primaryId = state.order[0];
   if (primaryId === undefined) return "No AI provider configured";
   const profile = state.profiles.find((candidate) => candidate.id === primaryId);
   return profile === undefined ? `Provider ${primaryId} is missing` : `${profile.id} · ${profile.model}`;
+}
+
+function modeSelect(value: ChatAutomationMode): HTMLSelectElement {
+  const select = e("select");
+  for (const candidate of MODES) {
+    const option = e("option");
+    option.value = candidate.value;
+    option.textContent = candidate.label;
+    option.selected = candidate.value === value;
+    select.append(option);
+  }
+  return select;
+}
+
+function overrideInput(
+  labelText: string,
+  value: number | string | undefined,
+  placeholder: string,
+  options: { type?: "number" | "text"; max?: number } = {},
+): { label: HTMLLabelElement; input: HTMLInputElement } {
+  const label = e("label");
+  const input = e("input");
+  input.type = options.type ?? "number";
+  input.value = value === undefined ? "" : String(value);
+  input.placeholder = placeholder;
+  if (input.type === "number") {
+    input.min = "0";
+    input.step = "100";
+    if (options.max !== undefined) input.max = String(options.max);
+  } else {
+    input.maxLength = options.max ?? 200;
+  }
+  label.append(e("span", undefined, labelText), input);
+  return { label, input };
 }
 
 function renderCurrentTab(): void {
@@ -175,26 +182,19 @@ function renderCurrentTab(): void {
     currentTabElement.textContent = "No active browser tab is available.";
     return;
   }
-  if (chat === undefined || chat.conversationId === undefined) {
+  if (chat?.conversationId === undefined) {
     currentTabElement.className = "empty-state";
     currentTabElement.textContent = "The active tab is not a connected ChatGPT conversation yet.";
     return;
   }
 
   currentTabElement.className = "current-card";
-  const head = createElement("div", "chat-card-head");
-  const title = createElement("div", "title-block");
-  title.append(
-    createElement("h3", "chat-title", displayTitle(chat)),
-    createElement("div", "meta", `Tab ${chat.tabId} · ${shortConversationId(chat.conversationId)}`),
-  );
-  const actions = createElement("div", "inline-actions");
+  const head = e("div", "chat-card-head");
+  const title = e("div", "title-block");
+  title.append(e("h3", "chat-title", chatTitle(chat)), e("div", "meta", `Tab ${chat.tabId} · ${shortId(chat.conversationId)}`));
+  const actions = e("div", "inline-actions");
   const currentMode = chat.policy?.mode ?? "OFF";
-  const toggle = createElement(
-    "button",
-    currentMode === "OFF" ? undefined : "secondary",
-    currentMode === "OFF" ? "Enable observe" : "Disable",
-  );
+  const toggle = e("button", currentMode === "OFF" ? undefined : "secondary", currentMode === "OFF" ? "Enable observe" : "Disable");
   toggle.type = "button";
   toggle.addEventListener("click", () => {
     const request: PanelAutomationPolicyUpdate = {
@@ -205,169 +205,110 @@ function renderCurrentTab(): void {
       patch: { mode: currentMode === "OFF" ? "OBSERVE" : "OFF" },
     };
     void mutate(request, currentMode === "OFF" ? "Enabling current chat…" : "Disabling current chat…")
-      .catch((error: unknown) => renderStatus("Update failed.", error instanceof Error ? error.message : "Unknown error."));
+      .catch((error: unknown) => status("Update failed.", error instanceof Error ? error.message : "Unknown error."));
   });
-  const focus = createElement("button", "secondary", "Focus");
+  const focus = e("button", "secondary", "Focus");
   focus.type = "button";
   focus.addEventListener("click", () => {
     void chrome.tabs.update(chat.tabId, { active: true })
-      .then(() => renderStatus("Chat focused.", displayTitle(chat)))
-      .catch(() => renderStatus("Unable to focus chat.", "The browser rejected the tab activation request."));
+      .then(() => status("Chat focused.", chatTitle(chat)))
+      .catch(() => status("Unable to focus chat.", "The browser rejected the tab activation request."));
   });
   actions.append(toggle, focus);
   head.append(title, actions);
-  const meta = createElement("div", "meta-row");
-  addBadge(meta, modeLabel(currentMode), currentMode === "AUTO" ? "ok" : undefined);
-  addBadge(meta, chat.controlEligibility, chat.controlEligibility === "OWNER" ? "ok" : chat.controlEligibility === "MIRROR" ? "warn" : undefined);
-  if (chat.runtime?.phase !== undefined) addBadge(meta, chat.runtime.phase, chat.runtime.phase === "AMBIGUOUS_WRITE" ? "warn" : undefined);
-  currentTabElement.append(head, meta, createElement("div", "meta", primaryProviderLabel()));
+
+  const meta = e("div", "meta-row");
+  badge(meta, modeText(currentMode), currentMode === "AUTO" ? "ok" : undefined);
+  badge(meta, chat.controlEligibility, chat.controlEligibility === "OWNER" ? "ok" : chat.controlEligibility === "MIRROR" ? "warn" : undefined);
+  if (chat.runtime !== undefined) badge(meta, chat.runtime.phase, chat.runtime.phase === "AMBIGUOUS_WRITE" ? "warn" : undefined);
+  currentTabElement.append(head, meta, e("div", "meta", primaryProviderText()));
 }
 
-function createModeSelect(value: ChatAutomationMode): HTMLSelectElement {
-  const select = createElement("select");
-  for (const option of MODE_OPTIONS) {
-    const item = createElement("option");
-    item.value = option.value;
-    item.textContent = option.label;
-    item.selected = option.value === value;
-    select.append(item);
-  }
-  return select;
-}
+function notificationEditor(
+  chat: ManagedChatStatus,
+): { fieldset: HTMLFieldSetElement; inherit: HTMLInputElement; inputs: HTMLInputElement[] } {
+  const fieldset = e("fieldset", "compact-fieldset wide");
+  fieldset.append(e("legend", undefined, "Notifications"));
+  const inheritRow = e("label", "checkbox-row");
+  const inherit = e("input");
+  inherit.type = "checkbox";
+  inherit.checked = chat.overrides?.notificationTriggers === undefined;
+  inheritRow.append(inherit, e("span", undefined, "Inherit global notification policy"));
+  fieldset.append(inheritRow);
 
-function createOverrideInput(
-  labelText: string,
-  value: number | string | undefined,
-  placeholder: string,
-  options: { type?: "number" | "text"; max?: number } = {},
-): { label: HTMLLabelElement; input: HTMLInputElement } {
-  const label = createElement("label");
-  const caption = createElement("span", undefined, labelText);
-  const input = createElement("input");
-  input.type = options.type ?? "number";
-  input.placeholder = placeholder;
-  input.value = value === undefined ? "" : String(value);
-  if (input.type === "number") {
-    input.min = "0";
-    input.step = "100";
-    if (options.max !== undefined) input.max = String(options.max);
-  } else {
-    input.maxLength = options.max ?? 200;
+  const grid = e("div", "check-grid");
+  const effective = chat.overrides?.notificationTriggers ?? chat.policy?.notificationTriggers ?? [];
+  const inputs: HTMLInputElement[] = [];
+  for (const option of NOTIFICATIONS) {
+    const label = e("label");
+    const input = e("input");
+    input.type = "checkbox";
+    input.value = option.value;
+    input.checked = effective.includes(option.value);
+    input.disabled = inherit.checked;
+    label.append(input, e("span", undefined, option.label));
+    grid.append(label);
+    inputs.push(input);
   }
-  label.append(caption, input);
-  return { label, input };
+  inherit.addEventListener("change", () => {
+    for (const input of inputs) input.disabled = inherit.checked;
+  });
+  fieldset.append(grid);
+  return { fieldset, inherit, inputs };
 }
 
 function createChatCard(chat: ManagedChatStatus): HTMLElement {
-  const card = createElement("article", "chat-card");
+  const card = e("article", "chat-card");
   const mode = chat.policy?.mode ?? "OFF";
   card.dataset.managed = String(mode !== "OFF");
 
-  const head = createElement("div", "chat-card-head");
-  const title = createElement("div", "title-block");
-  title.append(
-    createElement("h3", "chat-title", displayTitle(chat)),
-    createElement("div", "meta", `Tab ${chat.tabId} · ${shortConversationId(chat.conversationId)}`),
-  );
-  const headActions = createElement("div", "inline-actions");
-  const focus = createElement("button", "secondary small", "Focus");
+  const head = e("div", "chat-card-head");
+  const title = e("div", "title-block");
+  title.append(e("h3", "chat-title", chatTitle(chat)), e("div", "meta", `Tab ${chat.tabId} · ${shortId(chat.conversationId)}`));
+  const focus = e("button", "secondary small", "Focus");
   focus.type = "button";
   focus.addEventListener("click", () => {
     void chrome.tabs.update(chat.tabId, { active: true })
-      .then(() => renderStatus("Chat focused.", displayTitle(chat)))
-      .catch(() => renderStatus("Unable to focus chat.", "The browser rejected the tab activation request."));
+      .then(() => status("Chat focused.", chatTitle(chat)))
+      .catch(() => status("Unable to focus chat.", "The browser rejected the tab activation request."));
   });
-  headActions.append(focus);
-  head.append(title, headActions);
+  head.append(title, focus);
 
-  const meta = createElement("div", "meta-row");
-  addBadge(meta, modeLabel(mode), mode === "AUTO" ? "ok" : undefined);
-  addBadge(meta, chat.controlEligibility, chat.controlEligibility === "OWNER" ? "ok" : chat.controlEligibility === "MIRROR" ? "warn" : undefined);
-  if (chat.generation !== undefined) addBadge(meta, chat.generation);
-  if (chat.runtime?.phase !== undefined) addBadge(meta, chat.runtime.phase, chat.runtime.phase === "AMBIGUOUS_WRITE" ? "warn" : undefined);
+  const meta = e("div", "meta-row");
+  badge(meta, modeText(mode), mode === "AUTO" ? "ok" : undefined);
+  badge(meta, chat.controlEligibility, chat.controlEligibility === "OWNER" ? "ok" : chat.controlEligibility === "MIRROR" ? "warn" : undefined);
+  if (chat.generation !== undefined) badge(meta, chat.generation);
+  if (chat.runtime !== undefined) badge(meta, chat.runtime.phase, chat.runtime.phase === "AMBIGUOUS_WRITE" ? "warn" : undefined);
 
   if (chat.conversationId === undefined || chat.policy === undefined) {
-    card.append(head, meta, createElement("div", "reason", "Waiting for a stable ChatGPT conversation identity."));
+    card.append(head, meta, e("div", "reason", "Waiting for a stable ChatGPT conversation identity."));
     return card;
   }
 
-  const controls = createElement("div", "chat-controls");
-  const modeLabelElement = createElement("label");
-  modeLabelElement.append(createElement("span", undefined, "Mode"));
-  const modeSelect = createModeSelect(mode);
-  modeLabelElement.append(modeSelect);
-
-  const settle = createOverrideInput(
-    "Settle override (ms)",
-    chat.overrides?.settleDelayMs,
-    `Inherit ${chat.policy.timing.settleDelayMs}`,
-    { max: 60_000 },
-  );
-  const continuationDelay = createOverrideInput(
-    "Continue override (ms)",
-    chat.overrides?.continueDelayMs,
-    `Inherit ${chat.policy.timing.continueDelayMs}`,
-    { max: 60_000 },
-  );
-  const cooldown = createOverrideInput(
-    "Cooldown override (ms)",
-    chat.overrides?.cooldownMs,
-    `Inherit ${chat.policy.timing.cooldownMs}`,
-    { max: 300_000 },
-  );
-  const continuation = createOverrideInput(
-    "Continuation text override",
-    chat.overrides?.continuationText,
-    `Inherit: ${chat.policy.continuationText}`,
-    { type: "text", max: 200 },
-  );
+  const controls = e("div", "chat-controls");
+  const modeLabel = e("label");
+  const modeControl = modeSelect(mode);
+  modeLabel.append(e("span", undefined, "Mode"), modeControl);
+  const settle = overrideInput("Settle override (ms)", chat.overrides?.settleDelayMs, `Inherit ${chat.policy.timing.settleDelayMs}`, { max: 60_000 });
+  const continuationDelay = overrideInput("Continue override (ms)", chat.overrides?.continueDelayMs, `Inherit ${chat.policy.timing.continueDelayMs}`, { max: 60_000 });
+  const cooldown = overrideInput("Cooldown override (ms)", chat.overrides?.cooldownMs, `Inherit ${chat.policy.timing.cooldownMs}`, { max: 300_000 });
+  const continuation = overrideInput("Continuation text override", chat.overrides?.continuationText, `Inherit: ${chat.policy.continuationText}`, { type: "text", max: 200 });
   continuation.label.classList.add("wide");
-
-  const notificationFieldset = createElement("fieldset", "compact-fieldset wide");
-  notificationFieldset.append(createElement("legend", undefined, "Notifications"));
-  const inheritRow = createElement("label", "checkbox-row");
-  const inheritNotifications = createElement("input");
-  inheritNotifications.type = "checkbox";
-  inheritNotifications.checked = chat.overrides?.notificationTriggers === undefined;
-  inheritRow.append(inheritNotifications, createElement("span", undefined, "Inherit global notification policy"));
-  notificationFieldset.append(inheritRow);
-  const notificationGrid = createElement("div", "check-grid");
-  const effectiveNotifications = chat.overrides?.notificationTriggers ?? chat.policy.notificationTriggers;
-  const notificationInputs: HTMLInputElement[] = [];
-  for (const option of NOTIFICATION_OPTIONS) {
-    const label = createElement("label");
-    const input = createElement("input");
-    input.type = "checkbox";
-    input.value = option.value;
-    input.checked = effectiveNotifications.includes(option.value);
-    input.disabled = inheritNotifications.checked;
-    label.append(input, createElement("span", undefined, option.label));
-    notificationInputs.push(input);
-    notificationGrid.append(label);
-  }
-  inheritNotifications.addEventListener("change", () => {
-    for (const input of notificationInputs) input.disabled = inheritNotifications.checked;
-  });
-  notificationFieldset.append(notificationGrid);
-
-  const overrideNote = createElement(
-    "div",
-    "override-note",
-    `AI provider: ${primaryProviderLabel()} · blank timing/text fields inherit global defaults.`,
-  );
-  const actions = createElement("div", "wide form-actions");
-  const save = createElement("button", undefined, "Save chat policy");
+  const notifications = notificationEditor(chat);
+  const note = e("div", "override-note", `AI provider: ${primaryProviderText()} · blank timing/text fields inherit global defaults.`);
+  const actions = e("div", "wide form-actions");
+  const save = e("button", undefined, "Save chat policy");
   save.type = "button";
   save.addEventListener("click", () => {
     try {
-      const continuationValue = continuation.input.value.trim();
+      const continuationText = continuation.input.value.trim();
       const patch: ChatAutomationPolicyPatch = {
-        mode: modeSelect.value as ChatAutomationMode,
-        settleDelayMs: readOptionalInteger(settle.input),
-        continueDelayMs: readOptionalInteger(continuationDelay.input),
-        cooldownMs: readOptionalInteger(cooldown.input),
-        continuationText: continuationValue.length === 0 ? null : continuationValue,
-        notificationTriggers: inheritNotifications.checked ? null : selectedNotifications(notificationInputs),
+        mode: modeControl.value as ChatAutomationMode,
+        settleDelayMs: optionalInteger(settle.input),
+        continueDelayMs: optionalInteger(continuationDelay.input),
+        cooldownMs: optionalInteger(cooldown.input),
+        continuationText: continuationText.length === 0 ? null : continuationText,
+        notificationTriggers: notifications.inherit.checked ? null : checkedNotifications(notifications.inputs),
       };
       const request: PanelAutomationPolicyUpdate = {
         type: "panel:automation-policy-update",
@@ -376,38 +317,25 @@ function createChatCard(chat: ManagedChatStatus): HTMLElement {
         conversationId: chat.conversationId as string,
         patch,
       };
-      void mutate(request, `Saving ${displayTitle(chat)}…`)
-        .catch((error: unknown) => renderStatus("Chat policy update failed.", error instanceof Error ? error.message : "Unknown error."));
+      void mutate(request, `Saving ${chatTitle(chat)}…`)
+        .catch((error: unknown) => status("Chat policy update failed.", error instanceof Error ? error.message : "Unknown error."));
     } catch (error) {
-      renderStatus("Invalid chat policy.", error instanceof Error ? error.message : "Review the timing fields.");
+      status("Invalid chat policy.", error instanceof Error ? error.message : "Review the timing fields.");
     }
   });
   actions.append(save);
-
-  controls.append(
-    modeLabelElement,
-    settle.label,
-    continuationDelay.label,
-    cooldown.label,
-    continuation.label,
-    notificationFieldset,
-    overrideNote,
-    actions,
-  );
+  controls.append(modeLabel, settle.label, continuationDelay.label, cooldown.label, continuation.label, notifications.fieldset, note, actions);
 
   card.append(head, meta);
-  const runtime = chat.runtime;
-  if (runtime !== undefined) {
-    const runtimeRow = createElement("div", "runtime-row");
-    runtimeRow.append(createElement("span", "meta", `Runtime: ${runtime.phase}`));
-    if (runtime.lastDecision !== undefined) {
-      runtimeRow.append(createElement("span", "meta", `Decision: ${runtime.lastDecision.decision}`));
-    }
-    if (runtime.phase === "SETTLING") runtimeRow.append(createElement("span", "meta", `Delay: ${chat.policy.timing.settleDelayMs} ms`));
-    if (runtime.phase === "WAITING_TO_CONTINUE") runtimeRow.append(createElement("span", "meta", `Delay: ${chat.policy.timing.continueDelayMs} ms`));
-    if (runtime.phase === "COOLDOWN") runtimeRow.append(createElement("span", "meta", `Cooldown: ${chat.policy.timing.cooldownMs} ms`));
-    card.append(runtimeRow);
-    if (runtime.reason !== undefined) card.append(createElement("div", "reason", runtime.reason));
+  if (chat.runtime !== undefined) {
+    const runtime = e("div", "runtime-row");
+    runtime.append(e("span", "meta", `Runtime: ${chat.runtime.phase}`));
+    if (chat.runtime.lastDecision !== undefined) runtime.append(e("span", "meta", `Decision: ${chat.runtime.lastDecision.decision}`));
+    if (chat.runtime.phase === "SETTLING") runtime.append(e("span", "meta", `Delay: ${chat.policy.timing.settleDelayMs} ms`));
+    if (chat.runtime.phase === "WAITING_TO_CONTINUE") runtime.append(e("span", "meta", `Delay: ${chat.policy.timing.continueDelayMs} ms`));
+    if (chat.runtime.phase === "COOLDOWN") runtime.append(e("span", "meta", `Cooldown: ${chat.policy.timing.cooldownMs} ms`));
+    card.append(runtime);
+    if (chat.runtime.reason !== undefined) card.append(e("div", "reason", chat.runtime.reason));
   }
   card.append(controls);
   return card;
@@ -421,11 +349,11 @@ function renderChats(): void {
     if (leftManaged !== rightManaged) return leftManaged ? -1 : 1;
     if (left.tabId === activeTabId) return -1;
     if (right.tabId === activeTabId) return 1;
-    return displayTitle(left).localeCompare(displayTitle(right));
+    return chatTitle(left).localeCompare(chatTitle(right));
   });
   chatCountElement.textContent = String(chats.length);
   if (chats.length === 0) {
-    chatListElement.append(createElement("div", "empty-state", "No connected ChatGPT tabs are visible to the extension."));
+    chatListElement.append(e("div", "empty-state", "No connected ChatGPT tabs are visible to the extension."));
     return;
   }
   for (const chat of chats) chatListElement.append(createChatCard(chat));
@@ -434,64 +362,83 @@ function renderChats(): void {
 function renderDefaults(): void {
   const defaults = overview?.defaults;
   if (defaults === undefined) return;
-  getNamedInput(defaultsForm, "settleDelayMs").value = String(defaults.settleDelayMs);
-  getNamedInput(defaultsForm, "continueDelayMs").value = String(defaults.continueDelayMs);
-  getNamedInput(defaultsForm, "cooldownMs").value = String(defaults.cooldownMs);
-  getNamedInput(defaultsForm, "continuationText").value = defaults.continuationText;
+  namedInput(defaultsForm, "settleDelayMs").value = String(defaults.settleDelayMs);
+  namedInput(defaultsForm, "continueDelayMs").value = String(defaults.continueDelayMs);
+  namedInput(defaultsForm, "cooldownMs").value = String(defaults.cooldownMs);
+  namedInput(defaultsForm, "continuationText").value = defaults.continuationText;
   defaultNotificationsElement.replaceChildren();
-  createNotificationChecks(defaults.notificationTriggers, "default");
+  for (const option of NOTIFICATIONS) {
+    const label = e("label");
+    const input = e("input");
+    input.type = "checkbox";
+    input.value = option.value;
+    input.checked = defaults.notificationTriggers.includes(option.value);
+    label.append(input, e("span", undefined, option.label));
+    defaultNotificationsElement.append(label);
+  }
+}
+
+function reordered(order: readonly string[], from: number, to: number): string[] {
+  const next = [...order];
+  if (from < 0 || to < 0 || from >= next.length || to >= next.length) return next;
+  const moving = next[from];
+  if (moving === undefined) return next;
+  next.splice(from, 1);
+  next.splice(to, 0, moving);
+  return next;
 }
 
 function renderProviders(): void {
   providerListElement.replaceChildren();
   const state = overview?.providers;
   if (state === undefined || state.profiles.length === 0) {
-    providerListElement.append(createElement("div", "empty-state", "No AI provider is configured. AUTO remains fail-closed on ambiguous stops."));
+    providerListElement.append(e("div", "empty-state", "No AI provider is configured. AUTO remains fail-closed on ambiguous stops."));
     return;
   }
-  const profileById = new Map(state.profiles.map((profile) => [profile.id, profile] as const));
-  const orderedIds = [...state.order, ...state.profiles.map((profile) => profile.id).filter((id) => !state.order.includes(id))];
-  orderedIds.forEach((id, index) => {
-    const profile = profileById.get(id);
-    if (profile === undefined) return;
-    const row = createElement("div", "provider-row");
-    const copy = createElement("div", "provider-copy");
-    const title = createElement("div", "meta-row");
-    title.append(createElement("strong", undefined, profile.id));
-    if (index === 0 && state.order[0] === id) addBadge(title, "Primary", "ok");
-    copy.append(
-      title,
-      createElement("div", "meta", `${profile.kind} · ${profile.model}`),
-      createElement("div", "meta", profile.endpoint),
-    );
-    const actions = createElement("div", "provider-actions");
-    const up = createElement("button", "secondary small", "↑");
+
+  const byId = new Map(state.profiles.map((profile) => [profile.id, profile] as const));
+  const ids = [...state.order, ...state.profiles.map((profile) => profile.id).filter((id) => !state.order.includes(id))];
+  for (const id of ids) {
+    const profile = byId.get(id);
+    if (profile === undefined) continue;
+    const orderIndex = state.order.indexOf(id);
+    const row = e("div", "provider-row");
+    const copy = e("div", "provider-copy");
+    const title = e("div", "meta-row");
+    title.append(e("strong", undefined, profile.id));
+    if (orderIndex === 0) badge(title, "Primary", "ok");
+    copy.append(title, e("div", "meta", `${profile.kind} · ${profile.model}`), e("div", "meta", profile.endpoint));
+
+    const actions = e("div", "provider-actions");
+    const up = e("button", "secondary small", "↑");
     up.type = "button";
     up.title = "Move provider earlier";
-    up.disabled = index === 0 || !state.order.includes(id);
+    up.disabled = orderIndex <= 0;
     up.addEventListener("click", () => {
-      const order = [...state.order];
-      const currentIndex = order.indexOf(id);
-      if (currentIndex <= 0) return;
-      [order[currentIndex - 1], order[currentIndex]] = [order[currentIndex] as string, order[currentIndex - 1] as string];
-      const request: PanelProviderOrderUpdate = { type: "panel:provider-order-update", protocolVersion: PROTOCOL_VERSION, order };
+      const request: PanelProviderOrderUpdate = {
+        type: "panel:provider-order-update",
+        protocolVersion: PROTOCOL_VERSION,
+        order: reordered(state.order, orderIndex, orderIndex - 1),
+      };
       void mutate(request, "Updating provider priority…")
-        .catch((error: unknown) => renderStatus("Provider update failed.", error instanceof Error ? error.message : "Unknown error."));
+        .catch((error: unknown) => status("Provider update failed.", error instanceof Error ? error.message : "Unknown error."));
     });
-    const down = createElement("button", "secondary small", "↓");
+
+    const down = e("button", "secondary small", "↓");
     down.type = "button";
     down.title = "Move provider later";
-    down.disabled = !state.order.includes(id) || state.order.indexOf(id) === state.order.length - 1;
+    down.disabled = orderIndex < 0 || orderIndex >= state.order.length - 1;
     down.addEventListener("click", () => {
-      const order = [...state.order];
-      const currentIndex = order.indexOf(id);
-      if (currentIndex < 0 || currentIndex >= order.length - 1) return;
-      [order[currentIndex], order[currentIndex + 1]] = [order[currentIndex + 1] as string, order[currentIndex] as string];
-      const request: PanelProviderOrderUpdate = { type: "panel:provider-order-update", protocolVersion: PROTOCOL_VERSION, order };
+      const request: PanelProviderOrderUpdate = {
+        type: "panel:provider-order-update",
+        protocolVersion: PROTOCOL_VERSION,
+        order: reordered(state.order, orderIndex, orderIndex + 1),
+      };
       void mutate(request, "Updating provider priority…")
-        .catch((error: unknown) => renderStatus("Provider update failed.", error instanceof Error ? error.message : "Unknown error."));
+        .catch((error: unknown) => status("Provider update failed.", error instanceof Error ? error.message : "Unknown error."));
     });
-    const remove = createElement("button", "secondary small", "Remove");
+
+    const remove = e("button", "secondary small", "Remove");
     remove.type = "button";
     remove.addEventListener("click", () => {
       if (!window.confirm(`Remove provider profile ${profile.id}? The stored API key for this profile will be deleted.`)) return;
@@ -501,22 +448,18 @@ function renderProviders(): void {
         providerId: profile.id,
       };
       void mutate(request, `Removing ${profile.id}…`)
-        .catch((error: unknown) => renderStatus("Provider removal failed.", error instanceof Error ? error.message : "Unknown error."));
+        .catch((error: unknown) => status("Provider removal failed.", error instanceof Error ? error.message : "Unknown error."));
     });
     actions.append(up, down, remove);
     row.append(copy, actions);
     providerListElement.append(row);
-  });
-}
-
-function renderPauseAll(): void {
-  const paused = overview?.emergencyPaused === true;
-  pauseAllButton.textContent = paused ? "Resume All" : "Pause All";
-  pauseAllButton.className = paused ? "secondary" : "danger";
+  }
 }
 
 function renderAll(): void {
-  renderPauseAll();
+  const paused = overview?.emergencyPaused === true;
+  pauseAllButton.textContent = paused ? "Resume All" : "Pause All";
+  pauseAllButton.className = paused ? "secondary" : "danger";
   renderCurrentTab();
   renderChats();
   renderDefaults();
@@ -531,48 +474,45 @@ async function refreshOverview(): Promise<void> {
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
     activeTabId = activeTab?.id;
     const request: PanelOverviewRequest = { type: "panel:overview-request", protocolVersion: PROTOCOL_VERSION };
-    const response = assertSuccess(await send(request));
+    const response = requireSuccess(await send(request));
     if (response.type !== "background:overview") throw new Error("The service worker returned an unexpected overview response.");
     overview = response;
     renderAll();
-    const managedCount = response.chats.filter((chat) => chat.policy?.mode !== undefined && chat.policy.mode !== "OFF").length;
-    renderStatus(
+    const managed = response.chats.filter((chat) => chat.policy?.mode !== undefined && chat.policy.mode !== "OFF").length;
+    status(
       response.emergencyPaused ? "All automatic sends are paused." : "Guardian is ready.",
-      `${managedCount} managed of ${response.chats.length} connected chat tab${response.chats.length === 1 ? "" : "s"}.`,
+      `${managed} managed of ${response.chats.length} connected chat tab${response.chats.length === 1 ? "" : "s"}.`,
     );
   } catch (error) {
-    renderStatus("Management state unavailable.", error instanceof Error ? error.message : "The service worker could not answer the request.");
+    status("Management state unavailable.", error instanceof Error ? error.message : "The service worker could not answer the request.");
   } finally {
     refreshing = false;
     refreshButton.disabled = false;
   }
 }
 
-refreshButton.addEventListener("click", () => {
-  void refreshOverview();
-});
+refreshButton.addEventListener("click", () => void refreshOverview());
 
 pauseAllButton.addEventListener("click", () => {
-  const paused = overview?.emergencyPaused === true;
   const request: PanelEmergencyPauseUpdate = {
     type: "panel:emergency-pause-update",
     protocolVersion: PROTOCOL_VERSION,
-    paused: !paused,
+    paused: overview?.emergencyPaused !== true,
   };
-  void mutate(request, paused ? "Resuming automatic supervision…" : "Pausing all automatic sends…")
-    .catch((error: unknown) => renderStatus("Pause update failed.", error instanceof Error ? error.message : "Unknown error."));
+  void mutate(request, overview?.emergencyPaused === true ? "Resuming automatic supervision…" : "Pausing all automatic sends…")
+    .catch((error: unknown) => status("Pause update failed.", error instanceof Error ? error.message : "Unknown error."));
 });
 
 defaultsForm.addEventListener("submit", (event) => {
   event.preventDefault();
   try {
-    const notificationInputs = [...defaultNotificationsElement.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
+    const notificationInputs = Array.from(defaultNotificationsElement.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'));
     const patch: Partial<AutomationPolicyDefaults> = {
-      settleDelayMs: readRequiredInteger(defaultsForm, "settleDelayMs"),
-      continueDelayMs: readRequiredInteger(defaultsForm, "continueDelayMs"),
-      cooldownMs: readRequiredInteger(defaultsForm, "cooldownMs"),
-      continuationText: getNamedInput(defaultsForm, "continuationText").value.trim(),
-      notificationTriggers: selectedNotifications(notificationInputs),
+      settleDelayMs: requiredInteger(defaultsForm, "settleDelayMs"),
+      continueDelayMs: requiredInteger(defaultsForm, "continueDelayMs"),
+      cooldownMs: requiredInteger(defaultsForm, "cooldownMs"),
+      continuationText: namedInput(defaultsForm, "continuationText").value.trim(),
+      notificationTriggers: checkedNotifications(notificationInputs),
     };
     const request: PanelAutomationDefaultsUpdate = {
       type: "panel:automation-defaults-update",
@@ -580,39 +520,38 @@ defaultsForm.addEventListener("submit", (event) => {
       patch,
     };
     void mutate(request, "Saving global defaults…")
-      .catch((error: unknown) => renderStatus("Default update failed.", error instanceof Error ? error.message : "Unknown error."));
+      .catch((error: unknown) => status("Default update failed.", error instanceof Error ? error.message : "Unknown error."));
   } catch (error) {
-    renderStatus("Invalid global defaults.", error instanceof Error ? error.message : "Review the form values.");
+    status("Invalid global defaults.", error instanceof Error ? error.message : "Review the form values.");
   }
 });
 
-function syncProviderFormKind(): void {
-  const kind = getNamedSelect(providerForm, "kind").value;
-  const baseUrl = getNamedInput(providerForm, "baseUrl");
-  const generic = kind === "OPENAI_COMPATIBLE";
+function syncProviderKind(): void {
+  const generic = namedSelect(providerForm, "kind").value === "OPENAI_COMPATIBLE";
   providerBaseUrlField.hidden = !generic;
-  baseUrl.required = generic;
+  namedInput(providerForm, "baseUrl").required = generic;
 }
 
-getNamedSelect(providerForm, "kind").addEventListener("change", syncProviderFormKind);
-syncProviderFormKind();
+namedSelect(providerForm, "kind").addEventListener("change", syncProviderKind);
+syncProviderKind();
 
 providerForm.addEventListener("submit", (event) => {
   event.preventDefault();
   try {
-    const kind = getNamedSelect(providerForm, "kind").value;
-    const id = getNamedInput(providerForm, "id").value.trim();
-    const model = getNamedInput(providerForm, "model").value.trim();
-    const apiKeyInput = getNamedInput(providerForm, "apiKey");
+    const kind = namedSelect(providerForm, "kind").value;
+    const id = namedInput(providerForm, "id").value.trim();
+    const model = namedInput(providerForm, "model").value.trim();
+    const apiKeyInput = namedInput(providerForm, "apiKey");
     const apiKey = apiKeyInput.value.trim();
-    const makePrimary = getNamedInput(providerForm, "makePrimary").checked;
+    const makePrimary = namedInput(providerForm, "makePrimary").checked;
     let profile: ProviderProfile;
     let originPattern: string;
+
     if (kind === "OPENROUTER") {
       profile = { kind: "OPENROUTER", id, model, apiKey };
       originPattern = "https://openrouter.ai/*";
     } else if (kind === "OPENAI_COMPATIBLE") {
-      const baseUrl = getNamedInput(providerForm, "baseUrl").value.trim();
+      const baseUrl = namedInput(providerForm, "baseUrl").value.trim();
       const url = new URL(baseUrl);
       if (url.protocol !== "https:") throw new Error("Provider base URL must use HTTPS.");
       profile = { kind: "OPENAI_COMPATIBLE", id, model, apiKey, baseUrl };
@@ -632,11 +571,9 @@ providerForm.addEventListener("submit", (event) => {
       };
       await mutate(request, `Saving provider ${id}…`);
       apiKeyInput.value = "";
-    })().catch((error: unknown) => {
-      renderStatus("Provider setup failed.", error instanceof Error ? error.message : "Unknown error.");
-    });
+    })().catch((error: unknown) => status("Provider setup failed.", error instanceof Error ? error.message : "Unknown error."));
   } catch (error) {
-    renderStatus("Invalid provider configuration.", error instanceof Error ? error.message : "Review the provider form.");
+    status("Invalid provider configuration.", error instanceof Error ? error.message : "Review the provider form.");
   }
 });
 
