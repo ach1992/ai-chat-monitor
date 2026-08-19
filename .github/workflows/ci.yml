@@ -20,3 +20,15 @@ jobs:
       - run: npm ci
       - run: npm run validate
       - run: npm run smoke:extension
+      - run: npm run package
+      - name: Verify release ZIP
+        run: |
+          unzip -t artifacts/chat-turn-guardian-*.zip
+          test "$(unzip -Z1 artifacts/chat-turn-guardian-*.zip | grep -c '^manifest.json$')" -eq 1
+          test "$(unzip -Z1 artifacts/chat-turn-guardian-*.zip | grep -Ec '\.(ts|map)$|(^|/)\.env($|\.)')" -eq 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chat-turn-guardian-${{ github.sha }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14

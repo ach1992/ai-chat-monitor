@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
+    "package": "node scripts/package.mjs",
     "dev": "node scripts/dev.mjs",
     "typecheck": "tsc -p tsconfig.build.json --noEmit && tsc -p tsconfig.content.json --noEmit",
     "lint": "node scripts/lint.mjs",

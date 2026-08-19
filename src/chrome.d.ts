@@ -74,6 +74,7 @@ declare namespace chrome {
 
     function request(permissions: Permissions): Promise<boolean>;
     function contains(permissions: Permissions): Promise<boolean>;
+    function remove(permissions: Permissions): Promise<boolean>;
   }
 
   namespace notifications {

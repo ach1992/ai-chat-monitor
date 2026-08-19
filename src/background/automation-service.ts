@@ -16,6 +16,7 @@ import {
 import { ConservativeStopClassifier } from "../classification/classifier.js";
 import type { SessionView } from "../core/session-registry.js";
 import { createProviderManager } from "../providers/manager.js";
+import { providerOriginPattern } from "../providers/settings.js";
 import { ProviderSettingsStore } from "../providers/settings-store.js";
 import type { ProviderProfile, ProviderSettingsState } from "../providers/types.js";
 import { AuditHistoryRepository, type AuditEvent, type AuditHistoryState } from "../reliability/audit.js";
@@ -42,6 +43,7 @@ export class AutomationService {
   readonly #providerSettings = new ProviderSettingsStore();
   readonly #ready: Promise<void>;
   #policyWritesInFlight = 0;
+  #providerMutationQueue: Promise<void> = Promise.resolve();
 
   constructor(
     getSession: (tabId: number) => SessionView | undefined,
@@ -191,12 +193,13 @@ export class AutomationService {
 
   async providerSettings(): Promise<ProviderSettingsState> {
     await this.#ready;
+    await this.#providerMutationQueue;
     return this.#providerSettings.load();
   }
 
   async upsertProviderProfile(profile: ProviderProfile, makePrimary = false): Promise<ProviderSettingsState> {
     await this.#ready;
-    const saved = await this.#withPolicyWrite(async () => {
+    const { before, saved } = await this.#withPolicyWrite(() => this.#withProviderWrite(async () => {
       this.#invalidateAll("Provider settings changed; pending classifier decisions were cancelled before persistence.");
       const current = await this.#providerSettings.load();
       const profiles = current.profiles.filter((candidate) => candidate.id !== profile.id);
@@ -210,15 +213,16 @@ export class AutomationService {
           : [...withoutProfile, profile.id];
       const next: ProviderSettingsState = { version: 1, profiles, order };
       await this.#providerSettings.save(next);
-      return this.#providerSettings.load();
-    });
+      return { before: current, saved: await this.#providerSettings.load() };
+    }));
+    await this.#releaseUnusedProviderOrigins(before, saved);
     this.#rehydrateKnownSessions();
     return saved;
   }
 
   async removeProviderProfile(providerId: string): Promise<ProviderSettingsState> {
     await this.#ready;
-    const saved = await this.#withPolicyWrite(async () => {
+    const { before, saved } = await this.#withPolicyWrite(() => this.#withProviderWrite(async () => {
       this.#invalidateAll("Provider settings changed; pending classifier decisions were cancelled before persistence.");
       const current = await this.#providerSettings.load();
       const next: ProviderSettingsState = {
@@ -227,21 +231,22 @@ export class AutomationService {
         order: current.order.filter((id) => id !== providerId),
       };
       await this.#providerSettings.save(next);
-      return this.#providerSettings.load();
-    });
+      return { before: current, saved: await this.#providerSettings.load() };
+    }));
+    await this.#releaseUnusedProviderOrigins(before, saved);
     this.#rehydrateKnownSessions();
     return saved;
   }
 
   async updateProviderOrder(order: string[]): Promise<ProviderSettingsState> {
     await this.#ready;
-    const saved = await this.#withPolicyWrite(async () => {
+    const saved = await this.#withPolicyWrite(() => this.#withProviderWrite(async () => {
       this.#invalidateAll("Provider priority changed; pending classifier decisions were cancelled before persistence.");
       const current = await this.#providerSettings.load();
       const next: ProviderSettingsState = { ...current, order: [...order] };
       await this.#providerSettings.save(next);
       return this.#providerSettings.load();
-    });
+    }));
     this.#rehydrateKnownSessions();
     return saved;
   }
@@ -353,6 +358,18 @@ export class AutomationService {
     return undefined;
   }
 
+  async #releaseUnusedProviderOrigins(before: ProviderSettingsState, after: ProviderSettingsState): Promise<void> {
+    const needed = new Set(after.profiles.map(providerOriginPattern));
+    const stale = [...new Set(before.profiles.map(providerOriginPattern))].filter((origin) => !needed.has(origin));
+    for (const origin of stale) {
+      try {
+        await chrome.permissions.remove({ origins: [origin] });
+      } catch {
+        // Permission cleanup is defense in depth and must not roll back an already-persisted config change.
+      }
+    }
+  }
+
   #invalidateAll(reason: string): void {
     const conversations = new Set(
       this.#coordinator.statuses()
@@ -372,6 +389,12 @@ export class AutomationService {
         this.#reliability.captureSession(session);
       }
     }
+  }
+
+  async #withProviderWrite<T>(operation: () => Promise<T>): Promise<T> {
+    const run = this.#providerMutationQueue.then(operation, operation);
+    this.#providerMutationQueue = run.then(() => undefined, () => undefined);
+    return run;
   }
 
   async #withPolicyWrite<T>(operation: () => Promise<T>): Promise<T> {
