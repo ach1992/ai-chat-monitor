@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ensureCurrentTabConnected, isSupportedChatGptUrl } from "../dist/sidepanel/current-tab.js";
+import {
+  desiredCurrentTabMode,
+  ensureCurrentTabConnected,
+  isSupportedChatGptUrl,
+  shouldRefreshCurrentTabForUpdate,
+} from "../dist/sidepanel/current-tab.js";
 
 test("supported ChatGPT URL detection is exact and fail-closed", () => {
   assert.equal(isSupportedChatGptUrl("https://chatgpt.com/c/abc"), true);
@@ -9,6 +14,25 @@ test("supported ChatGPT URL detection is exact and fail-closed", () => {
   assert.equal(isSupportedChatGptUrl("https://evil.chatgpt.com/c/abc"), false);
   assert.equal(isSupportedChatGptUrl("https://example.com/?next=https://chatgpt.com"), false);
   assert.equal(isSupportedChatGptUrl(undefined), false);
+});
+
+test("current-tab ON starts in OBSERVE, preserves advanced modes, and OFF always disables", () => {
+  assert.equal(desiredCurrentTabMode("OFF", true), "OBSERVE");
+  assert.equal(desiredCurrentTabMode("OBSERVE", true), "OBSERVE");
+  assert.equal(desiredCurrentTabMode("AUTO", true), "AUTO");
+  assert.equal(desiredCurrentTabMode("NOTIFY_ONLY", true), "NOTIFY_ONLY");
+  assert.equal(desiredCurrentTabMode("OBSERVE", false), "OFF");
+  assert.equal(desiredCurrentTabMode("AUTO", false), "OFF");
+  assert.equal(desiredCurrentTabMode("NOTIFY_ONLY", false), "OFF");
+});
+
+test("reactive tab refresh only follows meaningful updates for the active tab", () => {
+  assert.equal(shouldRefreshCurrentTabForUpdate(7, 7, { status: "loading" }), true);
+  assert.equal(shouldRefreshCurrentTabForUpdate(7, 7, { status: "complete" }), true);
+  assert.equal(shouldRefreshCurrentTabForUpdate(7, 7, { url: "https://chatgpt.com/c/new" }), true);
+  assert.equal(shouldRefreshCurrentTabForUpdate(7, 8, { status: "complete" }), false);
+  assert.equal(shouldRefreshCurrentTabForUpdate(7, 7, {}), false);
+  assert.equal(shouldRefreshCurrentTabForUpdate(undefined, 7, { status: "complete" }), false);
 });
 
 test("already connected exact tab does not reload or reconnect", async () => {
