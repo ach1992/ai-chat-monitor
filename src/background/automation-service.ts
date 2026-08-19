@@ -6,7 +6,13 @@ import {
   type AutomationPolicyState,
   type ChatAutomationPolicyPatch,
 } from "../automation/policy.js";
-import { isGuardedSendResult, type AutomationRuntimeStatus, type GuardedSendResult, type ResolvedAutomationPolicy } from "../automation/types.js";
+import {
+  isGuardedSendResult,
+  type AutomationDecisionEnvelope,
+  type AutomationRuntimeStatus,
+  type GuardedSendResult,
+  type ResolvedAutomationPolicy,
+} from "../automation/types.js";
 import { ConservativeStopClassifier } from "../classification/classifier.js";
 import type { SessionView } from "../core/session-registry.js";
 import { createProviderManager } from "../providers/manager.js";
@@ -261,7 +267,7 @@ export class AutomationService {
 
   policySnapshot(): AutomationPolicyState { return this.#policies.snapshot(); }
 
-  async #guardContinuation(envelope: Parameters<AutomationCoordinator["status"]>[0] extends never ? never : import("../automation/types.js").AutomationDecisionEnvelope): Promise<GuardedSendResult | undefined> {
+  async #guardContinuation(envelope: AutomationDecisionEnvelope): Promise<GuardedSendResult | undefined> {
     const session = this.#getSession(envelope.tabId);
     const assistant = session?.observation?.latestAssistant;
     if (
