@@ -9,6 +9,7 @@ import {
 import {
   currentTabIdentityMatches,
   currentTabRouteMatchesChat,
+  directCurrentTabMode,
   desiredCurrentTabMode,
   ensureCurrentTabConnected,
   shouldRefreshCurrentTabForUpdate,
@@ -163,20 +164,6 @@ async function updateCurrentTabMode(
   requireSuccess(await chrome.runtime.sendMessage<GuardianResponse>(request));
 }
 
-async function tryDirectDisable(tabId: number, conversationId: string): Promise<boolean> {
-  const request: PanelAutomationPolicyUpdate = {
-    type: "panel:automation-policy-update",
-    protocolVersion: PROTOCOL_VERSION,
-    tabId,
-    conversationId,
-    patch: { mode: "OFF" },
-  };
-  const response = await chrome.runtime.sendMessage<GuardianResponse>(request);
-  if (response.type !== "background:error") return true;
-  if (response.code === "INVALID_MESSAGE") return false;
-  throw new Error(response.message);
-}
-
 function primaryProviderText(overview: PanelOverviewResponse): string {
   const primaryId = overview.providers.order[0];
   if (primaryId === undefined) return "No AI provider configured";
@@ -280,7 +267,7 @@ function renderCurrentTab(state: CurrentTabState): void {
   toggle.disabled = currentTabBusy;
   toggle.setAttribute("aria-pressed", String(enabled));
   toggle.addEventListener("click", () => {
-    void setCurrentTabEnabled(tabId, !enabled, routeKey, currentConversationId);
+    void setCurrentTabEnabled(tabId, !enabled, routeKey, currentConversationId, mode, state.identityCurrent);
   });
   actions.append(toggle);
   if (enabled && !state.identityCurrent) {
@@ -312,17 +299,21 @@ async function setCurrentTabEnabled(
   enabled: boolean,
   expectedRouteKey: string,
   knownConversationId: string | undefined,
+  knownMode: "OFF" | "OBSERVE" | "AUTO" | "NOTIFY_ONLY",
+  identityCurrent: boolean,
 ): Promise<void> {
   if (currentTabBusy) return;
   currentTabBusy = true;
-  status(enabled ? "Turning Guardian ON..." : "Turning Guardian OFF...", "Exact tab and conversation identity are revalidated before the policy changes.");
+  status(enabled ? "Turning Guardian ON..." : "Turning Guardian OFF...", "Current conversation identity is revalidated before the policy changes.");
   try {
-    if (!enabled && knownConversationId !== undefined) {
-      const disabled = await tryDirectDisable(tabId, knownConversationId);
-      if (disabled) {
-        status("Guardian is OFF for this tab.", "Supervision is disabled for this conversation.");
-        return;
-      }
+    const directMode = directCurrentTabMode(knownMode, enabled, identityCurrent, knownConversationId);
+    if (directMode !== undefined && knownConversationId !== undefined) {
+      if (directMode !== knownMode) await updateCurrentTabMode(tabId, knownConversationId, directMode);
+      status(
+        enabled ? "Guardian is ON for this tab." : "Guardian is OFF for this tab.",
+        enabled ? `Mode: ${modeLabel(directMode)}. Advanced modes remain per-conversation.` : "Supervision is disabled for this conversation.",
+      );
+      return;
     }
 
     const chat = await ensureConnected(tabId, expectedRouteKey);

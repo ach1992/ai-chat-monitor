@@ -168,9 +168,12 @@
             </label>
             <label class="wide">
               <span>Model</span>
-              <input data-provider-model-v2 type="text" maxlength="200" list="provider-model-catalog-v2" autocomplete="off" required />
-              <datalist id="provider-model-catalog-v2" data-provider-model-list-v2></datalist>
+              <input data-provider-model-v2 type="text" maxlength="200" autocomplete="off" required />
             </label>
+            <div class="wide model-catalog-field" data-provider-model-catalog-field-v2 hidden>
+              <span class="meta">Loaded model catalog suggestions</span>
+              <select data-provider-model-list-v2 class="model-catalog-list" size="8" aria-label="Loaded model catalog suggestions"></select>
+            </div>
             <div class="wide catalog-controls">
               <button type="button" class="secondary" data-provider-load-models-v2>Load models</button>
               <label data-provider-filter-field-v2>

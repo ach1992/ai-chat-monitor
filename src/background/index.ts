@@ -9,6 +9,7 @@ import {
   isPanelAutomationPolicyUpdate,
   isPanelEmergencyPauseUpdate,
   isPanelOverviewRequest,
+  isPanelProviderClassifierReadinessRequest,
   isPanelProviderModelCatalogRequest,
   isPanelProviderOrderUpdate,
   isPanelProviderProfileRemove,
@@ -26,6 +27,7 @@ import {
   type PanelAutomationPolicyUpdate,
   type PanelEmergencyPauseUpdate,
   type PanelOverviewResponse,
+  type PanelProviderClassifierReadinessRequest,
   type PanelProviderModelCatalogRequest,
   type PanelProviderOrderUpdate,
   type PanelProviderProfileRemove,
@@ -40,6 +42,7 @@ import {
   type SessionRegistryState,
 } from "../core/session-registry.js";
 import { ProviderConfigurationError, redactProviderProfile } from "../providers/settings.js";
+import { testProviderClassifierReadiness } from "../providers/readiness.js";
 import { ProviderFailure, type ProviderSettingsState } from "../providers/types.js";
 import {
   createEphemeralStorage,
@@ -379,6 +382,27 @@ async function handleProviderModelCatalog(message: PanelProviderModelCatalogRequ
   }
 }
 
+async function handleProviderClassifierReadiness(
+  message: PanelProviderClassifierReadinessRequest,
+  sender: chrome.runtime.MessageSender,
+): Promise<GuardianResponse> {
+  if (!trustedExtensionSender(sender)) {
+    return protocolError("INVALID_SENDER", "Only trusted extension pages may test provider classifier readiness.");
+  }
+  try {
+    const settings = await automation.providerSettings();
+    const profile = settings.profiles.find((candidate) => candidate.id === message.providerId);
+    if (profile === undefined) return protocolError("INVALID_MESSAGE", "The selected provider profile is not configured.");
+    return {
+      type: "background:provider-classifier-readiness",
+      protocolVersion: PROTOCOL_VERSION,
+      result: await testProviderClassifierReadiness(profile),
+    };
+  } catch {
+    return protocolError("PROVIDER_FAILURE", "Unable to test provider classifier readiness.");
+  }
+}
+
 async function handleProviderProfileRemove(message: PanelProviderProfileRemove, sender: chrome.runtime.MessageSender): Promise<GuardianResponse> {
   if (!trustedExtensionSender(sender)) return protocolError("INVALID_SENDER", "Only trusted extension pages may change provider settings.");
   try {
@@ -421,6 +445,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (isPanelEmergencyPauseUpdate(message)) { void handleEmergencyPauseUpdate(message, sender).then(sendResponse); return true; }
   if (isPanelProviderProfileUpsert(message)) { void handleProviderProfileUpsert(message, sender).then(sendResponse); return true; }
   if (isPanelProviderModelCatalogRequest(message)) { void handleProviderModelCatalog(message, sender).then(sendResponse); return true; }
+  if (isPanelProviderClassifierReadinessRequest(message)) { void handleProviderClassifierReadiness(message, sender).then(sendResponse); return true; }
   if (isPanelProviderProfileRemove(message)) { void handleProviderProfileRemove(message, sender).then(sendResponse); return true; }
   if (isPanelProviderOrderUpdate(message)) { void handleProviderOrderUpdate(message, sender).then(sendResponse); return true; }
   if (isPanelAuditClear(message)) { void handleAuditClear(sender).then(sendResponse); return true; }

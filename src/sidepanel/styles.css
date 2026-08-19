@@ -33,7 +33,7 @@ h3 { font-size: 0.95rem; }
 .eyebrow { margin-bottom: 0.2rem; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); }
 .lede, .section-note, .footer-note, .meta, .reason, .empty-state, .current-help { color: var(--muted); font-size: 0.82rem; line-height: 1.4; }
 
-.status-card, .panel-section, .chat-card, .provider-row, .current-card, .reliability-row, .audit-row { border: 1px solid var(--border); border-radius: 0.85rem; background: var(--surface); }
+.status-card, .panel-section, .chat-card, .chat-card-disclosure, .provider-row, .current-card, .reliability-row, .audit-row { border: 1px solid var(--border); border-radius: 0.85rem; background: var(--surface); }
 .status-card { display: grid; gap: 0.25rem; padding: 0.75rem; }
 .panel-section { display: grid; gap: 0.7rem; padding: 0.8rem; }
 .count-pill, .badge { display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: 999px; padding: 0.16rem 0.45rem; font-size: 0.7rem; font-weight: 800; white-space: nowrap; }
@@ -62,7 +62,15 @@ h3 { font-size: 0.95rem; }
 
 .chat-list, .provider-list, .reliability-list, .audit-list { display: grid; gap: 0.65rem; }
 .chat-card, .current-card { display: grid; gap: 0.65rem; padding: 0.7rem; }
-.chat-card[data-managed="false"] { opacity: 0.78; }
+.chat-card[data-managed="false"], .chat-card-disclosure[data-managed="false"] { opacity: 0.78; }
+.chat-card-disclosure { overflow: hidden; }
+.chat-card-disclosure > summary { cursor: pointer; list-style: none; display: grid; gap: 0.45rem; padding: 0.7rem; }
+.chat-card-disclosure > summary::-webkit-details-marker { display: none; }
+.chat-card-disclosure > summary::after { content: "Expand"; justify-self: end; color: var(--muted); font-size: 0.72rem; font-weight: 800; }
+.chat-card-disclosure[open] > summary::after { content: "Collapse"; }
+.chat-card-disclosure > .chat-card { border: 0; border-top: 1px solid var(--border); border-radius: 0; background: transparent; opacity: 1; }
+.chat-card-disclosure > .chat-card > .chat-card-head:first-child,
+.chat-card-disclosure > .chat-card > .meta-row:nth-child(2) { display: none; }
 .title-block { min-width: 0; }
 .chat-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .meta-row, .runtime-row { display: flex; flex-wrap: wrap; gap: 0.35rem 0.55rem; align-items: center; }
@@ -93,6 +101,8 @@ h3 { font-size: 0.95rem; }
 .fixed-endpoint { min-height: 2.25rem; display: flex; align-items: center; padding: 0.5rem 0.6rem; border: 1px dashed var(--border); border-radius: 0.65rem; color: var(--muted); font-size: 0.78rem; overflow-wrap: anywhere; }
 .catalog-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.55rem; align-items: end; }
 .catalog-controls label { display: grid; gap: 0.3rem; }
+.model-catalog-field { display: grid; gap: 0.3rem; }
+.model-catalog-list { max-height: 14rem; overflow-y: auto; }
 .provider-editor-actions { gap: 0.5rem; }
 .provider-editor-actions button { min-width: 7rem; }
 

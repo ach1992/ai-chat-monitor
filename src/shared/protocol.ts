@@ -17,6 +17,7 @@ import {
 } from "../providers/settings.js";
 import type {
   ProviderCatalogSpec,
+  ProviderClassifierReadinessResult,
   ProviderModelCatalogEntry,
   ProviderProfileMutation,
 } from "../providers/types.js";
@@ -104,6 +105,12 @@ export interface PanelProviderModelCatalogRequest {
   type: "panel:provider-model-catalog-request";
   protocolVersion: typeof PROTOCOL_VERSION;
   spec: ProviderCatalogSpec;
+}
+
+export interface PanelProviderClassifierReadinessRequest {
+  type: "panel:provider-classifier-readiness-request";
+  protocolVersion: typeof PROTOCOL_VERSION;
+  providerId: string;
 }
 
 export interface PanelProviderProfileRemove {
@@ -196,6 +203,12 @@ export interface ProviderModelCatalogResponse {
   models: ProviderModelCatalogEntry[];
 }
 
+export interface ProviderClassifierReadinessResponse {
+  type: "background:provider-classifier-readiness";
+  protocolVersion: typeof PROTOCOL_VERSION;
+  result: ProviderClassifierReadinessResult;
+}
+
 export interface AuditClearResponse {
   type: "background:audit-cleared";
   protocolVersion: typeof PROTOCOL_VERSION;
@@ -220,6 +233,7 @@ export type GuardianRequest =
   | PanelEmergencyPauseUpdate
   | PanelProviderProfileUpsert
   | PanelProviderModelCatalogRequest
+  | PanelProviderClassifierReadinessRequest
   | PanelProviderProfileRemove
   | PanelProviderOrderUpdate
   | PanelAuditClear;
@@ -231,6 +245,7 @@ export type GuardianResponse =
   | AutomationPolicyResponse
   | ProviderSettingsResponse
   | ProviderModelCatalogResponse
+  | ProviderClassifierReadinessResponse
   | AuditClearResponse
   | ProtocolErrorResponse;
 
@@ -410,6 +425,15 @@ export function isPanelProviderModelCatalogRequest(value: unknown): value is Pan
     hasProtocolVersion(value) &&
     value.type === "panel:provider-model-catalog-request" &&
     isProviderCatalogSpec(value.spec)
+  );
+}
+
+export function isPanelProviderClassifierReadinessRequest(value: unknown): value is PanelProviderClassifierReadinessRequest {
+  return (
+    isRecord(value) &&
+    hasProtocolVersion(value) &&
+    value.type === "panel:provider-classifier-readiness-request" &&
+    isProviderId(value.providerId)
   );
 }
 

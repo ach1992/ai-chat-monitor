@@ -341,6 +341,24 @@ function createChatCard(chat: ManagedChatStatus): HTMLElement {
   return card;
 }
 
+function createChatDisclosure(chat: ManagedChatStatus): HTMLDetailsElement {
+  const disclosure = e("details", "chat-card-disclosure");
+  const mode = chat.policy?.mode ?? "OFF";
+  disclosure.dataset.managed = String(mode !== "OFF");
+
+  const summary = e("summary", "chat-card-disclosure-summary");
+  const title = e("div", "title-block");
+  title.append(e("h3", "chat-title", chatTitle(chat)), e("div", "meta", `Tab ${chat.tabId} · ${shortId(chat.conversationId)}`));
+  const meta = e("div", "meta-row");
+  badge(meta, modeText(mode), mode === "AUTO" ? "ok" : undefined);
+  badge(meta, chat.controlEligibility, chat.controlEligibility === "OWNER" ? "ok" : chat.controlEligibility === "MIRROR" ? "warn" : undefined);
+  if (chat.generation !== undefined) badge(meta, chat.generation);
+  if (chat.runtime !== undefined) badge(meta, chat.runtime.phase, chat.runtime.phase === "AMBIGUOUS_WRITE" ? "warn" : undefined);
+  summary.append(title, meta);
+  disclosure.append(summary, createChatCard(chat));
+  return disclosure;
+}
+
 function renderChats(): void {
   chatListElement.replaceChildren();
   const chats = [...(overview?.chats ?? [])].sort((left, right) => {
@@ -356,7 +374,7 @@ function renderChats(): void {
     chatListElement.append(e("div", "empty-state", "No connected ChatGPT tabs are visible to the extension."));
     return;
   }
-  for (const chat of chats) chatListElement.append(createChatCard(chat));
+  for (const chat of chats) chatListElement.append(createChatDisclosure(chat));
 }
 
 function renderDefaults(): void {
