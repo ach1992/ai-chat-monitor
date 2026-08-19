@@ -51,8 +51,9 @@ test("Side Panel live-hardening UX is wired without broadening browser authority
 
   assert.match(html, /id="provider-editor-v2"[^>]*hidden/);
   assert.match(html, /data-provider-add-v2[^>]*aria-expanded="false"/);
-  assert.match(html, /pattern="\[-A-Za-z0-9_\]\+"/);
+  assert.match(html, /pattern="\[A-Za-z0-9_\\-\]\+"/);
   assert.doesNotMatch(html, /pattern="\[A-Za-z0-9_-\]\+"/);
+  assert.doesNotMatch(html, /pattern="\[-A-Za-z0-9_\]\+"/);
   assert.doesNotMatch(html, /availability\.js/);
 
   const listIndex = html.indexOf("data-provider-list-v2");
