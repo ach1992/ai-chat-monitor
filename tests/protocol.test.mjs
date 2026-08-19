@@ -9,6 +9,8 @@ import {
   isPanelAuditClear,
   isPanelAutomationDefaultsUpdate,
   isPanelAutomationPolicyUpdate,
+  isPanelProviderModelCatalogRequest,
+  isPanelProviderProfileUpsert,
   isPanelStatusRequest,
 } from "../dist/shared/protocol.js";
 
@@ -64,6 +66,47 @@ test("observation validates bounded normalized response metadata", () => {
 test("panel status requests reject invalid tab identities", () => {
   assert.equal(isPanelStatusRequest({ type: "panel:status-request", protocolVersion: PROTOCOL_VERSION, tabId: 42 }), true);
   assert.equal(isPanelStatusRequest({ type: "panel:status-request", protocolVersion: PROTOCOL_VERSION, tabId: -1 }), false);
+});
+
+test("provider profile mutations allow blank-key edits but reject invalid provider shapes", () => {
+  assert.equal(isPanelProviderProfileUpsert({
+    type: "panel:provider-profile-upsert",
+    protocolVersion: PROTOCOL_VERSION,
+    profile: { kind: "NARAROUTER", id: "nara", model: "saved-alias", apiKey: "" },
+  }), true);
+  assert.equal(isPanelProviderProfileUpsert({
+    type: "panel:provider-profile-upsert",
+    protocolVersion: PROTOCOL_VERSION,
+    profile: { kind: "OPENAI_COMPATIBLE", id: "generic", model: "manual", baseUrl: "http://insecure.example/v1", apiKey: "secret" },
+  }), false);
+  assert.equal(isPanelProviderProfileUpsert({
+    type: "panel:provider-profile-upsert",
+    protocolVersion: PROTOCOL_VERSION,
+    profile: { kind: "NARAROUTER", id: "nara", model: "saved", apiKey: "secret", baseUrl: "https://attacker.example/v1" },
+  }), false);
+});
+
+test("provider catalog requests validate fixed presets and generic HTTPS discovery", () => {
+  assert.equal(isPanelProviderModelCatalogRequest({
+    type: "panel:provider-model-catalog-request",
+    protocolVersion: PROTOCOL_VERSION,
+    spec: { kind: "OPENROUTER", providerId: "router", apiKey: "" },
+  }), true);
+  assert.equal(isPanelProviderModelCatalogRequest({
+    type: "panel:provider-model-catalog-request",
+    protocolVersion: PROTOCOL_VERSION,
+    spec: { kind: "NARAROUTER", apiKey: "sk-nry-new" },
+  }), true);
+  assert.equal(isPanelProviderModelCatalogRequest({
+    type: "panel:provider-model-catalog-request",
+    protocolVersion: PROTOCOL_VERSION,
+    spec: { kind: "OPENAI_COMPATIBLE", baseUrl: "https://api.example.test/v1", apiKey: "secret" },
+  }), true);
+  assert.equal(isPanelProviderModelCatalogRequest({
+    type: "panel:provider-model-catalog-request",
+    protocolVersion: PROTOCOL_VERSION,
+    spec: { kind: "OPENAI_COMPATIBLE", baseUrl: "http://api.example.test/v1", apiKey: "secret" },
+  }), false);
 });
 
 test("reliability policy messages validate bounded hard fuse values and clear-audit command", () => {
