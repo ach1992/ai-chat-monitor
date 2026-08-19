@@ -157,7 +157,11 @@ namespace GuardianContentAgent {
 
   async function reconnectAgent(): Promise<boolean> {
     const nextRouteKey = adapter.currentRouteKey();
-    if (nextRouteKey !== lastRouteKey) return emitNavigation(nextRouteKey);
+    if (nextRouteKey !== lastRouteKey) {
+      const navigated = await emitNavigation(nextRouteKey);
+      if (navigated) return true;
+      return announceAgent();
+    }
     return announceAgent();
   }
 
