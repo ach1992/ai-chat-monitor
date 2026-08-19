@@ -59,10 +59,12 @@ function validEvent(event: AuditEvent): boolean {
 }
 
 function normalizedEvent(event: AuditEvent): AuditEvent {
+  const { reason: originalReason, providerId: originalProviderId, ...rest } = event;
+  const reason = cleanReason(originalReason);
   return {
-    ...event,
-    ...(event.reason === undefined ? {} : { reason: cleanReason(event.reason) }),
-    ...(event.providerId === undefined ? {} : { providerId: event.providerId.slice(0, MAX_PROVIDER_ID_CHARS) }),
+    ...rest,
+    ...(reason === undefined ? {} : { reason }),
+    ...(originalProviderId === undefined ? {} : { providerId: originalProviderId.slice(0, MAX_PROVIDER_ID_CHARS) }),
   };
 }
 
