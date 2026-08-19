@@ -94,7 +94,7 @@ export class AutomationService {
     if (this.#policyWritesInFlight > 0) {
       this.#coordinator.invalidateTab(
         session.tabId,
-        "Automation configuration persistence is in progress; fresh observation is required after it completes.",
+        "Automation policy persistence is in progress; fresh observation is required after it completes.",
       );
       return;
     }
