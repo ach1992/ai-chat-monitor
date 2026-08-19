@@ -8,7 +8,7 @@
   "host_permissions": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
   "optional_host_permissions": ["https://*/*"],
   "background": {
-    "service_worker": "background/index.js",
+    "service_worker": "background/worker.js",
     "type": "module"
   },
   "side_panel": {
