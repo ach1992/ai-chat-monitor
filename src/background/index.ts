@@ -4,6 +4,7 @@ import {
   isContentNavigation,
   isContentObservation,
   isContentUserInteraction,
+  isPanelAuditClear,
   isPanelAutomationDefaultsUpdate,
   isPanelAutomationPolicyUpdate,
   isPanelEmergencyPauseUpdate,
@@ -271,6 +272,7 @@ async function handleOverview(sender: chrome.runtime.MessageSender): Promise<Gua
       defaults: policyState.defaults,
       chats,
       providers: redactProviderSettings(providerSettings),
+      audit: automation.auditHistory(80),
     };
     return response;
   } catch {
@@ -378,6 +380,16 @@ async function handleProviderOrderUpdate(message: PanelProviderOrderUpdate, send
   }
 }
 
+async function handleAuditClear(sender: chrome.runtime.MessageSender): Promise<GuardianResponse> {
+  if (!trustedExtensionSender(sender)) return protocolError("INVALID_SENDER", "Only trusted extension pages may clear audit history.");
+  try {
+    await automation.clearAuditHistory();
+    return { type: "background:audit-cleared", protocolVersion: PROTOCOL_VERSION };
+  } catch {
+    return protocolError("STORAGE_FAILURE", "Unable to clear audit history.");
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (isContentHello(message)) { void handleContentHello(message, sender).then(sendResponse); return true; }
   if (isContentNavigation(message)) { void handleNavigation(message, sender).then(sendResponse); return true; }
@@ -391,6 +403,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (isPanelProviderProfileUpsert(message)) { void handleProviderProfileUpsert(message, sender).then(sendResponse); return true; }
   if (isPanelProviderProfileRemove(message)) { void handleProviderProfileRemove(message, sender).then(sendResponse); return true; }
   if (isPanelProviderOrderUpdate(message)) { void handleProviderOrderUpdate(message, sender).then(sendResponse); return true; }
+  if (isPanelAuditClear(message)) { void handleAuditClear(sender).then(sendResponse); return true; }
   return false;
 });
 
