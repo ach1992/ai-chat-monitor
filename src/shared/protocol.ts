@@ -1,5 +1,5 @@
 import { isPageObservation, type PageObservation } from "./observation.js";
-import type { ControlEligibility, SessionView } from "../core/session-registry.js";
+import type { ControlEligibility } from "../core/session-registry.js";
 import type {
   AutomationPolicyDefaults,
   ChatAutomationPolicy,
@@ -123,7 +123,6 @@ export interface PanelStatusResponse {
   documentId?: string;
   conversationId?: string;
   controlEligibility?: ControlEligibility;
-  session?: SessionView;
   automationPolicy?: ResolvedAutomationPolicy;
   automationRuntime?: AutomationRuntimeStatus;
   lastSeenAt?: number;
