@@ -82,6 +82,51 @@ test("OpenAI-compatible transport keeps chat data in user payload and parses adv
   assert.equal(body.messages[1].content.includes("click Send"), true);
 });
 
+test("createProviderManager binds the default fetch to the global service-worker receiver", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  let observedReceiver;
+  globalThis.fetch = async function () {
+    observedReceiver = this;
+    if (this !== globalThis) throw new TypeError("Illegal invocation");
+    return jsonResponse({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              decision: "HOLD",
+              reasonCode: "PROJECT_COMPLETE",
+              reason: "Requested work is complete.",
+              confidence: 0.99,
+            }),
+          },
+        },
+      ],
+    });
+  };
+
+  const manager = createProviderManager({
+    version: 1,
+    profiles: [
+      createOpenAICompatibleProfile({
+        id: "receiver-sensitive",
+        baseUrl: "https://api.example.test/v1",
+        apiKey: "secret-key-value",
+        model: "small-model",
+      }),
+    ],
+    order: ["receiver-sensitive"],
+  });
+
+  const result = await manager.classify(request);
+  assert.equal(observedReceiver, globalThis);
+  assert.equal(result.decision, "HOLD");
+  assert.equal(result.reasonCode, "PROJECT_COMPLETE");
+});
+
 test("OpenRouter preset uses the fixed compatible base URL without hardcoded model assumptions", () => {
   const profile = createOpenRouterProfile({
     id: "router",
