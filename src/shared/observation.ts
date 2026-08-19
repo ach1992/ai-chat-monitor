@@ -38,6 +38,7 @@ export interface BlockingSnapshot {
 export interface PageObservation {
   conversationId?: string;
   routeKey: string;
+  pageTitle?: string;
   generation: GenerationState;
   latestUser?: UserTurnSnapshot;
   latestAssistant?: AssistantResponseSnapshot;
@@ -89,6 +90,7 @@ export function isPageObservation(value: unknown): value is PageObservation {
     !isOptionalString(value.conversationId) ||
     typeof value.routeKey !== "string" ||
     value.routeKey.length === 0 ||
+    (value.pageTitle !== undefined && (typeof value.pageTitle !== "string" || value.pageTitle.length > 300)) ||
     !isGenerationState(value.generation) ||
     (value.confidence !== "HIGH" && value.confidence !== "LOW") ||
     !Number.isFinite(value.observedAt)
