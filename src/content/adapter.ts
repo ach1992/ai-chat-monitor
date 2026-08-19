@@ -326,7 +326,6 @@ namespace GuardianContent {
         observation.blocking.blocked ||
         !observation.composer.present ||
         observation.composer.hasText ||
-        observation.composer.focused ||
         observation.latestAssistant?.fingerprint !== expectation.assistantFingerprint ||
         (expectation.assistantDomMessageId !== undefined && observation.latestAssistant.domMessageId !== expectation.assistantDomMessageId)
       ) {
@@ -342,11 +341,6 @@ namespace GuardianContent {
       const composer = firstMatch<HTMLElement>(this.#document, COMPOSER_SELECTORS);
       const currentAssistantText = currentAssistant === undefined ? "" : normalizeAssistantText(elementText(currentAssistant));
       const currentMessageId = currentAssistant === undefined ? undefined : readMessageId(currentAssistant);
-      const activeElement = this.#document.activeElement;
-      const composerFocused =
-        composer !== undefined &&
-        activeElement !== null &&
-        (composer === activeElement || composer.contains(activeElement));
 
       if (
         this.currentConversationId() !== expectation.conversationId ||
@@ -356,7 +350,6 @@ namespace GuardianContent {
         (expectation.assistantDomMessageId !== undefined && currentMessageId !== expectation.assistantDomMessageId) ||
         composer === undefined ||
         normalizeAssistantText(elementText(composer)).length > 0 ||
-        composerFocused ||
         firstMatch<HTMLElement>(this.#document, STOP_SELECTORS) !== undefined ||
         pageHasBlockingUi(this.#document)
       ) {
