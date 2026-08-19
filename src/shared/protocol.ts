@@ -11,10 +11,15 @@ import type {
   ResolvedAutomationPolicy,
 } from "../automation/types.js";
 import {
-  isProviderProfile,
+  isProviderCatalogSpec,
+  isProviderProfileMutation,
   type RedactedProviderProfile,
 } from "../providers/settings.js";
-import type { ProviderProfile } from "../providers/types.js";
+import type {
+  ProviderCatalogSpec,
+  ProviderModelCatalogEntry,
+  ProviderProfileMutation,
+} from "../providers/types.js";
 import type { AuditEvent } from "../reliability/audit.js";
 
 export const PROTOCOL_VERSION = 2 as const;
@@ -91,8 +96,14 @@ export interface PanelEmergencyPauseUpdate {
 export interface PanelProviderProfileUpsert {
   type: "panel:provider-profile-upsert";
   protocolVersion: typeof PROTOCOL_VERSION;
-  profile: ProviderProfile;
+  profile: ProviderProfileMutation;
   makePrimary?: boolean;
+}
+
+export interface PanelProviderModelCatalogRequest {
+  type: "panel:provider-model-catalog-request";
+  protocolVersion: typeof PROTOCOL_VERSION;
+  spec: ProviderCatalogSpec;
 }
 
 export interface PanelProviderProfileRemove {
@@ -179,6 +190,12 @@ export interface ProviderSettingsResponse {
   providers: RedactedProviderSettings;
 }
 
+export interface ProviderModelCatalogResponse {
+  type: "background:provider-model-catalog";
+  protocolVersion: typeof PROTOCOL_VERSION;
+  models: ProviderModelCatalogEntry[];
+}
+
 export interface AuditClearResponse {
   type: "background:audit-cleared";
   protocolVersion: typeof PROTOCOL_VERSION;
@@ -187,7 +204,7 @@ export interface AuditClearResponse {
 export interface ProtocolErrorResponse {
   type: "background:error";
   protocolVersion: typeof PROTOCOL_VERSION;
-  code: "INVALID_SENDER" | "INVALID_MESSAGE" | "STALE_EVENT" | "STORAGE_FAILURE";
+  code: "INVALID_SENDER" | "INVALID_MESSAGE" | "STALE_EVENT" | "STORAGE_FAILURE" | "PROVIDER_FAILURE";
   message: string;
 }
 
@@ -202,6 +219,7 @@ export type GuardianRequest =
   | PanelAutomationDefaultsUpdate
   | PanelEmergencyPauseUpdate
   | PanelProviderProfileUpsert
+  | PanelProviderModelCatalogRequest
   | PanelProviderProfileRemove
   | PanelProviderOrderUpdate
   | PanelAuditClear;
@@ -212,6 +230,7 @@ export type GuardianResponse =
   | PanelOverviewResponse
   | AutomationPolicyResponse
   | ProviderSettingsResponse
+  | ProviderModelCatalogResponse
   | AuditClearResponse
   | ProtocolErrorResponse;
 
@@ -380,8 +399,17 @@ export function isPanelProviderProfileUpsert(value: unknown): value is PanelProv
     isRecord(value) &&
     hasProtocolVersion(value) &&
     value.type === "panel:provider-profile-upsert" &&
-    isProviderProfile(value.profile) &&
+    isProviderProfileMutation(value.profile) &&
     (value.makePrimary === undefined || typeof value.makePrimary === "boolean")
+  );
+}
+
+export function isPanelProviderModelCatalogRequest(value: unknown): value is PanelProviderModelCatalogRequest {
+  return (
+    isRecord(value) &&
+    hasProtocolVersion(value) &&
+    value.type === "panel:provider-model-catalog-request" &&
+    isProviderCatalogSpec(value.spec)
   );
 }
 
