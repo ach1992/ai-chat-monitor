@@ -10,8 +10,8 @@ import {
   currentTabIdentityMatches,
   desiredCurrentTabMode,
   ensureCurrentTabConnected,
-  isSupportedChatGptUrl,
   shouldRefreshCurrentTabForUpdate,
+  supportedChatGptRouteKey,
 } from "./current-tab.js";
 
 type AgentProbeResponse = {
@@ -33,7 +33,7 @@ interface CurrentTabState {
   tab: chrome.tabs.Tab | undefined;
   overview: PanelOverviewResponse;
   chat: ManagedChatStatus | undefined;
-  supported: boolean;
+  routeKey: string | undefined;
   agentReachable: boolean;
   identityCurrent: boolean;
 }
@@ -135,7 +135,7 @@ function wait(delayMs: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, delayMs));
 }
 
-async function ensureConnected(tabId: number): Promise<ManagedChatStatus> {
+async function ensureConnected(tabId: number, expectedRouteKey: string): Promise<ManagedChatStatus> {
   return ensureCurrentTabConnected({
     now: Date.now,
     probe: probeContentAgent,
@@ -143,7 +143,7 @@ async function ensureConnected(tabId: number): Promise<ManagedChatStatus> {
     reload: (targetTabId) => chrome.tabs.reload(targetTabId),
     readChat: readManagedChat,
     wait,
-  }, tabId);
+  }, tabId, { expectedRouteKey });
 }
 
 function primaryProviderText(overview: PanelOverviewResponse): string {
@@ -181,7 +181,8 @@ function renderCurrentTab(state: CurrentTabState): void {
     root.textContent = "No active browser tab is available.";
     return;
   }
-  if (!state.supported) {
+  const routeKey = state.routeKey;
+  if (routeKey === undefined) {
     root.className = "current-card current-card-primary";
     root.append(
       e("strong", "guardian-state", "Guardian unavailable"),
@@ -231,15 +232,16 @@ function renderCurrentTab(state: CurrentTabState): void {
   const toggle = e("button", enabled ? "secondary" : undefined, enabled ? "Turn Guardian OFF" : "Turn Guardian ON");
   toggle.type = "button";
   toggle.disabled = currentTabBusy;
+  toggle.setAttribute("aria-pressed", String(enabled));
   toggle.addEventListener("click", () => {
-    void setCurrentTabEnabled(tabId, !enabled);
+    void setCurrentTabEnabled(tabId, !enabled, routeKey);
   });
   actions.append(toggle);
   if (enabled && !state.identityCurrent) {
     const reconnect = e("button", "secondary", "Reconnect");
     reconnect.type = "button";
     reconnect.disabled = currentTabBusy;
-    reconnect.addEventListener("click", () => { void recoverCurrentTab(tabId); });
+    reconnect.addEventListener("click", () => { void recoverCurrentTab(tabId, routeKey); });
     actions.append(reconnect);
   }
 
@@ -259,12 +261,12 @@ function renderCurrentTab(state: CurrentTabState): void {
   root.append(e("div", "meta", primaryProviderText(state.overview)), actions, advanced);
 }
 
-async function setCurrentTabEnabled(tabId: number, enabled: boolean): Promise<void> {
+async function setCurrentTabEnabled(tabId: number, enabled: boolean, expectedRouteKey: string): Promise<void> {
   if (currentTabBusy) return;
   currentTabBusy = true;
   status(enabled ? "Turning Guardian ON..." : "Turning Guardian OFF...", "Exact tab and conversation identity are revalidated before the policy changes.");
   try {
-    const chat = await ensureConnected(tabId);
+    const chat = await ensureConnected(tabId, expectedRouteKey);
     if (chat.conversationId === undefined) throw new Error("ChatGPT has not exposed a stable conversation identity yet.");
     const currentMode = chat.policy?.mode ?? "OFF";
     const desiredMode = desiredCurrentTabMode(currentMode, enabled);
@@ -287,12 +289,12 @@ async function setCurrentTabEnabled(tabId: number, enabled: boolean): Promise<vo
   }
 }
 
-async function recoverCurrentTab(tabId: number): Promise<void> {
+async function recoverCurrentTab(tabId: number, expectedRouteKey: string): Promise<void> {
   if (currentTabBusy) return;
   currentTabBusy = true;
   status("Reconnecting current ChatGPT tab...", "Guardian will use the live content agent when possible, otherwise it reloads this tab once and waits for a fresh identity.");
   try {
-    await ensureConnected(tabId);
+    await ensureConnected(tabId, expectedRouteKey);
     status("Current ChatGPT tab reconnected.", "The tab is reporting fresh Guardian state again.");
   } catch (error) {
     status("Reconnect failed.", error instanceof Error ? error.message : "Guardian could not recover the current ChatGPT tab.");
@@ -308,10 +310,10 @@ async function doRefreshCurrentTab(serial: number): Promise<void> {
     activeTabId = tab?.id;
     const overview = await loadOverview();
     const chat = activeTabId === undefined ? undefined : overview.chats.find((candidate) => candidate.tabId === activeTabId);
-    const supported = isSupportedChatGptUrl(tab?.url);
-    const probe = supported && activeTabId !== undefined ? await probeContentAgent(activeTabId) : undefined;
+    const routeKey = supportedChatGptRouteKey(tab?.url);
+    const probe = routeKey !== undefined && activeTabId !== undefined ? await probeContentAgent(activeTabId) : undefined;
     const identityCurrent = currentTabIdentityMatches(chat, probe);
-    if (serial === refreshSerial) renderCurrentTab({ tab, overview, chat, supported, agentReachable: probe !== undefined, identityCurrent });
+    if (serial === refreshSerial) renderCurrentTab({ tab, overview, chat, routeKey, agentReachable: probe !== undefined, identityCurrent });
   } catch (error) {
     if (serial === refreshSerial) {
       root.className = "current-card current-card-primary";
