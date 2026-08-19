@@ -21,6 +21,7 @@ namespace GuardianContentAgent {
     routeKey: string;
     assistantFingerprint: string;
     assistantDomMessageId?: string;
+    lastUserInteractionAt?: number;
     continuationText: string;
     expiresAt: number;
   }
@@ -33,6 +34,7 @@ namespace GuardianContentAgent {
   let observationTimer: number | undefined;
   let observationGeneration = 0;
   let outboundQueue: Promise<void> = Promise.resolve();
+  let lastLocalUserInteractionAt: number | undefined;
 
   function nextSequence(): number { sequence += 1; return sequence; }
 
@@ -59,6 +61,7 @@ namespace GuardianContentAgent {
       typeof record.routeKey === "string" && record.routeKey.length > 0 && record.routeKey.length <= 500 &&
       typeof record.assistantFingerprint === "string" && /^[a-f0-9]{64}$/.test(record.assistantFingerprint) &&
       (record.assistantDomMessageId === undefined || typeof record.assistantDomMessageId === "string") &&
+      (record.lastUserInteractionAt === undefined || (typeof record.lastUserInteractionAt === "number" && Number.isFinite(record.lastUserInteractionAt))) &&
       typeof record.continuationText === "string" && record.continuationText.trim().length > 0 && record.continuationText.length <= 200 &&
       typeof record.expiresAt === "number" && Number.isFinite(record.expiresAt)
     );
@@ -68,6 +71,10 @@ namespace GuardianContentAgent {
     if (message.agentInstanceId !== agentInstanceId || message.pageEpoch !== pageEpoch || Date.now() > message.expiresAt) {
       return { decisionId: message.decisionId, status: "NOT_STARTED", reason: "Content-agent identity or decision lifetime no longer matches." };
     }
+    const humanStateIsCurrent = (): boolean => message.lastUserInteractionAt === lastLocalUserInteractionAt;
+    if (!humanStateIsCurrent()) {
+      return { decisionId: message.decisionId, status: "NOT_STARTED", reason: "Trusted human interaction changed after the decision evidence." };
+    }
     const result = await adapter.guardedSend({
       decisionId: message.decisionId,
       conversationId: message.conversationId,
@@ -75,7 +82,7 @@ namespace GuardianContentAgent {
       assistantFingerprint: message.assistantFingerprint,
       ...(message.assistantDomMessageId === undefined ? {} : { assistantDomMessageId: message.assistantDomMessageId }),
       continuationText: message.continuationText,
-    });
+    }, humanStateIsCurrent);
     scheduleObservation(0);
     return result;
   }
@@ -141,6 +148,8 @@ namespace GuardianContentAgent {
   }
 
   function emitUserInteraction(interaction: InteractionKind): void {
+    const sentAt = Math.max(Date.now(), (lastLocalUserInteractionAt ?? 0) + 1);
+    lastLocalUserInteractionAt = sentAt;
     void send({
       type: "content:user-interaction",
       protocolVersion: GuardianContent.PROTOCOL_VERSION,
@@ -148,7 +157,7 @@ namespace GuardianContentAgent {
       pageEpoch,
       sequence: nextSequence(),
       interaction,
-      sentAt: Date.now(),
+      sentAt,
     });
     scheduleObservation(0);
   }

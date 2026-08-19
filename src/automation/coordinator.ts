@@ -659,7 +659,6 @@ export class AutomationCoordinator {
       observation.blocking.blocked === false &&
       observation.composer.present === true &&
       observation.composer.hasText === false &&
-      observation.composer.focused === false &&
       observation.latestAssistant !== undefined &&
       observation.latestAssistant.normalizedText.length > 0
     );

@@ -105,6 +105,7 @@ export class AutomationService {
               routeKey: envelope.routeKey,
               assistantFingerprint: envelope.assistantFingerprint,
               ...(envelope.assistantDomMessageId === undefined ? {} : { assistantDomMessageId: envelope.assistantDomMessageId }),
+              ...(envelope.lastUserInteractionAt === undefined ? {} : { lastUserInteractionAt: envelope.lastUserInteractionAt }),
               continuationText: envelope.continuationText,
               expiresAt: envelope.expiresAt,
             },
