@@ -1,127 +1,200 @@
 # Chat Turn Guardian
 
-A standalone Chromium browser extension that safely supervises explicitly selected ChatGPT conversations, detects needless turn-boundary stops, auto-continues only when appropriate, and notifies when human attention is required.
+Chat Turn Guardian is a standalone Chromium Manifest V3 extension that supervises explicitly selected ChatGPT Web conversations and can request another turn when a finished response is confidently classified as a needless turn boundary.
 
-## Status
+The extension is deliberately narrow. The chat's own agent, Skill, or workflow remains responsible for **what work should happen**. Chat Turn Guardian only decides whether a generic configured continuation message may be requested without genuine human involvement.
 
-Project bootstrap is complete. The accepted MVP outcome and implementation work are tracked in [Issue #1](../../issues/1). The implementation sequence starts with [Issue #2](../../issues/2).
+## MVP capabilities
 
-The current foundation provides the Manifest V3 shell, TypeScript toolchain, service-worker/content-script/Side Panel messaging boundary, session-vs-durable storage abstractions, deterministic tests, and CI. It intentionally does **not** automate ChatGPT messages yet.
+- Supervises multiple ChatGPT tabs/conversations independently.
+- Per-chat modes: `OFF`, `OBSERVE`, `AUTO`, and `NOTIFY_ONLY`.
+- Global timing defaults with per-chat settle/continue/cooldown overrides.
+- Configurable continuation text.
+- Conservative deterministic stop rules plus an optional AI classifier.
+- OpenRouter and generic OpenAI-compatible provider profiles with ordered fallback.
+- Provider credentials stored only in trusted extension storage.
+- Bounded classification context: the immediately relevant user turn plus latest assistant turn, not the full conversation.
+- Exact tab/document/conversation/message binding before any automatic action.
+- Duplicate-conversation owner/mirror isolation so at most one tab can auto-send.
+- Human typing, sending, editing, stopping, navigation, policy changes, and blocking UI cancel or stale pending automation.
+- Guarded page mutation with post-send verification and no blind retry after ambiguous writes.
+- Browser notifications for response completion, HOLD/attention, UNSURE, provider/extension errors, and stagnation.
+- Progress-aware stagnation detection plus a separate configurable hard safety fuse.
+- Bounded, redacted, clearable audit history.
+- Persistent Side Panel for multi-chat management, Pause All, provider configuration, runtime state, and diagnostics.
+- Service-worker restart recovery that requires fresh observation before automation can act.
 
-No local daemon, local model, or companion application is required by the MVP design.
+## Safety model
 
-## Project map
+Chat Turn Guardian is fail-closed by design:
 
-- **Canonical product requirements:** [`docs/PROJECT_SPEC.md`](docs/PROJECT_SPEC.md)
-- **Architecture and safety invariants:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-- **MVP outcome / authoritative work plan:** [Issue #1](../../issues/1)
-- **Foundation:** [Issue #2](../../issues/2)
-- **ChatGPT adapter + multi-tab isolation:** [Issue #3](../../issues/3)
-- **AI provider abstraction + stop classifier:** [Issue #4](../../issues/4)
-- **Guarded auto-continue state machine:** [Issue #5](../../issues/5)
-- **Side Panel + per-chat controls/timing:** [Issue #6](../../issues/6)
-- **Notifications + stagnation protection:** [Issue #7](../../issues/7)
-- **MVP hardening / final validation:** [Issue #8](../../issues/8)
-- **Post-MVP Telegram notification/status channel:** [Issue #9](../../issues/9)
+- `UNSURE`, provider failure, malformed provider output, timeout, rate limit, blocking UI, stale state, or storage failure never becomes an automatic continuation.
+- AI providers return only advisory `CONTINUE` / `HOLD` / `UNSURE` classifications. They cannot access tabs, DOM mutation, approvals, or browser actions.
+- Only the guarded ChatGPT page adapter can perform the narrow configured continuation action, and it revalidates the exact current page/message immediately before mutation.
+- Human interaction always has precedence over pending automation.
+- Ambiguous writes are journaled and never blindly retried.
+- The extension does not bypass platform/account limits, CAPTCHAs, confirmations, approvals, or safety controls.
+- Full conversation text is not persisted in audit history. Classifier input is bounded and secret-redacted before provider transport.
 
-## Development
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the component boundaries and [`docs/MVP_VALIDATION.md`](docs/MVP_VALIDATION.md) for the validation/evidence matrix.
 
-### Prerequisites
+## Requirements
 
-- Node.js 22 or newer;
-- npm 10 or newer;
-- Chromium/Chrome 114 or newer for the Side Panel API.
+- Chromium-family browser with Manifest V3 Side Panel support. The manifest currently targets Chrome/Chromium 114+.
+- Node.js 22+ for development/building.
+- A provider API key only if AI classification is desired. Without a configured provider, ambiguous classifier cases fail closed to `UNSURE`.
 
-Install the pinned development dependency:
+## Fresh-clone validation
 
 ```bash
+git clone https://github.com/ach1992/chat-turn-guardian.git
+cd chat-turn-guardian
 npm ci
-```
-
-Run the complete deterministic validation suite:
-
-```bash
 npm run validate
+npm run smoke:extension
+npm run package
 ```
 
-Individual commands are available when narrowing a failure:
+`npm run validate` performs strict TypeScript checks, repository linting, a production-style extension build, and the complete automated test suite.
+
+`npm run smoke:extension` launches Chromium with the generated `dist/` directory as an unpacked extension and fails if Chromium reports extension-load errors.
+
+`npm run package` rebuilds the extension and creates:
+
+- `artifacts/chat-turn-guardian-<version>.zip`
+- `artifacts/SHA256SUMS.txt`
+- `artifacts/build-info.json`
+
+The ZIP contains the extension payload without TypeScript sources or source maps. CI also retains the package output as a workflow artifact for the validated commit.
+
+## Install as an unpacked extension
+
+1. Run `npm ci && npm run build`, or extract a validated release ZIP so `manifest.json` is at the extracted directory root.
+2. Open `chrome://extensions`.
+3. Enable **Developer mode**.
+4. Choose **Load unpacked**.
+5. Select the generated `dist/` directory, or the extracted release-package directory.
+6. Open ChatGPT Web in one or more tabs.
+7. Open the Chat Turn Guardian Side Panel.
+
+The extension starts fail-closed. Chats are not automatically controlled just because the extension is installed.
+
+## First-use configuration
+
+### 1. Configure a provider
+
+In the Side Panel, add either:
+
+- **OpenRouter**: profile ID, model, and API key; or
+- **OpenAI-compatible**: profile ID, HTTPS base URL, model, and API key.
+
+The browser asks for host access to the exact provider origin at configuration time. Provider profiles can be reordered for fallback priority. Removing or replacing the last profile that uses an origin revokes that now-unused origin permission on a best-effort basis.
+
+Provider API keys are never returned in ordinary management/status responses.
+
+### 2. Start with `OBSERVE`
+
+For a connected ChatGPT conversation, use `OBSERVE` first. The extension will settle and classify finished assistant turns but cannot enter the automatic send state.
+
+Use the Side Panel runtime state, last decision/reason, audit history, and notifications to confirm behavior on your workflow.
+
+### 3. Enable `AUTO` only for selected chats
+
+Set a conversation to `AUTO` only when you want guarded continuation for that exact chat. A `CONTINUE` classification is still only a candidate: the extension rechecks session identity, ownership, policy revision, assistant fingerprint, composer state, user interaction state, blocking UI, stagnation/fuse state, and expiration before the content agent is allowed to mutate the page.
+
+### 4. Use `Pause All` whenever needed
+
+`Pause All` immediately prevents new automatic sends while preserving configuration. Resuming requires fresh page evidence before automation can proceed.
+
+## Modes
+
+| Mode | Classification | Automatic send | Notifications |
+| --- | --- | --- | --- |
+| `OFF` | No supervision | Never | No managed-chat events |
+| `OBSERVE` | Yes | Never | Configurable |
+| `AUTO` | Yes | Only after every safety gate passes | Configurable |
+| `NOTIFY_ONLY` | No auto-send path | Never | Configurable, including response-finished-only |
+
+## Timing and loop protection
+
+Global defaults and per-chat overrides exist for:
+
+- settle delay;
+- continuation delay;
+- post-send cooldown;
+- continuation text;
+- notification triggers;
+- hard-fuse maximum verified auto-continues.
+
+The hard fuse is a final emergency boundary, not the primary progress detector. Progress-aware protection first compares privacy-preserving signatures of recent **verified auto-continued** assistant outcomes. Repeated materially similar no-progress outcomes are held as stagnation even before the hard fuse is reached. Useful changing outcomes are not stopped merely because an arbitrary small continuation count was reached.
+
+Human interaction resets the relevant verified-auto continuation window used by the fuse/stagnation guard.
+
+## Provider and privacy behavior
+
+- Durable `chrome.storage.local` data is restricted to trusted extension contexts before policy/provider state is restored.
+- Provider endpoints must use HTTPS. URL credentials, query strings, fragments, and sensitive header overrides are rejected.
+- Automatic redirects are refused for provider requests so credentials are not forwarded to an unexpected origin.
+- Provider requests are timeout-bounded and response-size-bounded.
+- Context sanitization limits recent turns and minimizes large code/log blocks.
+- Common API-key/auth-token forms are redacted before provider transport.
+- Audit history stores bounded structured metadata, hashes/fingerprints, and local diagnostic reasons; it does not store full assistant/user content or provider secrets. Free-form classifier reasons are not persisted in audit history.
+
+## What to expect when something is unsafe
+
+The correct behavior is usually **no automatic action**. Typical Side Panel states include:
+
+- `HOLD`: a real boundary, human interaction, blocking UI, ownership issue, or stagnation requires attention.
+- `UNSURE`: the classifier/provider could not safely justify continuation.
+- `AMBIGUOUS_WRITE`: a page mutation may have started but cannot be safely reconciled; blind retry is blocked.
+- `PAUSED`: global Pause All is active.
+- `COOLDOWN`: a verified continuation was sent and the per-chat cooldown is active.
+
+## Troubleshooting
+
+### Side Panel says the tab is not connected
+
+Confirm the active tab is `https://chatgpt.com/...` (or the supported legacy ChatGPT host), then reload the tab after loading/updating the extension. A service-worker restart intentionally invalidates old observation authority until the content agent produces fresh evidence.
+
+### `AUTO` never sends
+
+Check the displayed reason/runtime state. Common safe causes are:
+
+- no provider configured for an ambiguous stop;
+- provider failure or low-confidence result;
+- the tab is a duplicate-conversation `MIRROR`, not `OWNER`;
+- the composer is focused or contains user text;
+- ChatGPT is still generating;
+- blocking/error/rate-limit/confirmation UI is present;
+- the response/policy/session changed during a delay;
+- stagnation or the hard fuse held the chat;
+- a prior ambiguous write guard blocks retry.
+
+### Provider requests fail
+
+Verify the profile model/base URL/API key, confirm the requested exact-origin host permission is still granted, and use an HTTPS endpoint. Provider/model availability and quotas are external service facts and are intentionally not hardcoded into the extension.
+
+### Notifications do not appear
+
+Confirm browser/OS notifications are permitted for the browser and the chat's notification trigger is enabled. Notification delivery failure is observational only: it cannot trigger a send, retry, or automation state transition.
+
+### ChatGPT changes its DOM
+
+The adapter intentionally fails closed on selector/identity drift. If current ChatGPT markup no longer matches the supported adapter, use `OFF`/`OBSERVE`, capture the failing scenario, and update the adapter/tests rather than weakening the final revalidation gates.
+
+## Development commands
 
 ```bash
+npm run build
+npm run dev
 npm run typecheck
 npm run lint
 npm test
-npm run build
+npm run validate
+npm run smoke:extension
+npm run package
 ```
 
-For a watch-mode development build:
+## Project boundary
 
-```bash
-npm run dev
-```
-
-Generated extension files are written to `dist/` and are intentionally not committed.
-
-### Load the unpacked extension
-
-1. Run `npm run build`.
-2. Open `chrome://extensions` in Chrome/Chromium 114+.
-3. Enable **Developer mode**.
-4. Choose **Load unpacked** and select this repository's `dist/` directory.
-5. Open a `https://chatgpt.com/` tab.
-6. Open **Chat Turn Guardian** from Chrome's side panel selector.
-7. Choose **Refresh status**. The panel should report the active browser tab as connected; when Chrome supplies it, the current document identity is also shown.
-
-The foundation Side Panel is status-only. `AUTO`, provider configuration, guarded sends, and full conversation/session identity are implemented by later issues and must not be inferred from this shell.
-
-## Foundation architecture
-
-The service worker is the coordinator boundary. A ChatGPT content script sends a versioned `content:hello`; the worker binds it to Chrome's authoritative sender `tabId` and `documentId` and records presence in `chrome.storage.session`. The Side Panel asks for status for one explicit active `tabId`, and rejects responses for any other tab.
-
-Storage is intentionally split:
-
-- `createDurableStorage()` uses `chrome.storage.local` for future user policy/configuration;
-- `createEphemeralStorage()` uses `chrome.storage.session` for restart-tolerant browser-session runtime state.
-
-Provider host permissions are not requested by the foundation. They will be introduced only with the provider implementation and reviewed against the least-privilege requirement.
-
-## Core behavior
-
-Each ChatGPT conversation is explicitly opt-in and independently configurable as:
-
-- `OFF` — unmanaged;
-- `OBSERVE` — classify/observe only, never send automatically;
-- `AUTO` — safely auto-continue only after conservative classification and fresh revalidation;
-- `NOTIFY_ONLY` — never send; notify on configured events such as response completion.
-
-Global timing defaults and per-chat overrides cover response settling, continuation delay, and post-send cooldown. Multiple tabs are isolated by tab/document/conversation/message identity, and duplicate tabs for the same conversation cannot both control automatic sends.
-
-## Safety posture
-
-The extension is deliberately fail-closed:
-
-- human interaction always supersedes pending automation;
-- uncertainty/provider failure/platform errors never authorize continuation;
-- every continuation decision is bound to the exact current conversation/message and revalidated immediately before send;
-- ambiguous send outcomes are never blind-retried;
-- repetitive/no-progress loops are held instead of continued indefinitely;
-- the extension never fabricates approvals or attempts to bypass account/model/platform limits or safeguards.
-
-The chat's own agent/Skill remains responsible for **what work should happen**. Chat Turn Guardian only decides whether a finished turn appears to need genuine human involvement before requesting another turn.
-
-## Provider direction
-
-The classifier layer is provider-agnostic. The MVP requires OpenRouter plus a generic OpenAI-compatible provider configuration and is designed to add other hosted/free-tier providers without coupling them to chat-management logic. Free quotas/model availability are treated as variable provider facts rather than permanent product assumptions.
-
-## Resume development in a new Master chat
-
-Use this repository as the authoritative source and recover before acting. The persisted operating baseline is in Issue #1.
-
-A concise handoff instruction is:
-
-```text
-Repository: https://github.com/ach1992/chat-turn-guardian
-Role: MASTER
-RECOVER from authoritative repository/GitHub state, then continue end-to-end from the highest-value READY work under the persisted project authority and coordination baseline. Do not rely on previous chat history.
-```
-
-Start from Issue #1, then follow its current dependency/work plan rather than rebuilding project intent from memory.
+This MVP is not a general browser agent, project manager, GitHub orchestrator, approval authority, or mechanism for bypassing platform safeguards. It does not create chats, move reviewer prompts between chats, require a local daemon/model, or implement Telegram remote control. The planned post-MVP Telegram direction is notification/read-only status first, not arbitrary message injection.
