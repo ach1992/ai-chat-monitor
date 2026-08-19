@@ -147,7 +147,7 @@ await writeFile(
     version: packageJson.version,
     archive: archiveName,
     sha256,
-    sourceSha: process.env.GITHUB_SHA ?? null,
+    sourceSha: process.env.VALIDATION_SHA ?? process.env.GITHUB_SHA ?? null,
     fileCount: names.length,
   }, null, 2)}\n`,
   "utf8",
