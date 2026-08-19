@@ -48,6 +48,13 @@ export function isSupportedChatGptUrl(value: string | undefined): boolean {
   return supportedChatGptRouteKey(value) !== undefined;
 }
 
+export function currentTabRouteMatchesChat(
+  chat: CurrentTabChat | undefined,
+  routeKey: string | undefined,
+): boolean {
+  return chat?.conversationId !== undefined && routeKey !== undefined && chat.routeKey === routeKey;
+}
+
 export function currentTabIdentityMatches(
   chat: CurrentTabChat | undefined,
   probe: CurrentTabAgentProbe | undefined,
