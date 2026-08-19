@@ -15,10 +15,20 @@ import {
 } from "../automation/types.js";
 import { ConservativeStopClassifier } from "../classification/classifier.js";
 import type { SessionView } from "../core/session-registry.js";
+import { fetchProviderModelCatalog } from "../providers/catalog.js";
 import { createProviderManager } from "../providers/manager.js";
-import { providerOriginPattern } from "../providers/settings.js";
+import {
+  providerOriginPattern,
+  resolveProviderCatalogProfile,
+  resolveProviderProfileMutation,
+} from "../providers/settings.js";
 import { ProviderSettingsStore } from "../providers/settings-store.js";
-import type { ProviderProfile, ProviderSettingsState } from "../providers/types.js";
+import type {
+  ProviderCatalogSpec,
+  ProviderModelCatalogEntry,
+  ProviderProfileMutation,
+  ProviderSettingsState,
+} from "../providers/types.js";
 import { AuditHistoryRepository, type AuditEvent, type AuditHistoryState } from "../reliability/audit.js";
 import { evaluateProgressSafety, outcomeSignature } from "../reliability/progress.js";
 import { ReliabilityService, type ReliabilityRuntimeState } from "../reliability/service.js";
@@ -198,11 +208,13 @@ export class AutomationService {
     return this.#providerSettings.load();
   }
 
-  async upsertProviderProfile(profile: ProviderProfile, makePrimary = false): Promise<ProviderSettingsState> {
+  async upsertProviderProfile(mutation: ProviderProfileMutation, makePrimary = false): Promise<ProviderSettingsState> {
     await this.#ready;
     const { before, saved } = await this.#withPolicyWrite(() => this.#withProviderWrite(async () => {
       this.#invalidateAll("Provider settings changed; pending classifier decisions were cancelled before persistence.");
       const current = await this.#providerSettings.load();
+      const existing = current.profiles.find((candidate) => candidate.id === mutation.id);
+      const profile = resolveProviderProfileMutation(mutation, existing);
       const profiles = current.profiles.filter((candidate) => candidate.id !== profile.id);
       profiles.push(profile);
       const wasActive = current.order.includes(profile.id);
@@ -219,6 +231,18 @@ export class AutomationService {
     await this.#releaseUnusedProviderOrigins(before, saved);
     this.#rehydrateKnownSessions();
     return saved;
+  }
+
+  async providerModelCatalog(spec: ProviderCatalogSpec): Promise<ProviderModelCatalogEntry[]> {
+    await this.#ready;
+    const profile = await this.#withProviderWrite(async () => {
+      const current = await this.#providerSettings.load();
+      const existing = spec.providerId === undefined
+        ? undefined
+        : current.profiles.find((candidate) => candidate.id === spec.providerId);
+      return resolveProviderCatalogProfile(spec, existing);
+    });
+    return fetchProviderModelCatalog(profile);
   }
 
   async removeProviderProfile(providerId: string): Promise<ProviderSettingsState> {

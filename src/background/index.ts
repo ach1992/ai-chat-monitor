@@ -9,6 +9,7 @@ import {
   isPanelAutomationPolicyUpdate,
   isPanelEmergencyPauseUpdate,
   isPanelOverviewRequest,
+  isPanelProviderModelCatalogRequest,
   isPanelProviderOrderUpdate,
   isPanelProviderProfileRemove,
   isPanelProviderProfileUpsert,
@@ -25,6 +26,7 @@ import {
   type PanelAutomationPolicyUpdate,
   type PanelEmergencyPauseUpdate,
   type PanelOverviewResponse,
+  type PanelProviderModelCatalogRequest,
   type PanelProviderOrderUpdate,
   type PanelProviderProfileRemove,
   type PanelProviderProfileUpsert,
@@ -37,8 +39,8 @@ import {
   type SessionMutationResult,
   type SessionRegistryState,
 } from "../core/session-registry.js";
-import { redactProviderProfile } from "../providers/settings.js";
-import type { ProviderSettingsState } from "../providers/types.js";
+import { ProviderConfigurationError, redactProviderProfile } from "../providers/settings.js";
+import { ProviderFailure, type ProviderSettingsState } from "../providers/types.js";
 import {
   createEphemeralStorage,
   restrictDurableStorageToTrustedContexts,
@@ -355,8 +357,25 @@ async function handleProviderProfileUpsert(message: PanelProviderProfileUpsert, 
   try {
     const saved = await automation.upsertProviderProfile(message.profile, message.makePrimary ?? false);
     return providerResponse(saved);
-  } catch {
+  } catch (error) {
+    if (error instanceof ProviderConfigurationError) return protocolError("INVALID_MESSAGE", error.message);
     return protocolError("STORAGE_FAILURE", "Unable to persist provider profile.");
+  }
+}
+
+async function handleProviderModelCatalog(message: PanelProviderModelCatalogRequest, sender: chrome.runtime.MessageSender): Promise<GuardianResponse> {
+  if (!trustedExtensionSender(sender)) return protocolError("INVALID_SENDER", "Only trusted extension pages may load provider models.");
+  try {
+    const models = await automation.providerModelCatalog(message.spec);
+    return {
+      type: "background:provider-model-catalog",
+      protocolVersion: PROTOCOL_VERSION,
+      models,
+    };
+  } catch (error) {
+    if (error instanceof ProviderConfigurationError) return protocolError("INVALID_MESSAGE", error.message);
+    if (error instanceof ProviderFailure) return protocolError("PROVIDER_FAILURE", error.message);
+    return protocolError("PROVIDER_FAILURE", "Unable to load the provider model catalog.");
   }
 }
 
@@ -401,6 +420,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (isPanelAutomationDefaultsUpdate(message)) { void handleDefaultsUpdate(message, sender).then(sendResponse); return true; }
   if (isPanelEmergencyPauseUpdate(message)) { void handleEmergencyPauseUpdate(message, sender).then(sendResponse); return true; }
   if (isPanelProviderProfileUpsert(message)) { void handleProviderProfileUpsert(message, sender).then(sendResponse); return true; }
+  if (isPanelProviderModelCatalogRequest(message)) { void handleProviderModelCatalog(message, sender).then(sendResponse); return true; }
   if (isPanelProviderProfileRemove(message)) { void handleProviderProfileRemove(message, sender).then(sendResponse); return true; }
   if (isPanelProviderOrderUpdate(message)) { void handleProviderOrderUpdate(message, sender).then(sendResponse); return true; }
   if (isPanelAuditClear(message)) { void handleAuditClear(sender).then(sendResponse); return true; }

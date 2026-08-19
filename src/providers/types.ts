@@ -1,6 +1,6 @@
 import type { ClassificationRequest, ClassificationResult } from "../classification/types.js";
 
-export type ProviderKind = "OPENROUTER" | "OPENAI_COMPATIBLE";
+export type ProviderKind = "OPENROUTER" | "NARAROUTER" | "OPENAI_COMPATIBLE";
 
 export interface ProviderTransportOptions {
   timeoutMs?: number;
@@ -17,6 +17,13 @@ export interface OpenRouterProviderProfile extends ProviderTransportOptions {
   siteTitle?: string;
 }
 
+export interface NaraRouterProviderProfile extends ProviderTransportOptions {
+  kind: "NARAROUTER";
+  id: string;
+  apiKey: string;
+  model: string;
+}
+
 export interface OpenAICompatibleProviderProfile extends ProviderTransportOptions {
   kind: "OPENAI_COMPATIBLE";
   id: string;
@@ -25,7 +32,64 @@ export interface OpenAICompatibleProviderProfile extends ProviderTransportOption
   model: string;
 }
 
-export type ProviderProfile = OpenRouterProviderProfile | OpenAICompatibleProviderProfile;
+export type ProviderProfile = OpenRouterProviderProfile | NaraRouterProviderProfile | OpenAICompatibleProviderProfile;
+
+export interface OpenRouterProviderProfileMutation {
+  kind: "OPENROUTER";
+  id: string;
+  apiKey?: string;
+  model: string;
+}
+
+export interface NaraRouterProviderProfileMutation {
+  kind: "NARAROUTER";
+  id: string;
+  apiKey?: string;
+  model: string;
+}
+
+export interface OpenAICompatibleProviderProfileMutation {
+  kind: "OPENAI_COMPATIBLE";
+  id: string;
+  baseUrl: string;
+  apiKey?: string;
+  model: string;
+}
+
+export type ProviderProfileMutation =
+  | OpenRouterProviderProfileMutation
+  | NaraRouterProviderProfileMutation
+  | OpenAICompatibleProviderProfileMutation;
+
+export interface OpenRouterCatalogSpec {
+  kind: "OPENROUTER";
+  providerId?: string;
+  apiKey?: string;
+}
+
+export interface NaraRouterCatalogSpec {
+  kind: "NARAROUTER";
+  providerId?: string;
+  apiKey?: string;
+}
+
+export interface OpenAICompatibleCatalogSpec {
+  kind: "OPENAI_COMPATIBLE";
+  providerId?: string;
+  baseUrl: string;
+  apiKey?: string;
+}
+
+export type ProviderCatalogSpec = OpenRouterCatalogSpec | NaraRouterCatalogSpec | OpenAICompatibleCatalogSpec;
+
+export type ProviderModelPricingTier = "FREE" | "PAID" | "UNKNOWN";
+
+export interface ProviderModelCatalogEntry {
+  id: string;
+  name: string;
+  pricingTier: ProviderModelPricingTier;
+  contextLength?: number;
+}
 
 export interface ProviderSettingsState {
   version: 1;

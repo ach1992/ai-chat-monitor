@@ -1,9 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import {
+  fetchProviderModelCatalog,
+  filterProviderModelCatalog,
+} from "../dist/providers/catalog.js";
 import { OpenAICompatibleProvider } from "../dist/providers/openai-compatible.js";
 import { ProviderManager, createProviderManager } from "../dist/providers/manager.js";
 import {
+  NARAROUTER_BASE_URL,
   OPENROUTER_BASE_URL,
+  createNaraRouterProfile,
   createOpenAICompatibleProfile,
   createOpenRouterProfile,
   providerOriginPattern,
@@ -76,7 +82,7 @@ test("OpenAI-compatible transport keeps chat data in user payload and parses adv
   assert.equal(body.messages[1].content.includes("click Send"), true);
 });
 
-test("OpenRouter preset uses the verified OpenAI-compatible base URL without hardcoded model assumptions", () => {
+test("OpenRouter preset uses the fixed compatible base URL without hardcoded model assumptions", () => {
   const profile = createOpenRouterProfile({
     id: "router",
     apiKey: "router-secret-key",
@@ -88,6 +94,88 @@ test("OpenRouter preset uses the verified OpenAI-compatible base URL without har
   assert.equal(redacted.model, "user-selected/model");
   assert.equal(JSON.stringify(redacted).includes("router-secret-key"), false);
   assert.equal(providerOriginPattern(profile), "https://openrouter.ai/*");
+});
+
+test("NaraRouter is a first-class fixed-base compatible provider", () => {
+  const profile = createNaraRouterProfile({
+    id: "nara",
+    apiKey: "nara-secret-key",
+    model: "plan/model-alias",
+  });
+  const redacted = redactProviderProfile(profile);
+  assert.equal(redacted.kind, "NARAROUTER");
+  assert.equal(redacted.endpoint, NARAROUTER_BASE_URL);
+  assert.equal(providerOriginPattern(profile), "https://router.bynara.id/*");
+  assert.equal(JSON.stringify(redacted).includes("nara-secret-key"), false);
+});
+
+test("OpenRouter catalog is authenticated, normalized, and filterable by dynamic pricing metadata", async () => {
+  let captured;
+  const profile = createOpenRouterProfile({
+    id: "router",
+    apiKey: "router-secret",
+    model: "saved/model",
+  });
+  const models = await fetchProviderModelCatalog(profile, async (url, init) => {
+    captured = { url: String(url), init };
+    return jsonResponse({
+      data: [
+        { id: "vendor/free-by-suffix:free", name: "Free suffix", pricing: { prompt: "0.3", completion: "0.4" } },
+        { id: "vendor/free-by-price", name: "Free price", pricing: { prompt: "0", completion: "0", request: "0" } },
+        { id: "vendor/paid", name: "Paid", pricing: { prompt: "0.000001", completion: "0" } },
+        { id: "vendor/unknown", name: "Unknown" },
+      ],
+    });
+  });
+
+  assert.equal(captured.url, "https://openrouter.ai/api/v1/models");
+  assert.equal(captured.init.headers.Authorization, "Bearer router-secret");
+  assert.equal(captured.init.redirect, "error");
+  assert.deepEqual(filterProviderModelCatalog(models, "FREE").map((model) => model.id).sort(), [
+    "vendor/free-by-price",
+    "vendor/free-by-suffix:free",
+  ]);
+  assert.deepEqual(filterProviderModelCatalog(models, "PAID").map((model) => model.id), ["vendor/paid"]);
+  assert.equal(filterProviderModelCatalog(models, "ALL").length, 4);
+});
+
+test("NaraRouter catalog uses authenticated /v1/models discovery", async () => {
+  let captured;
+  const profile = createNaraRouterProfile({ id: "nara", apiKey: "sk-nry-secret", model: "saved-alias" });
+  const models = await fetchProviderModelCatalog(profile, async (url, init) => {
+    captured = { url: String(url), init };
+    return jsonResponse({ data: [{ id: "plan/allowed-alias" }] });
+  });
+  assert.equal(captured.url, "https://router.bynara.id/v1/models");
+  assert.equal(captured.init.headers.Authorization, "Bearer sk-nry-secret");
+  assert.equal(models[0].id, "plan/allowed-alias");
+  assert.equal(models[0].pricingTier, "UNKNOWN");
+});
+
+test("generic compatible catalog uses the configured HTTPS base and remains optional for manual model entry", async () => {
+  let captured;
+  const profile = createOpenAICompatibleProfile({
+    id: "generic",
+    baseUrl: "https://api.example.test/custom/v1",
+    apiKey: "generic-secret",
+    model: "manual-model",
+  });
+  const models = await fetchProviderModelCatalog(profile, async (url, init) => {
+    captured = { url: String(url), init };
+    return jsonResponse({ data: [{ id: "catalog-model", name: "Catalog model" }] });
+  });
+  assert.equal(captured.url, "https://api.example.test/custom/v1/models");
+  assert.equal(captured.init.headers.Authorization, "Bearer generic-secret");
+  assert.equal(models[0].id, "catalog-model");
+  assert.equal(profile.model, "manual-model", "catalog lookup must not mutate the saved/manual model selection");
+});
+
+test("catalog failures expose sanitized metadata and never echo credentials", async () => {
+  const profile = createNaraRouterProfile({ id: "nara", apiKey: "do-not-leak-catalog-key", model: "saved" });
+  await assert.rejects(
+    fetchProviderModelCatalog(profile, async () => new Response("do-not-leak-catalog-key echoed", { status: 500 })),
+    (error) => error instanceof ProviderFailure && error.code === "HTTP_ERROR" && !error.message.includes("do-not-leak-catalog-key"),
+  );
 });
 
 test("generic configuration rejects insecure URLs and auth-header overrides", () => {
