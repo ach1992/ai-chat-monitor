@@ -1,5 +1,4 @@
-import type { ResolvedAutomationPolicy } from "../automation/types.js";
-import type { AutomationRuntimeStatus } from "../automation/types.js";
+import type { AutomationRuntimeStatus, ResolvedAutomationPolicy } from "../automation/types.js";
 import type { SessionView } from "../core/session-registry.js";
 import { redactSecrets } from "../classification/context.js";
 import type { AuditEvent, AuditEventKind } from "./audit.js";
@@ -67,7 +66,7 @@ export class ReliabilityService {
   readonly #notify: (notification: ReliabilityNotification) => Promise<void>;
   readonly #now: () => number;
   #runtime: ReliabilityRuntimeState = { version: 1, seenKeys: [] };
-  #ready: Promise<void>;
+  #ready: Promise<void> = Promise.resolve();
   #queue: Promise<void> = Promise.resolve();
 
   constructor(options: ReliabilityServiceOptions) {
@@ -76,7 +75,6 @@ export class ReliabilityService {
     this.#resolvePolicy = options.resolvePolicy;
     this.#notify = options.notify;
     this.#now = options.now ?? (() => Date.now());
-    this.#ready = Promise.resolve();
   }
 
   restore(): Promise<void> {
@@ -99,9 +97,7 @@ export class ReliabilityService {
         assistant === undefined ||
         observation.generation !== "IDLE" ||
         observation.confidence !== "HIGH"
-      ) {
-        return;
-      }
+      ) return;
       const policy = this.#resolvePolicy(conversationId);
       if (policy.mode === "OFF") return;
       const key = `response:${conversationId}:${assistant.fingerprint}`;
@@ -118,7 +114,7 @@ export class ReliabilityService {
       };
       await this.#appendAudit(event);
       if (policy.notificationTriggers.includes("RESPONSE_FINISHED")) {
-        await this.#deliver(event, policy, "A selected assistant response finished.");
+        await this.#deliver(event, "A selected assistant response finished.");
       }
     });
   }
@@ -130,16 +126,24 @@ export class ReliabilityService {
       const policy = this.#resolvePolicy(conversationId);
       if (policy.mode === "OFF") return;
       const classification = status.lastDecision;
+      const localStagnation = status.phase === "HOLD" && status.reason?.startsWith("STAGNATION:") === true;
+      const classifiedError =
+        classification?.reasonCode === "PLATFORM_ERROR" ||
+        classification?.reasonCode === "RATE_LIMIT";
       let kind: AuditEventKind | undefined;
       let shouldNotify = false;
 
       if (status.phase === "COOLDOWN" && classification?.decision === "CONTINUE") {
         kind = "CONTINUE";
+      } else if (localStagnation || (status.phase === "HOLD" && classification?.reasonCode === "STAGNATION")) {
+        kind = "STAGNATION";
+        shouldNotify = policy.notificationTriggers.includes("STAGNATION") || policy.notificationTriggers.includes("HOLD");
+      } else if (status.phase === "HOLD" && classification?.decision === "HOLD" && classifiedError) {
+        kind = "ERROR";
+        shouldNotify = policy.notificationTriggers.includes("ERROR");
       } else if (status.phase === "HOLD" && classification?.decision === "HOLD") {
-        kind = classification.reasonCode === "STAGNATION" ? "STAGNATION" : "HOLD";
-        shouldNotify = kind === "STAGNATION"
-          ? policy.notificationTriggers.includes("STAGNATION") || policy.notificationTriggers.includes("HOLD")
-          : policy.notificationTriggers.includes("HOLD");
+        kind = "HOLD";
+        shouldNotify = policy.notificationTriggers.includes("HOLD");
       } else if (status.phase === "UNSURE") {
         const providerError = classification?.reasonCode === "PROVIDER_FAILURE";
         kind = providerError ? "ERROR" : "UNSURE";
@@ -159,7 +163,7 @@ export class ReliabilityService {
         status.assistantFingerprint ?? "none",
         status.decisionId ?? "none",
         status.phase,
-        classification?.reasonCode ?? "none",
+        classification?.reasonCode ?? (localStagnation ? "STAGNATION" : "none"),
       ].join(":");
       if (!(await this.#claimKey(key))) return;
       const event: AuditEvent = {
@@ -175,21 +179,17 @@ export class ReliabilityService {
           reasonCode: classification.reasonCode,
           ...(classification.providerId === undefined ? {} : { providerId: classification.providerId }),
         }),
+        ...(localStagnation && classification === undefined ? { reasonCode: "STAGNATION" as const } : {}),
         ...(status.reason === undefined ? {} : { reason: status.reason }),
         ...(status.assistantFingerprint === undefined ? {} : { assistantFingerprint: status.assistantFingerprint }),
       };
       await this.#appendAudit(event);
-      if (shouldNotify) await this.#deliver(event, policy, status.reason ?? "The chat requires attention.");
+      if (shouldNotify) await this.#deliver(event, status.reason ?? "The chat requires attention.");
     });
   }
 
-  history(limit = 80): AuditEvent[] {
-    return this.#audit.snapshot(limit);
-  }
-
-  clearHistory(): Promise<void> {
-    return this.#audit.clear();
-  }
+  history(limit = 80): AuditEvent[] { return this.#audit.snapshot(limit); }
+  clearHistory(): Promise<void> { return this.#audit.clear(); }
 
   static browserNotify(notification: ReliabilityNotification): Promise<void> {
     return chrome.notifications.create(notification.id, {
@@ -211,10 +211,7 @@ export class ReliabilityService {
 
   async #claimKey(key: string): Promise<boolean> {
     if (this.#runtime.seenKeys.includes(key)) return false;
-    const next: ReliabilityRuntimeState = {
-      version: 1,
-      seenKeys: [...this.#runtime.seenKeys, key].slice(-MAX_SEEN_KEYS),
-    };
+    const next: ReliabilityRuntimeState = { version: 1, seenKeys: [...this.#runtime.seenKeys, key].slice(-MAX_SEEN_KEYS) };
     try {
       await this.#runtimePersistence.save(next);
       this.#runtime = next;
@@ -232,7 +229,7 @@ export class ReliabilityService {
     }
   }
 
-  async #deliver(event: AuditEvent, _policy: ResolvedAutomationPolicy, fallbackMessage: string): Promise<void> {
+  async #deliver(event: AuditEvent, fallbackMessage: string): Promise<void> {
     const notification: ReliabilityNotification = {
       id: `guardian:${event.id}`.slice(0, 500),
       title: notificationTitle(event.kind),
