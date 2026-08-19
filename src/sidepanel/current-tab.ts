@@ -108,6 +108,9 @@ export async function ensureCurrentTabConnected<TChat extends CurrentTabChat>(
   if (initialProbe !== undefined && !sameRecoveryIntent(initialProbe, expectedRouteKey, expectedConversationId)) {
     throw new Error("The ChatGPT tab navigated before Guardian could start the requested action.");
   }
+  if (initialProbe !== undefined && initialProbe.conversationId === undefined) {
+    throw new Error("ChatGPT has not created a stable conversation yet. Send the first message and wait for ChatGPT to assign the conversation identity, then turn Guardian ON.");
+  }
   if (currentTabIdentityMatches(existing, initialProbe) && sameRecoveryIntent(initialProbe, expectedRouteKey, expectedConversationId)) {
     return existing as TChat;
   }
