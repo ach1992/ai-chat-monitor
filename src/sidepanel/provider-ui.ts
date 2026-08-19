@@ -16,6 +16,7 @@ import {
   type GuardianResponse,
   type PanelOverviewRequest,
   type PanelOverviewResponse,
+  type PanelProviderClassifierReadinessRequest,
   type PanelProviderModelCatalogRequest,
   type PanelProviderOrderUpdate,
   type PanelProviderProfileRemove,
@@ -42,7 +43,8 @@ const form = q<HTMLFormElement>("[data-provider-form-v2]", manager);
 const kindSelect = q<HTMLSelectElement>("[data-provider-kind-v2]", form);
 const idInput = q<HTMLInputElement>("[data-provider-id-v2]", form);
 const modelInput = q<HTMLInputElement>("[data-provider-model-v2]", form);
-const modelList = q<HTMLDataListElement>("[data-provider-model-list-v2]", form);
+const modelCatalogField = q<HTMLElement>("[data-provider-model-catalog-field-v2]", form);
+const modelList = q<HTMLSelectElement>("[data-provider-model-list-v2]", form);
 const baseUrlField = q<HTMLElement>("[data-provider-base-url-field-v2]", form);
 const baseUrlInput = q<HTMLInputElement>("[data-provider-base-url-v2]", form);
 const fixedEndpoint = q<HTMLElement>("[data-provider-fixed-endpoint-v2]", form);
@@ -92,6 +94,10 @@ function currentProfile(id: string): RedactedProviderProfile | undefined {
   return settings.profiles.find((profile) => profile.id === id);
 }
 
+function providerOriginPattern(profile: RedactedProviderProfile): string {
+  return `${new URL(profile.endpoint).origin}/*`;
+}
+
 function setBusy(next: boolean): void {
   busy = next;
   manager.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>("button, input, select").forEach((control) => {
@@ -119,6 +125,7 @@ function clearCatalog(message = "Model catalogs are optional; manual model entry
   catalogFilter = "ALL";
   filterSelect.value = "ALL";
   modelList.replaceChildren();
+  modelCatalogField.hidden = true;
   status(message);
 }
 
@@ -128,10 +135,11 @@ function renderCatalog(): void {
   for (const model of visible) {
     const option = document.createElement("option");
     option.value = model.id;
-    option.label = `${model.name}${model.pricingTier === "UNKNOWN" ? "" : ` - ${model.pricingTier}`}`;
+    option.textContent = `${model.id} — ${model.name}${model.pricingTier === "UNKNOWN" ? "" : ` — ${model.pricingTier}`}`;
     modelList.append(option);
   }
-  status(`${visible.length} of ${catalog.length} catalog models shown. You can still type a model ID manually.`);
+  modelCatalogField.hidden = visible.length === 0;
+  status(`${visible.length} of ${catalog.length} catalog models shown in a bounded list. You can still type a model ID manually.`);
 }
 
 function updateKindFields(resetCatalog = true): void {
@@ -183,6 +191,40 @@ function beginEdit(profile: RedactedProviderProfile): void {
   form.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
+async function testClassifier(profile: RedactedProviderProfile): Promise<void> {
+  if (busy) return;
+  setBusy(true);
+  status(`Testing ${profile.id} / ${profile.model} through the real classifier path with bounded synthetic context…`);
+  try {
+    if (!await chrome.permissions.request({ origins: [providerOriginPattern(profile)] })) {
+      status("Provider-origin permission was not granted; classifier readiness was not tested.");
+      return;
+    }
+    const request: PanelProviderClassifierReadinessRequest = {
+      type: "panel:provider-classifier-readiness-request",
+      protocolVersion: PROTOCOL_VERSION,
+      providerId: profile.id,
+    };
+    const response = await chrome.runtime.sendMessage<GuardianResponse>(request);
+    if (response.type === "background:error") throw new Error(response.message);
+    if (response.type !== "background:provider-classifier-readiness") {
+      throw new Error("Guardian returned an unexpected classifier-readiness response.");
+    }
+    const result = response.result;
+    if (result.ok) {
+      const confidence = result.confidence === undefined ? "" : ` at confidence ${result.confidence.toFixed(2)}`;
+      status(`Classifier ready: ${result.providerId} / ${result.model} returned ${result.decision} (${result.reasonCode})${confidence}.`);
+    } else {
+      status(`Classifier not ready: ${result.providerId} / ${result.model} failed (${result.code}): ${result.message}`);
+    }
+  } catch (error) {
+    status(error instanceof Error ? error.message : "Classifier readiness check failed.");
+  } finally {
+    setBusy(false);
+    renderProviderList();
+  }
+}
+
 function renderProviderList(): void {
   providerList.replaceChildren();
   if (settings.profiles.length === 0) {
@@ -201,10 +243,14 @@ function renderProviderList(): void {
     if (providerId === primaryId()) copy.append(e("span", "badge", "Primary"));
 
     const actions = e("div", "provider-actions");
+    const readiness = e("button", "secondary small", "Test classifier");
+    readiness.type = "button";
+    readiness.title = "Run a bounded synthetic request through this exact saved classifier model";
+    readiness.addEventListener("click", () => { void testClassifier(profile); });
     const edit = e("button", "secondary small", "Edit");
     edit.type = "button";
     edit.addEventListener("click", () => beginEdit(profile));
-    actions.append(edit);
+    actions.append(readiness, edit);
 
     const index = settings.order.indexOf(providerId);
     const up = e("button", "secondary small", "Up");
@@ -388,6 +434,9 @@ filterSelect.addEventListener("change", () => {
   const next = filterSelect.value;
   catalogFilter = next === "FREE" ? "FREE" : next === "PAID" ? "PAID" : "ALL";
   renderCatalog();
+});
+modelList.addEventListener("change", () => {
+  if (modelList.value.length > 0) modelInput.value = modelList.value;
 });
 loadModelsButton.addEventListener("click", () => { void loadModels(); });
 addButton.addEventListener("click", () => {
