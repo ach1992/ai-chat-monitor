@@ -37,6 +37,7 @@ function e<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, te
   return element;
 }
 
+const MAX_VISIBLE_MODEL_SUGGESTIONS = 100;
 const manager = q<HTMLElement>("[data-provider-manager-v2]");
 const providerList = q<HTMLElement>("[data-provider-list-v2]", manager);
 const form = q<HTMLFormElement>("[data-provider-form-v2]", manager);
@@ -120,26 +121,41 @@ async function refreshProviders(): Promise<void> {
   renderProviderList();
 }
 
+function setCatalogExpanded(expanded: boolean): void {
+  modelCatalogField.hidden = !expanded;
+  modelInput.setAttribute("aria-expanded", String(expanded));
+}
+
 function clearCatalog(message = "Model catalogs are optional; manual model entry remains available."): void {
   catalog = [];
   catalogFilter = "ALL";
   filterSelect.value = "ALL";
   modelList.replaceChildren();
-  modelCatalogField.hidden = true;
+  setCatalogExpanded(false);
   status(message);
 }
 
-function renderCatalog(): void {
+function matchingCatalogModels(): ProviderModelCatalogEntry[] {
+  const tierMatches = filterProviderModelCatalog(catalog, catalogFilter);
+  const query = modelInput.value.trim().toLowerCase();
+  if (query.length === 0) return tierMatches;
+  return tierMatches.filter((model) => `${model.id} ${model.name}`.toLowerCase().includes(query));
+}
+
+function renderCatalog(openWhenAvailable = document.activeElement === modelInput): void {
   modelList.replaceChildren();
-  const visible = filterProviderModelCatalog(catalog, catalogFilter);
+  const matches = matchingCatalogModels();
+  const visible = matches.slice(0, MAX_VISIBLE_MODEL_SUGGESTIONS);
   for (const model of visible) {
     const option = document.createElement("option");
     option.value = model.id;
     option.textContent = `${model.id} — ${model.name}${model.pricingTier === "UNKNOWN" ? "" : ` — ${model.pricingTier}`}`;
     modelList.append(option);
   }
-  modelCatalogField.hidden = visible.length === 0;
-  status(`${visible.length} of ${catalog.length} catalog models shown in a bounded list. You can still type a model ID manually.`);
+  setCatalogExpanded(openWhenAvailable && visible.length > 0);
+  if (catalog.length === 0) return;
+  const suffix = matches.length > visible.length ? ` Showing the first ${visible.length}; keep typing to narrow the search.` : "";
+  status(`${matches.length} matching model${matches.length === 1 ? "" : "s"} from ${catalog.length} loaded.${suffix} Manual model IDs remain allowed.`);
 }
 
 function updateKindFields(resetCatalog = true): void {
@@ -322,7 +338,8 @@ async function loadModels(): Promise<void> {
     catalog = response.models;
     catalogFilter = "ALL";
     filterSelect.value = "ALL";
-    renderCatalog();
+    modelInput.focus();
+    renderCatalog(true);
   } catch (error) {
     clearCatalog(providerKind() === "OPENAI_COMPATIBLE"
       ? `Catalog unavailable: ${error instanceof Error ? error.message : "request failed"}. Enter a model ID manually.`
@@ -433,10 +450,36 @@ baseUrlInput.addEventListener("input", () => clearCatalog("Base URL changed. Rel
 filterSelect.addEventListener("change", () => {
   const next = filterSelect.value;
   catalogFilter = next === "FREE" ? "FREE" : next === "PAID" ? "PAID" : "ALL";
-  renderCatalog();
+  renderCatalog(false);
+});
+modelInput.addEventListener("input", () => renderCatalog(true));
+modelInput.addEventListener("focus", () => renderCatalog(true));
+modelInput.addEventListener("blur", () => {
+  window.setTimeout(() => {
+    if (document.activeElement !== modelList) setCatalogExpanded(false);
+  }, 0);
+});
+modelInput.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    setCatalogExpanded(false);
+    return;
+  }
+  if (event.key === "ArrowDown" && !modelCatalogField.hidden && modelList.options.length > 0) {
+    event.preventDefault();
+    modelList.selectedIndex = 0;
+    modelList.focus();
+  }
 });
 modelList.addEventListener("change", () => {
   if (modelList.value.length > 0) modelInput.value = modelList.value;
+  setCatalogExpanded(false);
+  modelInput.focus();
+});
+modelList.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  event.preventDefault();
+  setCatalogExpanded(false);
+  modelInput.focus();
 });
 loadModelsButton.addEventListener("click", () => { void loadModels(); });
 addButton.addEventListener("click", () => {
