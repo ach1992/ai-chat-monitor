@@ -119,6 +119,27 @@ test("legacy fingerprint-only guards remain conservative when exact DOM response
   })), false);
 });
 
+test("unbounded DOM response ids fall back to a durable fingerprint-only guard", async () => {
+  const store = persistence();
+  const journal = new AutomationWriteJournal(store);
+  await journal.restore();
+
+  const oversizedDomMessageId = "x".repeat(201);
+  assert.equal(await journal.reserve(envelope({
+    decisionId: "decision-long-id",
+    assistantDomMessageId: oversizedDomMessageId,
+  })), true);
+
+  const stored = journal.snapshot().records[0];
+  assert.equal(stored.assistantDomMessageId, undefined);
+  assert.equal(journal.hasGuard("chat-1", fingerprint(1), "assistant-new"), true);
+
+  const restored = new AutomationWriteJournal(store);
+  await restored.restore();
+  assert.equal(restored.snapshot().records.length, 1);
+  assert.equal(restored.hasGuard("chat-1", fingerprint(1), "assistant-new"), true);
+});
+
 test("outcome reconciliation fails closed if its reserved guard is unexpectedly missing", async () => {
   const store = persistence();
   const journal = new AutomationWriteJournal(store);
