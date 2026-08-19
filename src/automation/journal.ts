@@ -5,6 +5,7 @@ export type WriteGuardDisposition = "ATTEMPTED" | "AMBIGUOUS" | "VERIFIED";
 export interface WriteGuardRecord {
   conversationId: string;
   assistantFingerprint: string;
+  assistantDomMessageId?: string;
   outcomeSignature?: string;
   decisionId: string;
   documentId: string;
@@ -28,6 +29,11 @@ function validRecord(record: WriteGuardRecord): boolean {
     record.conversationId.length > 0 &&
     typeof record.assistantFingerprint === "string" &&
     /^[a-f0-9]{64}$/.test(record.assistantFingerprint) &&
+    (record.assistantDomMessageId === undefined || (
+      typeof record.assistantDomMessageId === "string" &&
+      record.assistantDomMessageId.length > 0 &&
+      record.assistantDomMessageId.length <= 200
+    )) &&
     (record.outcomeSignature === undefined || /^[a-f0-9]{16}$/.test(record.outcomeSignature)) &&
     typeof record.decisionId === "string" &&
     record.decisionId.length > 0 &&
@@ -43,6 +49,20 @@ function normalizeState(state: AutomationWriteJournalState | undefined): Automat
   return { version: 1, records: state.records.filter(validRecord).map((record) => ({ ...record })) };
 }
 
+function guardedResponseMatches(
+  record: WriteGuardRecord,
+  conversationId: string,
+  assistantFingerprint: string,
+  assistantDomMessageId: string | undefined,
+): boolean {
+  if (record.conversationId !== conversationId || record.assistantFingerprint !== assistantFingerprint) return false;
+  return (
+    record.assistantDomMessageId === undefined ||
+    assistantDomMessageId === undefined ||
+    record.assistantDomMessageId === assistantDomMessageId
+  );
+}
+
 export class AutomationWriteJournal {
   readonly #persistence: AutomationWriteJournalPersistence;
   #state: AutomationWriteJournalState = { version: 1, records: [] };
@@ -53,9 +73,9 @@ export class AutomationWriteJournal {
   async restore(): Promise<void> { this.#state = normalizeState(await this.#persistence.load()); }
   snapshot(): AutomationWriteJournalState { return structuredClone(this.#state); }
 
-  hasGuard(conversationId: string, assistantFingerprint: string): boolean {
-    return this.#state.records.some(
-      (record) => record.conversationId === conversationId && record.assistantFingerprint === assistantFingerprint,
+  hasGuard(conversationId: string, assistantFingerprint: string, assistantDomMessageId?: string): boolean {
+    return this.#state.records.some((record) =>
+      guardedResponseMatches(record, conversationId, assistantFingerprint, assistantDomMessageId),
     );
   }
 
@@ -72,10 +92,11 @@ export class AutomationWriteJournal {
 
   reserve(envelope: AutomationDecisionEnvelope): Promise<boolean> {
     return this.#enqueue(async () => {
-      if (this.hasGuard(envelope.conversationId, envelope.assistantFingerprint)) return false;
+      if (this.hasGuard(envelope.conversationId, envelope.assistantFingerprint, envelope.assistantDomMessageId)) return false;
       const record: WriteGuardRecord = {
         conversationId: envelope.conversationId,
         assistantFingerprint: envelope.assistantFingerprint,
+        ...(envelope.assistantDomMessageId === undefined ? {} : { assistantDomMessageId: envelope.assistantDomMessageId }),
         decisionId: envelope.decisionId,
         documentId: envelope.documentId,
         attemptedAt: envelope.createdAt,
