@@ -81,6 +81,7 @@ function isAgentReconnectResponse(value: unknown): value is AgentReconnectRespon
 const root = q<HTMLElement>("[data-current-tab-live]");
 const statusElement = q<HTMLElement>("[data-status]");
 const detailsElement = q<HTMLElement>("[data-details]");
+const refreshButton = q<HTMLButtonElement>("[data-refresh]");
 let activeTabId: number | undefined;
 let currentTabBusy = false;
 let refreshPromise: Promise<void> | undefined;
@@ -201,6 +202,17 @@ function modeLabel(mode: string): string {
   if (mode === "AUTO") return "Auto";
   if (mode === "NOTIFY_ONLY") return "Notify only";
   return "Off";
+}
+
+function clearStaleFailureIfRecovered(overview: PanelOverviewResponse, identityCurrent: boolean): void {
+  if (!identityCurrent) return;
+  const currentStatus = statusElement.textContent ?? "";
+  if (currentStatus !== "Current-tab update failed." && currentStatus !== "Reconnect failed.") return;
+  const managed = overview.chats.filter((chat) => chat.policy?.mode !== undefined && chat.policy.mode !== "OFF").length;
+  status(
+    overview.emergencyPaused ? "All automatic sends are paused." : "Guardian is ready.",
+    `${managed} managed of ${overview.chats.length} connected chat tab${overview.chats.length === 1 ? "" : "s"}.`,
+  );
 }
 
 function renderCurrentTab(state: CurrentTabState): void {
@@ -351,7 +363,10 @@ async function doRefreshCurrentTab(serial: number): Promise<void> {
     const routeKey = supportedChatGptRouteKey(tab?.url);
     const probe = routeKey !== undefined && activeTabId !== undefined ? await probeContentAgent(activeTabId) : undefined;
     const identityCurrent = currentTabIdentityMatches(chat, probe);
-    if (serial === refreshSerial) renderCurrentTab({ tab, overview, chat, routeKey, agentReachable: probe !== undefined, identityCurrent });
+    if (serial === refreshSerial) {
+      renderCurrentTab({ tab, overview, chat, routeKey, agentReachable: probe !== undefined, identityCurrent });
+      clearStaleFailureIfRecovered(overview, identityCurrent);
+    }
   } catch (error) {
     if (serial === refreshSerial) {
       root.className = "current-card current-card-primary";
@@ -375,6 +390,7 @@ function refreshCurrentTab(force = false): Promise<void> {
   return running;
 }
 
+refreshButton.addEventListener("click", () => { void refreshCurrentTab(true); });
 chrome.tabs.onActivated.addListener(() => { void refreshCurrentTab(true); });
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (shouldRefreshCurrentTabForUpdate(activeTabId, tabId, changeInfo)) void refreshCurrentTab(true);
