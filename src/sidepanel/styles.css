@@ -83,6 +83,14 @@ h3 { font-size: 0.95rem; }
 .provider-editor { border-top: 1px solid var(--border); padding-top: 0.65rem; }
 .provider-editor summary { cursor: pointer; font-weight: 800; }
 .provider-form { margin-top: 0.7rem; }
+.provider-manager { display: grid; gap: 0.8rem; }
+.provider-manager-heading { padding-bottom: 0.15rem; }
+.provider-editor-v2 { margin-top: 0; padding-top: 0.8rem; border-top: 1px solid var(--border); }
+.fixed-endpoint { min-height: 2.25rem; display: flex; align-items: center; padding: 0.5rem 0.6rem; border: 1px dashed var(--border); border-radius: 0.65rem; color: var(--muted); font-size: 0.78rem; overflow-wrap: anywhere; }
+.catalog-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.55rem; align-items: end; }
+.catalog-controls label { display: grid; gap: 0.3rem; }
+.provider-editor-actions { gap: 0.5rem; }
+.provider-editor-actions button { min-width: 7rem; }
 
 .reliability-row { padding: 0.65rem; align-items: flex-start; }
 .reliability-controls { display: grid; grid-template-columns: minmax(5rem, 7rem) auto; gap: 0.4rem; align-items: center; flex: 0 0 auto; }
@@ -98,7 +106,7 @@ h3 { font-size: 0.95rem; }
 @media (max-width: 380px) {
   .hero, .section-heading, .chat-card-head, .provider-row, .reliability-row, .audit-row-head { align-items: stretch; flex-direction: column; }
   .hero-actions { grid-template-columns: 1fr 1fr; }
-  .form-grid, .chat-controls, .check-grid, .current-actions { grid-template-columns: 1fr; }
+  .form-grid, .chat-controls, .check-grid, .current-actions, .catalog-controls { grid-template-columns: 1fr; }
   .current-actions > button:only-child { grid-column: auto; }
   .guardian-state-block { justify-items: start; }
   .reliability-controls { grid-template-columns: 1fr auto; width: 100%; }
