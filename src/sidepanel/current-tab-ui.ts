@@ -8,6 +8,7 @@ import {
 } from "../shared/protocol.js";
 import {
   currentTabIdentityMatches,
+  currentTabRouteMatchesChat,
   desiredCurrentTabMode,
   ensureCurrentTabConnected,
   shouldRefreshCurrentTabForUpdate,
@@ -146,6 +147,35 @@ async function ensureConnected(tabId: number, expectedRouteKey: string): Promise
   }, tabId, { expectedRouteKey });
 }
 
+async function updateCurrentTabMode(
+  tabId: number,
+  conversationId: string,
+  mode: "OFF" | "OBSERVE" | "AUTO" | "NOTIFY_ONLY",
+): Promise<void> {
+  const request: PanelAutomationPolicyUpdate = {
+    type: "panel:automation-policy-update",
+    protocolVersion: PROTOCOL_VERSION,
+    tabId,
+    conversationId,
+    patch: { mode },
+  };
+  requireSuccess(await chrome.runtime.sendMessage<GuardianResponse>(request));
+}
+
+async function tryDirectDisable(tabId: number, conversationId: string): Promise<boolean> {
+  const request: PanelAutomationPolicyUpdate = {
+    type: "panel:automation-policy-update",
+    protocolVersion: PROTOCOL_VERSION,
+    tabId,
+    conversationId,
+    patch: { mode: "OFF" },
+  };
+  const response = await chrome.runtime.sendMessage<GuardianResponse>(request);
+  if (response.type !== "background:error") return true;
+  if (response.code === "INVALID_MESSAGE") return false;
+  throw new Error(response.message);
+}
+
 function primaryProviderText(overview: PanelOverviewResponse): string {
   const primaryId = overview.providers.order[0];
   if (primaryId === undefined) return "No AI provider configured";
@@ -192,8 +222,10 @@ function renderCurrentTab(state: CurrentTabState): void {
   }
 
   const chat = state.chat;
-  const mode = chat?.policy?.mode ?? "OFF";
+  const routeStateCurrent = currentTabRouteMatchesChat(chat, routeKey);
+  const mode = routeStateCurrent ? (chat?.policy?.mode ?? "OFF") : "OFF";
   const enabled = mode !== "OFF";
+  const currentConversationId = routeStateCurrent ? chat?.conversationId : undefined;
   root.className = "current-card current-card-primary";
   root.dataset.enabled = String(enabled);
 
@@ -201,7 +233,7 @@ function renderCurrentTab(state: CurrentTabState): void {
   const title = e("div", "title-block");
   title.append(
     e("h3", "chat-title", currentTitle(state)),
-    e("div", "meta", `Tab ${tabId} - ${shortId(chat?.conversationId)}`),
+    e("div", "meta", `Tab ${tabId} - ${shortId(currentConversationId)}`),
   );
   const stateBlock = e("div", "guardian-state-block");
   const stateText = e("strong", "guardian-state", enabled ? "Guardian ON" : "Guardian OFF");
@@ -224,8 +256,10 @@ function renderCurrentTab(state: CurrentTabState): void {
     badge(meta, chat.controlEligibility, chat.controlEligibility === "OWNER" ? "ok" : "warn");
     if (chat.runtime !== undefined) badge(meta, chat.runtime.phase, chat.runtime.phase === "AMBIGUOUS_WRITE" ? "warn" : undefined);
     if (chat.runtime?.lastDecision !== undefined) badge(meta, `Decision: ${chat.runtime.lastDecision.decision}`);
+  } else if (routeStateCurrent) {
+    badge(meta, "Agent stale", "warn");
   } else if (chat !== undefined) {
-    badge(meta, "Identity stale", "warn");
+    badge(meta, "Previous identity stale", "warn");
   }
 
   const actions = e("div", "current-actions");
@@ -234,7 +268,7 @@ function renderCurrentTab(state: CurrentTabState): void {
   toggle.disabled = currentTabBusy;
   toggle.setAttribute("aria-pressed", String(enabled));
   toggle.addEventListener("click", () => {
-    void setCurrentTabEnabled(tabId, !enabled, routeKey);
+    void setCurrentTabEnabled(tabId, !enabled, routeKey, currentConversationId);
   });
   actions.append(toggle);
   if (enabled && !state.identityCurrent) {
@@ -261,25 +295,29 @@ function renderCurrentTab(state: CurrentTabState): void {
   root.append(e("div", "meta", primaryProviderText(state.overview)), actions, advanced);
 }
 
-async function setCurrentTabEnabled(tabId: number, enabled: boolean, expectedRouteKey: string): Promise<void> {
+async function setCurrentTabEnabled(
+  tabId: number,
+  enabled: boolean,
+  expectedRouteKey: string,
+  knownConversationId: string | undefined,
+): Promise<void> {
   if (currentTabBusy) return;
   currentTabBusy = true;
   status(enabled ? "Turning Guardian ON..." : "Turning Guardian OFF...", "Exact tab and conversation identity are revalidated before the policy changes.");
   try {
+    if (!enabled && knownConversationId !== undefined) {
+      const disabled = await tryDirectDisable(tabId, knownConversationId);
+      if (disabled) {
+        status("Guardian is OFF for this tab.", "Supervision is disabled for this conversation.");
+        return;
+      }
+    }
+
     const chat = await ensureConnected(tabId, expectedRouteKey);
     if (chat.conversationId === undefined) throw new Error("ChatGPT has not exposed a stable conversation identity yet.");
     const currentMode = chat.policy?.mode ?? "OFF";
     const desiredMode = desiredCurrentTabMode(currentMode, enabled);
-    if (desiredMode !== currentMode) {
-      const request: PanelAutomationPolicyUpdate = {
-        type: "panel:automation-policy-update",
-        protocolVersion: PROTOCOL_VERSION,
-        tabId,
-        conversationId: chat.conversationId,
-        patch: { mode: desiredMode },
-      };
-      requireSuccess(await chrome.runtime.sendMessage<GuardianResponse>(request));
-    }
+    if (desiredMode !== currentMode) await updateCurrentTabMode(tabId, chat.conversationId, desiredMode);
     status(enabled ? "Guardian is ON for this tab." : "Guardian is OFF for this tab.", enabled ? `Mode: ${modeLabel(desiredMode)}. Advanced modes remain per-conversation.` : "Supervision is disabled for this conversation.");
   } catch (error) {
     status("Current-tab update failed.", error instanceof Error ? error.message : "Guardian could not recover the current ChatGPT tab.");
