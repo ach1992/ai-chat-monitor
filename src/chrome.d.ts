@@ -16,6 +16,7 @@ declare namespace chrome {
     }
 
     const onMessage: MessageEvent;
+    const lastError: { message?: string } | undefined;
 
     function sendMessage<TResponse = unknown>(message: unknown): Promise<TResponse>;
   }
@@ -73,6 +74,22 @@ declare namespace chrome {
 
     function request(permissions: Permissions): Promise<boolean>;
     function contains(permissions: Permissions): Promise<boolean>;
+  }
+
+  namespace notifications {
+    interface NotificationOptions {
+      type: "basic";
+      iconUrl: string;
+      title: string;
+      message: string;
+      priority?: number;
+    }
+
+    function create(
+      notificationId: string,
+      options: NotificationOptions,
+      callback?: (notificationId: string) => void,
+    ): void;
   }
 
   namespace storage {
