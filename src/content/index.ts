@@ -26,6 +26,16 @@ namespace GuardianContentAgent {
     expiresAt: number;
   }
 
+  interface PanelAgentProbeMessage {
+    type: "panel:agent-probe";
+    protocolVersion: 2;
+  }
+
+  interface PanelAgentReconnectMessage {
+    type: "panel:agent-reconnect";
+    protocolVersion: 2;
+  }
+
   const adapter = new GuardianContent.BrowserChatGPTAdapter(document, location);
   const agentInstanceId = crypto.randomUUID();
   let pageEpoch = 1;
@@ -48,23 +58,46 @@ namespace GuardianContentAgent {
     return response;
   }
 
+  function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
+  }
+
   function isGuardedSendMessage(value: unknown): value is GuardedSendMessage {
-    if (typeof value !== "object" || value === null) return false;
-    const record = value as Record<string, unknown>;
+    if (!isRecord(value)) return false;
     return (
-      record.type === "background:guarded-send" &&
-      record.protocolVersion === GuardianContent.PROTOCOL_VERSION &&
-      typeof record.decisionId === "string" && record.decisionId.length > 0 && record.decisionId.length <= 128 &&
-      typeof record.agentInstanceId === "string" && record.agentInstanceId.length > 0 && record.agentInstanceId.length <= 128 &&
-      typeof record.pageEpoch === "number" && Number.isInteger(record.pageEpoch) && record.pageEpoch >= 1 &&
-      typeof record.conversationId === "string" && record.conversationId.length >= 4 && record.conversationId.length <= 200 &&
-      typeof record.routeKey === "string" && record.routeKey.length > 0 && record.routeKey.length <= 500 &&
-      typeof record.assistantFingerprint === "string" && /^[a-f0-9]{64}$/.test(record.assistantFingerprint) &&
-      (record.assistantDomMessageId === undefined || typeof record.assistantDomMessageId === "string") &&
-      (record.lastUserInteractionAt === undefined || (typeof record.lastUserInteractionAt === "number" && Number.isFinite(record.lastUserInteractionAt))) &&
-      typeof record.continuationText === "string" && record.continuationText.trim().length > 0 && record.continuationText.length <= 200 &&
-      typeof record.expiresAt === "number" && Number.isFinite(record.expiresAt)
+      value.type === "background:guarded-send" &&
+      value.protocolVersion === GuardianContent.PROTOCOL_VERSION &&
+      typeof value.decisionId === "string" && value.decisionId.length > 0 && value.decisionId.length <= 128 &&
+      typeof value.agentInstanceId === "string" && value.agentInstanceId.length > 0 && value.agentInstanceId.length <= 128 &&
+      typeof value.pageEpoch === "number" && Number.isInteger(value.pageEpoch) && value.pageEpoch >= 1 &&
+      typeof value.conversationId === "string" && value.conversationId.length >= 4 && value.conversationId.length <= 200 &&
+      typeof value.routeKey === "string" && value.routeKey.length > 0 && value.routeKey.length <= 500 &&
+      typeof value.assistantFingerprint === "string" && /^[a-f0-9]{64}$/.test(value.assistantFingerprint) &&
+      (value.assistantDomMessageId === undefined || typeof value.assistantDomMessageId === "string") &&
+      (value.lastUserInteractionAt === undefined || (typeof value.lastUserInteractionAt === "number" && Number.isFinite(value.lastUserInteractionAt))) &&
+      typeof value.continuationText === "string" && value.continuationText.trim().length > 0 && value.continuationText.length <= 200 &&
+      typeof value.expiresAt === "number" && Number.isFinite(value.expiresAt)
     );
+  }
+
+  function isPanelAgentProbeMessage(value: unknown): value is PanelAgentProbeMessage {
+    return isRecord(value) && value.type === "panel:agent-probe" && value.protocolVersion === GuardianContent.PROTOCOL_VERSION;
+  }
+
+  function isPanelAgentReconnectMessage(value: unknown): value is PanelAgentReconnectMessage {
+    return isRecord(value) && value.type === "panel:agent-reconnect" && value.protocolVersion === GuardianContent.PROTOCOL_VERSION;
+  }
+
+  function agentProbeResponse(): Record<string, unknown> {
+    const conversationId = adapter.currentConversationId();
+    return {
+      type: "content:agent-probe",
+      protocolVersion: GuardianContent.PROTOCOL_VERSION,
+      agentInstanceId,
+      pageEpoch,
+      routeKey: adapter.currentRouteKey(),
+      ...(conversationId === undefined ? {} : { conversationId }),
+    };
   }
 
   async function handleGuardedSend(message: GuardedSendMessage): Promise<GuardianContent.PageGuardedSendResult> {
@@ -87,9 +120,9 @@ namespace GuardianContentAgent {
     return result;
   }
 
-  async function announceAgent(): Promise<void> {
+  async function announceAgent(): Promise<boolean> {
     const conversationId = adapter.currentConversationId();
-    await send({
+    const response = await send({
       type: "content:hello",
       protocolVersion: GuardianContent.PROTOCOL_VERSION,
       agentInstanceId,
@@ -99,15 +132,16 @@ namespace GuardianContentAgent {
       ...(conversationId === undefined ? {} : { conversationId }),
       sentAt: Date.now(),
     });
+    return response?.type === "background:agent-ack" && response.accepted;
   }
 
-  async function emitNavigation(nextRouteKey: string): Promise<void> {
+  async function emitNavigation(nextRouteKey: string): Promise<boolean> {
     pageEpoch += 1;
     lastRouteKey = nextRouteKey;
     observationGeneration += 1;
     if (observationTimer !== undefined) { clearTimeout(observationTimer); observationTimer = undefined; }
     const conversationId = adapter.currentConversationId();
-    await send({
+    const response = await send({
       type: "content:navigation",
       protocolVersion: GuardianContent.PROTOCOL_VERSION,
       agentInstanceId,
@@ -118,6 +152,17 @@ namespace GuardianContentAgent {
       sentAt: Date.now(),
     });
     scheduleObservation(0);
+    return response?.type === "background:agent-ack" && response.accepted;
+  }
+
+  async function reconnectAgent(): Promise<boolean> {
+    const nextRouteKey = adapter.currentRouteKey();
+    if (nextRouteKey !== lastRouteKey) {
+      const navigated = await emitNavigation(nextRouteKey);
+      if (navigated) return true;
+      return announceAgent();
+    }
+    return announceAgent();
   }
 
   async function observe(expectedGeneration: number): Promise<void> {
@@ -163,6 +208,27 @@ namespace GuardianContentAgent {
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (isPanelAgentProbeMessage(message)) {
+      sendResponse(agentProbeResponse());
+      return false;
+    }
+    if (isPanelAgentReconnectMessage(message)) {
+      void reconnectAgent().then((accepted) => {
+        if (accepted) scheduleObservation(0);
+        sendResponse({
+          type: "content:agent-reconnected",
+          protocolVersion: GuardianContent.PROTOCOL_VERSION,
+          accepted,
+        });
+      }, () => {
+        sendResponse({
+          type: "content:agent-reconnected",
+          protocolVersion: GuardianContent.PROTOCOL_VERSION,
+          accepted: false,
+        });
+      });
+      return true;
+    }
     if (!isGuardedSendMessage(message)) return false;
     void handleGuardedSend(message).then(sendResponse, () => {
       sendResponse({ decisionId: message.decisionId, status: "AMBIGUOUS", reason: "Content-agent guarded send failed unexpectedly." });

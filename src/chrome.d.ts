@@ -25,10 +25,17 @@ declare namespace chrome {
     interface Tab {
       id?: number;
       active?: boolean;
+      title?: string;
+      url?: string;
     }
 
     interface TabChangeInfo {
       status?: "loading" | "complete";
+      url?: string;
+    }
+
+    interface ActiveInfo {
+      tabId: number;
     }
 
     interface RemovedEvent {
@@ -41,6 +48,10 @@ declare namespace chrome {
       ): void;
     }
 
+    interface ActivatedEvent {
+      addListener(callback: (activeInfo: ActiveInfo) => void): void;
+    }
+
     interface MessageSendOptions {
       documentId?: string;
       frameId?: number;
@@ -48,16 +59,21 @@ declare namespace chrome {
 
     const onRemoved: RemovedEvent;
     const onUpdated: UpdatedEvent;
+    const onActivated: ActivatedEvent;
 
     function query(queryInfo: {
       active?: boolean;
       currentWindow?: boolean;
     }): Promise<Tab[]>;
 
+    function get(tabId: number): Promise<Tab>;
+
     function update(
       tabId: number,
       updateProperties: { active?: boolean },
     ): Promise<Tab>;
+
+    function reload(tabId: number): Promise<void>;
 
     function sendMessage<TResponse = unknown>(
       tabId: number,
