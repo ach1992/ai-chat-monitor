@@ -1,3 +1,5 @@
+import type { ChatAutomationMode } from "../automation/types.js";
+
 export interface CurrentTabChat {
   tabId: number;
   conversationId?: string;
@@ -18,6 +20,11 @@ export interface CurrentTabConnectionOptions {
   intervalMs?: number;
 }
 
+export interface CurrentTabUpdateSignal {
+  status?: string;
+  url?: string;
+}
+
 export function isSupportedChatGptUrl(value: string | undefined): boolean {
   if (value === undefined) return false;
   try {
@@ -26,6 +33,19 @@ export function isSupportedChatGptUrl(value: string | undefined): boolean {
   } catch {
     return false;
   }
+}
+
+export function desiredCurrentTabMode(currentMode: ChatAutomationMode, enabled: boolean): ChatAutomationMode {
+  if (!enabled) return "OFF";
+  return currentMode === "OFF" ? "OBSERVE" : currentMode;
+}
+
+export function shouldRefreshCurrentTabForUpdate(
+  activeTabId: number | undefined,
+  updatedTabId: number,
+  changeInfo: CurrentTabUpdateSignal,
+): boolean {
+  return activeTabId === updatedTabId && (changeInfo.status !== undefined || changeInfo.url !== undefined);
 }
 
 export async function ensureCurrentTabConnected<TChat extends CurrentTabChat>(
