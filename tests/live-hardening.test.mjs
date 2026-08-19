@@ -38,19 +38,22 @@ test("browser notification uses a Chromium-compatible raster data URL", async ()
 });
 
 test("Side Panel live-hardening UX is wired without broadening browser authority", async () => {
-  const [html, css, availability, providerUi, currentTabUi] = await Promise.all([
+  const [html, css, availability, worker, providerUi, currentTabUi, manifestText] = await Promise.all([
     readDist("sidepanel/index.html"),
     readDist("sidepanel/styles.css"),
-    readDist("sidepanel/availability.js"),
+    readDist("background/sidepanel-availability.js"),
+    readDist("background/worker.js"),
     readDist("sidepanel/provider-ui.js"),
     readDist("sidepanel/current-tab-ui.js"),
+    readDist("manifest.json"),
   ]);
+  const manifest = JSON.parse(manifestText);
 
   assert.match(html, /id="provider-editor-v2"[^>]*hidden/);
   assert.match(html, /data-provider-add-v2[^>]*aria-expanded="false"/);
   assert.match(html, /pattern="\[-A-Za-z0-9_\]\+"/);
   assert.doesNotMatch(html, /pattern="\[A-Za-z0-9_-\]\+"/);
-  assert.match(html, /availability\.js/);
+  assert.doesNotMatch(html, /availability\.js/);
 
   const listIndex = html.indexOf("data-provider-list-v2");
   const addIndex = html.indexOf("data-provider-add-v2");
@@ -63,6 +66,9 @@ test("Side Panel live-hardening UX is wired without broadening browser authority
   assert.match(currentTabUi, /clearStaleFailureIfRecovered/);
   assert.match(currentTabUi, /refreshButton\.addEventListener/);
 
+  assert.equal(manifest.background.service_worker, "background/worker.js");
+  assert.match(worker, /\.\/index\.js/);
+  assert.match(worker, /\.\/sidepanel-availability\.js/);
   assert.match(availability, /chrome\.sidePanel\.setOptions/);
   assert.match(availability, /chatgpt\.com/);
   assert.match(availability, /chat\.openai\.com/);
