@@ -76,7 +76,6 @@ export class AutomationWriteJournal {
       const record: WriteGuardRecord = {
         conversationId: envelope.conversationId,
         assistantFingerprint: envelope.assistantFingerprint,
-        outcomeSignature: envelope.outcomeSignature,
         decisionId: envelope.decisionId,
         documentId: envelope.documentId,
         attemptedAt: envelope.createdAt,
@@ -86,6 +85,22 @@ export class AutomationWriteJournal {
       await this.#persistence.save(next);
       this.#state = next;
       return true;
+    });
+  }
+
+  setOutcomeSignature(decisionId: string, outcomeSignature: string): Promise<void> {
+    return this.#enqueue(async () => {
+      if (!/^[a-f0-9]{16}$/.test(outcomeSignature)) throw new Error("Progress signature is invalid.");
+      const index = this.#state.records.findIndex((record) => record.decisionId === decisionId);
+      if (index < 0 || this.#state.records[index]?.disposition !== "ATTEMPTED") {
+        throw new Error("Write guard is not available for progress annotation.");
+      }
+      const records = this.#state.records.map((record, recordIndex) =>
+        recordIndex === index ? { ...record, outcomeSignature } : { ...record },
+      );
+      const next: AutomationWriteJournalState = { version: 1, records };
+      await this.#persistence.save(next);
+      this.#state = next;
     });
   }
 
