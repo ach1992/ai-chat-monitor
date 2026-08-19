@@ -70,6 +70,8 @@ test("Side Panel live-hardening UX is wired without broadening browser authority
   assert.match(worker, /\.\/index\.js/);
   assert.match(worker, /\.\/sidepanel-availability\.js/);
   assert.match(availability, /chrome\.sidePanel\.setOptions/);
+  assert.match(availability, /panel:agent-reconnect/);
+  assert.match(availability, /changeInfo\.status\s*===\s*"complete"/);
   assert.match(availability, /chatgpt\.com/);
   assert.match(availability, /chat\.openai\.com/);
   assert.match(availability, /enabled/);
