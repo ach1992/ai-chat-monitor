@@ -32,6 +32,7 @@ jobs:
           unzip -t artifacts/chat-turn-guardian-*.zip
           test "$(unzip -Z1 artifacts/chat-turn-guardian-*.zip | grep -c '^manifest.json$')" -eq 1
           test "$(unzip -Z1 artifacts/chat-turn-guardian-*.zip | grep -Ec '\.(ts|map)$|(^|/)\.env($|\.)')" -eq 0
+          node -e 'const fs = require("node:fs"); const info = JSON.parse(fs.readFileSync("artifacts/build-info.json", "utf8")); if (info.sourceSha !== process.env.VALIDATION_SHA) { console.error(`build-info sourceSha mismatch: ${info.sourceSha} != ${process.env.VALIDATION_SHA}`); process.exit(1); }'
       - uses: actions/upload-artifact@v4
         with:
           name: chat-turn-guardian-${{ env.VALIDATION_SHA }}
