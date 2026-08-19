@@ -637,7 +637,7 @@ export class AutomationCoordinator {
       conversationId: envelope.conversationId,
       policyRevision: envelope.policyRevision,
       assistantFingerprint: envelope.assistantFingerprint,
-      lastDecision: classification,
+      lastDecision: envelope.classification,
       decisionId: envelope.decisionId,
       cooldownUntil,
       reason: "Continuation send was verified; cooldown is active.",
