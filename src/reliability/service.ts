@@ -127,9 +127,7 @@ export class ReliabilityService {
       if (policy.mode === "OFF") return;
       const classification = status.lastDecision;
       const localStagnation = status.phase === "HOLD" && status.reason?.startsWith("STAGNATION:") === true;
-      const classifiedError =
-        classification?.reasonCode === "PLATFORM_ERROR" ||
-        classification?.reasonCode === "RATE_LIMIT";
+      const classifiedError = classification?.reasonCode === "PLATFORM_ERROR" || classification?.reasonCode === "RATE_LIMIT";
       let kind: AuditEventKind | undefined;
       let shouldNotify = false;
 
@@ -190,15 +188,28 @@ export class ReliabilityService {
 
   history(limit = 80): AuditEvent[] { return this.#audit.snapshot(limit); }
   clearHistory(): Promise<void> { return this.#audit.clear(); }
+  async flush(): Promise<void> { await this.#queue; }
 
   static browserNotify(notification: ReliabilityNotification): Promise<void> {
-    return chrome.notifications.create(notification.id, {
-      type: "basic",
-      iconUrl: NOTIFICATION_ICON,
-      title: notification.title,
-      message: notification.message,
-      priority: 0,
-    }).then(() => undefined);
+    return new Promise((resolve, reject) => {
+      chrome.notifications.create(
+        notification.id,
+        {
+          type: "basic",
+          iconUrl: NOTIFICATION_ICON,
+          title: notification.title,
+          message: notification.message,
+          priority: 0,
+        },
+        () => {
+          if (chrome.runtime.lastError !== undefined) {
+            reject(new Error("Browser notification delivery failed."));
+            return;
+          }
+          resolve();
+        },
+      );
+    });
   }
 
   #schedule(operation: () => Promise<void>): void {
@@ -212,11 +223,11 @@ export class ReliabilityService {
   async #claimKey(key: string): Promise<boolean> {
     if (this.#runtime.seenKeys.includes(key)) return false;
     const next: ReliabilityRuntimeState = { version: 1, seenKeys: [...this.#runtime.seenKeys, key].slice(-MAX_SEEN_KEYS) };
+    this.#runtime = next;
     try {
       await this.#runtimePersistence.save(next);
-      this.#runtime = next;
     } catch {
-      // Dedupe persistence failure is observational only; do not affect automation.
+      // In-memory de-duplication still applies for this worker lifetime.
     }
     return true;
   }
