@@ -23,17 +23,17 @@ export interface AutomationWriteJournalPersistence {
   save(state: AutomationWriteJournalState): Promise<void>;
 }
 
+function boundedDomMessageId(value: string | undefined): string | undefined {
+  return value !== undefined && value.length > 0 && value.length <= 200 ? value : undefined;
+}
+
 function validRecord(record: WriteGuardRecord): boolean {
   return (
     typeof record.conversationId === "string" &&
     record.conversationId.length > 0 &&
     typeof record.assistantFingerprint === "string" &&
     /^[a-f0-9]{64}$/.test(record.assistantFingerprint) &&
-    (record.assistantDomMessageId === undefined || (
-      typeof record.assistantDomMessageId === "string" &&
-      record.assistantDomMessageId.length > 0 &&
-      record.assistantDomMessageId.length <= 200
-    )) &&
+    (record.assistantDomMessageId === undefined || boundedDomMessageId(record.assistantDomMessageId) !== undefined) &&
     (record.outcomeSignature === undefined || /^[a-f0-9]{16}$/.test(record.outcomeSignature)) &&
     typeof record.decisionId === "string" &&
     record.decisionId.length > 0 &&
@@ -74,8 +74,9 @@ export class AutomationWriteJournal {
   snapshot(): AutomationWriteJournalState { return structuredClone(this.#state); }
 
   hasGuard(conversationId: string, assistantFingerprint: string, assistantDomMessageId?: string): boolean {
+    const exactDomMessageId = boundedDomMessageId(assistantDomMessageId);
     return this.#state.records.some((record) =>
-      guardedResponseMatches(record, conversationId, assistantFingerprint, assistantDomMessageId),
+      guardedResponseMatches(record, conversationId, assistantFingerprint, exactDomMessageId),
     );
   }
 
@@ -92,11 +93,12 @@ export class AutomationWriteJournal {
 
   reserve(envelope: AutomationDecisionEnvelope): Promise<boolean> {
     return this.#enqueue(async () => {
-      if (this.hasGuard(envelope.conversationId, envelope.assistantFingerprint, envelope.assistantDomMessageId)) return false;
+      const assistantDomMessageId = boundedDomMessageId(envelope.assistantDomMessageId);
+      if (this.hasGuard(envelope.conversationId, envelope.assistantFingerprint, assistantDomMessageId)) return false;
       const record: WriteGuardRecord = {
         conversationId: envelope.conversationId,
         assistantFingerprint: envelope.assistantFingerprint,
-        ...(envelope.assistantDomMessageId === undefined ? {} : { assistantDomMessageId: envelope.assistantDomMessageId }),
+        ...(assistantDomMessageId === undefined ? {} : { assistantDomMessageId }),
         decisionId: envelope.decisionId,
         documentId: envelope.documentId,
         attemptedAt: envelope.createdAt,
