@@ -7,15 +7,18 @@ async function readDist(path) {
 }
 
 test("Side Panel exposes the MVP management and reliability controls", async () => {
-  const [html, script, reliabilityScript] = await Promise.all([
+  const [html, script, reliabilityScript, currentTabScript, contentScript] = await Promise.all([
     readDist("sidepanel/index.html"),
     readDist("sidepanel/index.js"),
     readDist("sidepanel/reliability.js"),
+    readDist("sidepanel/current-tab-ui.js"),
+    readDist("content/index.js"),
   ]);
 
   for (const marker of [
     "data-pause-all",
     "data-current-tab",
+    "data-current-tab-live",
     "data-chat-list",
     "data-defaults-form",
     "data-provider-list",
@@ -27,6 +30,10 @@ test("Side Panel exposes the MVP management and reliability controls", async () 
   ]) {
     assert.match(html, new RegExp(marker));
   }
+
+  assert.match(html, /Guardian for this tab/);
+  assert.match(html, /class="panel-section disclosure"/);
+  assert.match(html, /current-tab-ui\.js/);
 
   for (const messageType of [
     "panel:overview-request",
@@ -49,9 +56,27 @@ test("Side Panel exposes the MVP management and reliability controls", async () 
     assert.match(reliabilityScript, new RegExp(messageType));
   }
 
+  for (const marker of [
+    "Turn Guardian ON",
+    "Turn Guardian OFF",
+    "panel:agent-probe",
+    "panel:agent-reconnect",
+    "panel:automation-policy-update",
+    "chrome.tabs.reload",
+    "chrome.tabs.onActivated",
+    "chrome.tabs.onUpdated",
+    "setInterval",
+  ]) {
+    assert.match(currentTabScript, new RegExp(marker.replaceAll(".", "\\.")));
+  }
+
+  assert.match(contentScript, /panel:agent-probe/);
+  assert.match(contentScript, /panel:agent-reconnect/);
+  assert.match(contentScript, /content:agent-reconnected/);
   assert.match(script, /chrome\.permissions\.request/);
   assert.match(script, /chrome\.tabs\.update/);
   assert.equal(script.includes(".innerHTML"), false, "chat/provider metadata should be rendered with textContent-safe DOM APIs");
+  assert.equal(currentTabScript.includes(".innerHTML"), false, "current-tab metadata should be rendered with textContent-safe DOM APIs");
   assert.equal(reliabilityScript.includes(".innerHTML"), false, "audit metadata should be rendered with textContent-safe DOM APIs");
   assert.doesNotMatch(reliabilityScript, /apiKey|normalizedText|latestAssistant/);
 });
