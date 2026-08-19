@@ -278,6 +278,7 @@ export class AutomationService {
       session.pageEpoch !== envelope.pageEpoch ||
       session.routeKey !== envelope.routeKey ||
       session.controlEligibility !== "OWNER" ||
+      session.lastUserInteractionAt !== envelope.lastUserInteractionAt ||
       assistant?.fingerprint !== envelope.assistantFingerprint
     ) {
       return {
@@ -336,6 +337,7 @@ export class AutomationService {
       fresh.pageEpoch !== envelope.pageEpoch ||
       fresh.routeKey !== envelope.routeKey ||
       fresh.controlEligibility !== "OWNER" ||
+      fresh.lastUserInteractionAt !== envelope.lastUserInteractionAt ||
       fresh.observation?.latestAssistant?.fingerprint !== envelope.assistantFingerprint ||
       freshPolicy.revision !== envelope.policyRevision ||
       freshPolicy.mode !== "AUTO" ||
