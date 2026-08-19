@@ -177,7 +177,12 @@ namespace GuardianContent {
   function blockingReasons(element: Element, text: string): BlockingReason[] {
     const reasons = new Set<BlockingReason>();
     if (element.getAttribute("role") === "dialog") reasons.add("MODAL");
-    if (element.getAttribute("role") === "alert") reasons.add("ERROR");
+    if (element.getAttribute("role") === "alert") {
+      const id = element.getAttribute("id") ?? "";
+      const classes = (element.getAttribute("class") ?? "").split(/\s+/).filter(Boolean);
+      const inertAccessibilityRegion = id.startsWith("aria-notify-live-region-") || classes.includes("sr-only");
+      if (!inertAccessibilityRegion && text.trim().length > 0) reasons.add("ERROR");
+    }
     const testId = (element.getAttribute("data-testid") ?? "").toLowerCase();
     if (testId.includes("error")) reasons.add("ERROR");
     if (testId.includes("rate-limit")) reasons.add("RATE_LIMIT");
