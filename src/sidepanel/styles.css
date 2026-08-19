@@ -81,7 +81,7 @@ h3 { font-size: 0.95rem; }
 .reason { padding: 0.55rem; border-radius: 0.6rem; background: var(--surface-strong); overflow-wrap: anywhere; }
 
 .form-grid, .chat-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.65rem; }
-.form-grid label, .chat-controls label { display: grid; gap: 0.3rem; font-size: 0.78rem; font-weight: 650; }
+.form-grid label, .chat-controls label, .form-grid .model-field { display: grid; gap: 0.3rem; font-size: 0.78rem; font-weight: 650; }
 .wide { grid-column: 1 / -1; }
 .form-actions { display: flex; justify-content: flex-end; }
 .compact-fieldset { margin: 0; padding: 0.55rem; border: 1px solid var(--border); border-radius: 0.65rem; }
