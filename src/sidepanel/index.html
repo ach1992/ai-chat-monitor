@@ -125,10 +125,75 @@
             <h2 id="providers-heading">Providers</h2>
           </div>
         </summary>
-        <p class="section-note">API keys stay in trusted extension storage and are never returned in ordinary status views.</p>
-        <div data-provider-list class="provider-list"></div>
-        <details class="provider-editor">
-          <summary>Add or replace provider</summary>
+        <p class="section-note">Profiles are editable in place. Stored API keys stay in trusted extension storage and are never rendered back into this panel.</p>
+
+        <div data-provider-manager-v2 class="provider-manager">
+          <div class="section-heading provider-manager-heading">
+            <div>
+              <p class="eyebrow">Priority order</p>
+              <h3>Saved profiles</h3>
+            </div>
+            <button type="button" class="secondary small" data-provider-add-v2>Add provider</button>
+          </div>
+          <div data-provider-list-v2 class="provider-list"></div>
+
+          <form data-provider-form-v2 class="form-grid provider-form provider-editor-v2">
+            <div class="wide">
+              <p class="eyebrow">Profile editor</p>
+              <h3 data-provider-editor-title-v2>Add provider</h3>
+              <p class="section-note" data-provider-editor-note-v2>Choose a preset, optionally load its live model catalog, or enter a model ID manually.</p>
+            </div>
+            <label>
+              <span>Provider type</span>
+              <select data-provider-kind-v2>
+                <option value="OPENROUTER">OpenRouter</option>
+                <option value="NARAROUTER">NaraRouter</option>
+                <option value="OPENAI_COMPATIBLE">Generic OpenAI-compatible</option>
+              </select>
+            </label>
+            <label>
+              <span>Profile ID</span>
+              <input data-provider-id-v2 type="text" maxlength="64" pattern="[A-Za-z0-9_-]+" required />
+            </label>
+            <div class="wide fixed-endpoint" data-provider-fixed-endpoint-v2></div>
+            <label class="wide" data-provider-base-url-field-v2 hidden>
+              <span>Base URL</span>
+              <input data-provider-base-url-v2 type="url" placeholder="https://api.example.com/v1" />
+            </label>
+            <label class="wide">
+              <span>API key</span>
+              <input data-provider-api-key-v2 type="password" maxlength="4096" autocomplete="off" />
+            </label>
+            <label class="wide">
+              <span>Model</span>
+              <input data-provider-model-v2 type="text" maxlength="200" list="provider-model-catalog-v2" autocomplete="off" required />
+              <datalist id="provider-model-catalog-v2" data-provider-model-list-v2></datalist>
+            </label>
+            <div class="wide catalog-controls">
+              <button type="button" class="secondary" data-provider-load-models-v2>Load models</button>
+              <label data-provider-filter-field-v2>
+                <span>OpenRouter models</span>
+                <select data-provider-filter-v2>
+                  <option value="ALL">All</option>
+                  <option value="FREE">Free</option>
+                  <option value="PAID">Paid</option>
+                </select>
+              </label>
+            </div>
+            <label class="checkbox-row wide">
+              <input data-provider-primary-v2 type="checkbox" />
+              <span>Make this the primary provider</span>
+            </label>
+            <div class="wide form-actions provider-editor-actions">
+              <button type="button" class="secondary" data-provider-cancel-v2>Reset</button>
+              <button type="submit">Save provider</button>
+            </div>
+            <p class="wide meta" data-provider-status-v2 aria-live="polite"></p>
+          </form>
+        </div>
+
+        <div hidden aria-hidden="true">
+          <div data-provider-list class="provider-list"></div>
           <form data-provider-form class="form-grid provider-form">
             <label>
               <span>Provider type</span>
@@ -161,7 +226,7 @@
               <button type="submit">Save provider</button>
             </div>
           </form>
-        </details>
+        </div>
       </details>
 
       <footer class="footer-note">
@@ -172,5 +237,6 @@
     <script type="module" src="./index.js"></script>
     <script type="module" src="./reliability.js"></script>
     <script type="module" src="./current-tab-ui.js"></script>
+    <script type="module" src="./provider-ui.js"></script>
   </body>
 </html>
