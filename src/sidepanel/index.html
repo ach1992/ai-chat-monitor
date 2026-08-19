@@ -155,7 +155,7 @@
             </label>
             <label>
               <span>Profile ID</span>
-              <input data-provider-id-v2 type="text" maxlength="64" pattern="[A-Za-z0-9_\-]+" required />
+              <input data-provider-id-v2 type="text" maxlength="64" pattern="(?:[A-Za-z0-9_]|-)+" required />
             </label>
             <div class="wide fixed-endpoint" data-provider-fixed-endpoint-v2></div>
             <label class="wide" data-provider-base-url-field-v2 hidden>
@@ -166,13 +166,31 @@
               <span>API key</span>
               <input data-provider-api-key-v2 type="password" maxlength="4096" autocomplete="off" />
             </label>
-            <label class="wide">
-              <span>Model</span>
-              <input data-provider-model-v2 type="text" maxlength="200" autocomplete="off" required />
-            </label>
-            <div class="wide model-catalog-field" data-provider-model-catalog-field-v2 hidden>
-              <span class="meta">Loaded model catalog suggestions</span>
-              <select data-provider-model-list-v2 class="model-catalog-list" size="8" aria-label="Loaded model catalog suggestions"></select>
+            <div class="wide model-field">
+              <label for="provider-model-v2">Model</label>
+              <div class="model-combobox">
+                <input
+                  id="provider-model-v2"
+                  data-provider-model-v2
+                  type="text"
+                  maxlength="200"
+                  autocomplete="off"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-controls="provider-model-catalog-v2"
+                  aria-expanded="false"
+                  required
+                />
+                <div class="model-catalog-field" data-provider-model-catalog-field-v2 hidden>
+                  <select
+                    id="provider-model-catalog-v2"
+                    data-provider-model-list-v2
+                    class="model-catalog-list"
+                    size="6"
+                    aria-label="Matching loaded model suggestions"
+                  ></select>
+                </div>
+              </div>
             </div>
             <div class="wide catalog-controls">
               <button type="button" class="secondary" data-provider-load-models-v2>Load models</button>
@@ -209,7 +227,7 @@
             </label>
             <label>
               <span>Profile ID</span>
-              <input name="id" type="text" maxlength="64" pattern="[A-Za-z0-9_\-]+" required />
+              <input name="id" type="text" maxlength="64" pattern="(?:[A-Za-z0-9_]|-)+" required />
             </label>
             <label class="wide">
               <span>Model</span>

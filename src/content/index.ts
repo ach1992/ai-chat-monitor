@@ -36,6 +36,7 @@ namespace GuardianContentAgent {
     protocolVersion: 2;
   }
 
+  const FOCUS_INTENT_WINDOW_MS = 1_500;
   const adapter = new GuardianContent.BrowserChatGPTAdapter(document, location);
   const agentInstanceId = crypto.randomUUID();
   let pageEpoch = 1;
@@ -45,6 +46,7 @@ namespace GuardianContentAgent {
   let observationGeneration = 0;
   let outboundQueue: Promise<void> = Promise.resolve();
   let lastLocalUserInteractionAt: number | undefined;
+  let lastKeyboardFocusIntentAt: number | undefined;
 
   function nextSequence(): number { sequence += 1; return sequence; }
 
@@ -207,6 +209,12 @@ namespace GuardianContentAgent {
     scheduleObservation(0);
   }
 
+  function consumeRecentKeyboardFocusIntent(now: number): boolean {
+    const intentAt = lastKeyboardFocusIntentAt;
+    lastKeyboardFocusIntentAt = undefined;
+    return intentAt !== undefined && now >= intentAt && now - intentAt <= FOCUS_INTENT_WINDOW_MS;
+  }
+
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (isPanelAgentProbeMessage(message)) {
       sendResponse(agentProbeResponse());
@@ -252,17 +260,20 @@ namespace GuardianContentAgent {
     }, true);
   }
   document.addEventListener("focusin", (event) => {
-    if (!event.isTrusted) return;
-    if (adapter.isComposerTarget(event.target)) emitUserInteraction("COMPOSER_FOCUS");
+    if (!event.isTrusted || !adapter.isComposerTarget(event.target)) return;
+    if (consumeRecentKeyboardFocusIntent(performance.now())) emitUserInteraction("COMPOSER_FOCUS");
   }, true);
   document.addEventListener("keydown", (event) => {
-    if (!event.isTrusted || !adapter.isComposerTarget(event.target)) return;
+    if (!event.isTrusted) return;
+    if (event.key === "Tab") lastKeyboardFocusIntentAt = performance.now();
+    if (!adapter.isComposerTarget(event.target)) return;
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) emitUserInteraction("MANUAL_SEND");
     else emitUserInteraction("COMPOSER_INPUT");
   }, true);
   document.addEventListener("pointerdown", (event) => {
     if (!event.isTrusted) return;
-    if (adapter.isManualSendTarget(event.target)) emitUserInteraction("MANUAL_SEND");
+    if (adapter.isComposerTarget(event.target)) emitUserInteraction("COMPOSER_FOCUS");
+    else if (adapter.isManualSendTarget(event.target)) emitUserInteraction("MANUAL_SEND");
     else if (adapter.isStopGenerationTarget(event.target)) emitUserInteraction("STOP_GENERATION");
     else if (adapter.isEditTurnTarget(event.target)) emitUserInteraction("EDIT_TURN");
     else if (adapter.isBlockingInteractionTarget(event.target)) emitUserInteraction("BLOCKING_INTERACTION");
