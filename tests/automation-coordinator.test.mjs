@@ -105,11 +105,13 @@ function makeHarness({ mode = "AUTO", classifier, sender } = {}) {
   };
 
   const journal = {
-    hasGuard(conversationId, assistantFingerprint) {
-      return guards.has(`${conversationId}:${assistantFingerprint}`);
+    hasGuard(conversationId, assistantFingerprint, assistantDomMessageId) {
+      const exactKey = `${conversationId}:${assistantFingerprint}:${assistantDomMessageId ?? "none"}`;
+      const fallbackKey = `${conversationId}:${assistantFingerprint}:none`;
+      return guards.has(exactKey) || guards.has(fallbackKey);
     },
     async reserve(envelope) {
-      const key = `${envelope.conversationId}:${envelope.assistantFingerprint}`;
+      const key = `${envelope.conversationId}:${envelope.assistantFingerprint}:${envelope.assistantDomMessageId ?? "none"}`;
       if (guards.has(key)) return false;
       guards.set(key, envelope.decisionId);
       decisions.set(envelope.decisionId, { key, state: "ATTEMPTED" });
@@ -191,6 +193,25 @@ test("OBSERVE classifies only bounded preceding user plus latest assistant conte
   assert.equal(harness.coordinator.status(7).phase, "OBSERVING");
 });
 
+test("human suppression is scoped to the exact assistant DOM response when identical text repeats", async () => {
+  const harness = makeHarness({ mode: "OBSERVE" });
+  harness.coordinator.handleHumanInteraction(harness.getSession());
+  assert.equal(harness.coordinator.status(7).phase, "HOLD");
+
+  harness.setSession(makeSession({
+    user: "Ask for a fresh human choice again.",
+    userMessageId: "user-2",
+    assistantMessageId: "assistant-2",
+    fingerprint: "a".repeat(64),
+  }));
+  harness.coordinator.handleSession(harness.getSession());
+  harness.clock.advance(10);
+  await flushAsync();
+
+  assert.equal(harness.classifyCalls.length, 1);
+  assert.equal(harness.coordinator.status(7).phase, "OBSERVING");
+});
+
 test("NOTIFY_ONLY never classifies or enters an automatic send state", async () => {
   const harness = makeHarness({ mode: "NOTIFY_ONLY" });
   harness.coordinator.handleSession(harness.getSession());
@@ -260,6 +281,7 @@ test("AUTO sends only after settle and continue delays with the exact bound iden
   assert.equal(harness.sendCalls[0].pageEpoch, 1);
   assert.equal(harness.sendCalls[0].conversationId, "chat-1");
   assert.equal(harness.sendCalls[0].assistantFingerprint, "a".repeat(64));
+  assert.equal(harness.sendCalls[0].assistantDomMessageId, "assistant-1");
   assert.equal(harness.sendCalls[0].policyRevision, 11);
   assert.equal(typeof harness.sendCalls[0].evidenceKey, "string");
   assert.equal(harness.coordinator.status(7).phase, "COOLDOWN");

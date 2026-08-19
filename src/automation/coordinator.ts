@@ -43,6 +43,7 @@ interface RuntimeEntry {
   timer?: unknown;
   evidenceKey?: string;
   suppressedFingerprint?: string;
+  suppressedDomMessageId?: string | undefined;
   status: AutomationRuntimeStatus;
 }
 
@@ -69,6 +70,19 @@ function optionalEqual<T>(left: T | undefined, right: T | undefined): boolean {
 
 function cloneStatus(status: AutomationRuntimeStatus): AutomationRuntimeStatus {
   return structuredClone(status);
+}
+
+function suppressedAssistantMatches(
+  runtime: RuntimeEntry,
+  fingerprint: string,
+  domMessageId: string | undefined,
+): boolean {
+  if (runtime.suppressedFingerprint !== fingerprint) return false;
+  return (
+    runtime.suppressedDomMessageId === undefined ||
+    domMessageId === undefined ||
+    runtime.suppressedDomMessageId === domMessageId
+  );
 }
 
 export class AutomationCoordinator {
@@ -105,7 +119,8 @@ export class AutomationCoordinator {
   handleSession(session: SessionView): void {
     const policy = session.conversationId === undefined ? undefined : this.#policies.resolve(session.conversationId);
     const observation = session.observation;
-    const fingerprint = observation?.latestAssistant?.fingerprint;
+    const assistant = observation?.latestAssistant;
+    const fingerprint = assistant?.fingerprint;
     const existing = this.#runtime.get(session.tabId);
 
     if (session.conversationId === undefined || observation === undefined || fingerprint === undefined) {
@@ -176,7 +191,7 @@ export class AutomationCoordinator {
 
     if (
       existing?.status.conversationId === session.conversationId &&
-      existing.suppressedFingerprint === fingerprint &&
+      suppressedAssistantMatches(existing, fingerprint, assistant?.domMessageId) &&
       existing.status.policyRevision === policy.revision
     ) {
       this.#setStatus(existing, {
@@ -214,7 +229,7 @@ export class AutomationCoordinator {
         });
         return;
       }
-      if (this.#journal.hasGuard(session.conversationId, fingerprint)) {
+      if (this.#journal.hasGuard(session.conversationId, fingerprint, assistant?.domMessageId)) {
         this.#replaceRuntime(session.tabId, {
           mode: policy.mode,
           phase: "AMBIGUOUS_WRITE",
@@ -263,7 +278,8 @@ export class AutomationCoordinator {
   }
 
   handleHumanInteraction(session: SessionView): void {
-    const fingerprint = session.observation?.latestAssistant?.fingerprint;
+    const assistant = session.observation?.latestAssistant;
+    const fingerprint = assistant?.fingerprint;
     const policy = session.conversationId === undefined ? undefined : this.#policies.resolve(session.conversationId);
     const runtime = this.#replaceRuntime(session.tabId, {
       mode: policy?.mode ?? "OFF",
@@ -273,7 +289,10 @@ export class AutomationCoordinator {
       ...(fingerprint === undefined ? {} : { assistantFingerprint: fingerprint }),
       reason: "Human interaction cancelled pending automation for this response.",
     });
-    if (fingerprint !== undefined) runtime.suppressedFingerprint = fingerprint;
+    if (fingerprint !== undefined) {
+      runtime.suppressedFingerprint = fingerprint;
+      runtime.suppressedDomMessageId = assistant?.domMessageId;
+    }
   }
 
   invalidateTab(tabId: number, reason = "Session identity changed; pending automation was cancelled."): void {
@@ -437,6 +456,7 @@ export class AutomationCoordinator {
     const fresh = this.#revalidateEnvelope(envelope);
     if (fresh === undefined) {
       runtime.suppressedFingerprint = envelope.assistantFingerprint;
+      runtime.suppressedDomMessageId = envelope.assistantDomMessageId;
       this.#setStatus(runtime, {
         mode: "AUTO",
         phase: "HOLD",
@@ -499,6 +519,7 @@ export class AutomationCoordinator {
       }
       if (runtime.token === token) {
         runtime.suppressedFingerprint = envelope.assistantFingerprint;
+        runtime.suppressedDomMessageId = envelope.assistantDomMessageId;
         this.#setStatus(runtime, {
           mode: "AUTO",
           phase: "HOLD",
@@ -572,6 +593,7 @@ export class AutomationCoordinator {
         return;
       }
       runtime.suppressedFingerprint = envelope.assistantFingerprint;
+      runtime.suppressedDomMessageId = envelope.assistantDomMessageId;
       this.#setStatus(runtime, {
         mode: "AUTO",
         phase: "HOLD",
@@ -738,6 +760,7 @@ export class AutomationCoordinator {
 
   #staleRuntime(runtime: RuntimeEntry, evidence: CandidateEvidence, reason: string): void {
     runtime.suppressedFingerprint = evidence.fingerprint;
+    runtime.suppressedDomMessageId = evidence.domMessageId;
     this.#setStatus(runtime, {
       mode: evidence.policy.mode,
       phase: "HOLD",
@@ -759,6 +782,7 @@ export class AutomationCoordinator {
       token: (existing?.token ?? 0) + 1,
       ...(evidenceKey === undefined ? {} : { evidenceKey }),
       ...(existing?.suppressedFingerprint === undefined ? {} : { suppressedFingerprint: existing.suppressedFingerprint }),
+      ...(existing?.suppressedDomMessageId === undefined ? {} : { suppressedDomMessageId: existing.suppressedDomMessageId }),
       status: { tabId, updatedAt: this.#clock.now(), ...status },
     };
     this.#runtime.set(tabId, runtime);
