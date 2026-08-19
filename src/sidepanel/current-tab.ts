@@ -3,12 +3,18 @@ import type { ChatAutomationMode } from "../automation/types.js";
 export interface CurrentTabChat {
   tabId: number;
   conversationId?: string;
+  routeKey: string;
   lastSeenAt: number;
+}
+
+export interface CurrentTabAgentProbe {
+  conversationId?: string;
+  routeKey: string;
 }
 
 export interface CurrentTabConnectionGateway<TChat extends CurrentTabChat> {
   now(): number;
-  probe(tabId: number): Promise<boolean>;
+  probe(tabId: number): Promise<CurrentTabAgentProbe | undefined>;
   requestReconnect(tabId: number): Promise<boolean>;
   reload(tabId: number): Promise<void>;
   readChat(tabId: number): Promise<TChat | undefined>;
@@ -35,6 +41,18 @@ export function isSupportedChatGptUrl(value: string | undefined): boolean {
   }
 }
 
+export function currentTabIdentityMatches(
+  chat: CurrentTabChat | undefined,
+  probe: CurrentTabAgentProbe | undefined,
+): boolean {
+  return (
+    chat?.conversationId !== undefined &&
+    probe?.conversationId !== undefined &&
+    chat.conversationId === probe.conversationId &&
+    chat.routeKey === probe.routeKey
+  );
+}
+
 export function desiredCurrentTabMode(currentMode: ChatAutomationMode, enabled: boolean): ChatAutomationMode {
   if (!enabled) return "OFF";
   return currentMode === "OFF" ? "OBSERVE" : currentMode;
@@ -59,11 +77,11 @@ export async function ensureCurrentTabConnected<TChat extends CurrentTabChat>(
   if (!Number.isInteger(intervalMs) || intervalMs < 0) throw new Error("Reconnect interval must be a non-negative integer.");
 
   const existing = await gateway.readChat(tabId);
-  const reachable = await gateway.probe(tabId);
-  if (reachable && existing?.conversationId !== undefined) return existing;
+  const probe = await gateway.probe(tabId);
+  if (currentTabIdentityMatches(existing, probe)) return existing as TChat;
 
   const recoveryStartedAt = gateway.now();
-  if (reachable) {
+  if (probe !== undefined) {
     const requested = await gateway.requestReconnect(tabId);
     if (!requested) throw new Error("The ChatGPT content agent did not accept the reconnect request.");
   } else {
