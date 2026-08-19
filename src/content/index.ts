@@ -135,13 +135,13 @@ namespace GuardianContentAgent {
     return response?.type === "background:agent-ack" && response.accepted;
   }
 
-  async function emitNavigation(nextRouteKey: string): Promise<void> {
+  async function emitNavigation(nextRouteKey: string): Promise<boolean> {
     pageEpoch += 1;
     lastRouteKey = nextRouteKey;
     observationGeneration += 1;
     if (observationTimer !== undefined) { clearTimeout(observationTimer); observationTimer = undefined; }
     const conversationId = adapter.currentConversationId();
-    await send({
+    const response = await send({
       type: "content:navigation",
       protocolVersion: GuardianContent.PROTOCOL_VERSION,
       agentInstanceId,
@@ -152,6 +152,13 @@ namespace GuardianContentAgent {
       sentAt: Date.now(),
     });
     scheduleObservation(0);
+    return response?.type === "background:agent-ack" && response.accepted;
+  }
+
+  async function reconnectAgent(): Promise<boolean> {
+    const nextRouteKey = adapter.currentRouteKey();
+    if (nextRouteKey !== lastRouteKey) return emitNavigation(nextRouteKey);
+    return announceAgent();
   }
 
   async function observe(expectedGeneration: number): Promise<void> {
@@ -202,7 +209,7 @@ namespace GuardianContentAgent {
       return false;
     }
     if (isPanelAgentReconnectMessage(message)) {
-      void announceAgent().then((accepted) => {
+      void reconnectAgent().then((accepted) => {
         if (accepted) scheduleObservation(0);
         sendResponse({
           type: "content:agent-reconnected",
