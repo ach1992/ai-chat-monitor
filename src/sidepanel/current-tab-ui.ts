@@ -6,7 +6,12 @@ import {
   type PanelOverviewRequest,
   type PanelOverviewResponse,
 } from "../shared/protocol.js";
-import { ensureCurrentTabConnected, isSupportedChatGptUrl } from "./current-tab.js";
+import {
+  desiredCurrentTabMode,
+  ensureCurrentTabConnected,
+  isSupportedChatGptUrl,
+  shouldRefreshCurrentTabForUpdate,
+} from "./current-tab.js";
 
 type AgentProbeResponse = {
   type: "content:agent-probe";
@@ -258,7 +263,7 @@ async function setCurrentTabEnabled(tabId: number, enabled: boolean): Promise<vo
     const chat = await ensureConnected(tabId);
     if (chat.conversationId === undefined) throw new Error("ChatGPT has not exposed a stable conversation identity yet.");
     const currentMode = chat.policy?.mode ?? "OFF";
-    const desiredMode = enabled ? (currentMode === "OFF" ? "OBSERVE" : currentMode) : "OFF";
+    const desiredMode = desiredCurrentTabMode(currentMode, enabled);
     if (desiredMode !== currentMode) {
       const request: PanelAutomationPolicyUpdate = {
         type: "panel:automation-policy-update",
@@ -327,8 +332,7 @@ function refreshCurrentTab(force = false): Promise<void> {
 
 chrome.tabs.onActivated.addListener(() => { void refreshCurrentTab(true); });
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (tabId !== activeTabId) return;
-  if (changeInfo.status !== undefined || changeInfo.url !== undefined) void refreshCurrentTab(true);
+  if (shouldRefreshCurrentTabForUpdate(activeTabId, tabId, changeInfo)) void refreshCurrentTab(true);
 });
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) void refreshCurrentTab(true);
