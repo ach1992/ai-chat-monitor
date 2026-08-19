@@ -20,7 +20,7 @@ const ASSISTANT_HOLD_RULES: readonly HoldRule[] = [
   {
     code: "HUMAN_OPERATION_REQUIRED",
     reason: "The assistant explicitly requires a human-only operation.",
-    pattern: /\bHUMAN_OPERATION_REQUIRED\b|\byou (?:must|need to) (?:manually )?(?:complete|perform|approve|confirm|sign in|authenticate)\b/i,
+    pattern: /\bHUMAN_OPERATION_REQUIRED\b|\byou (?:must|need to) (?:manually )?(?:complete|perform|approve|confirm|sign in|authenticate)\b|\b(?:please\s+)?(?:copy|paste|send|relay|take|run|execute)\b[\s\S]{0,220}\b(?:another|new|separate|independent|external)(?:\s+(?:new|separate|independent|external|review)){0,2}\s+(?:chat|conversation|person|reviewer|tool)\b|\b(?:another|new|separate|independent|external)(?:\s+(?:new|separate|independent|external|review)){0,2}\s+(?:chat|conversation|person|reviewer|tool)\b[\s\S]{0,220}\b(?:copy|paste|send|relay|take|run|execute)\b/i,
   },
   {
     code: "PROJECT_COMPLETE",
