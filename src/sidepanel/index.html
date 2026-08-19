@@ -80,6 +80,39 @@
         </form>
       </section>
 
+      <section class="panel-section" aria-labelledby="reliability-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Reliability</p>
+            <h2 id="reliability-heading">Loop protection &amp; audit</h2>
+          </div>
+          <button type="button" class="secondary small" data-reliability-refresh>Refresh</button>
+        </div>
+        <p class="section-note">Progress-aware stagnation protection runs before the separate hard safety fuse. Audit history is bounded and excludes full chat text and provider secrets.</p>
+        <form data-fuse-default-form class="form-grid">
+          <label class="wide">
+            <span>Global hard fuse (verified auto-continues)</span>
+            <input name="hardFuseMaxAutoContinues" type="number" min="5" max="500" step="1" required />
+          </label>
+          <div class="wide form-actions">
+            <button type="submit">Save hard fuse</button>
+          </div>
+        </form>
+        <div>
+          <p class="eyebrow">Per-chat hard fuse</p>
+          <div data-fuse-chat-list class="reliability-list"></div>
+        </div>
+        <div class="section-heading audit-heading">
+          <div>
+            <p class="eyebrow">Recent decisions</p>
+            <h3>Audit history</h3>
+          </div>
+          <button type="button" class="secondary small" data-audit-clear>Clear history</button>
+        </div>
+        <div data-audit-list class="audit-list"></div>
+        <p class="meta" data-reliability-status aria-live="polite"></p>
+      </section>
+
       <section class="panel-section" aria-labelledby="providers-heading">
         <div class="section-heading">
           <div>
@@ -132,5 +165,6 @@
     </main>
 
     <script type="module" src="./index.js"></script>
+    <script type="module" src="./reliability.js"></script>
   </body>
 </html>
