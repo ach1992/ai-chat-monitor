@@ -43,7 +43,7 @@ interface RuntimeEntry {
   timer?: unknown;
   evidenceKey?: string;
   suppressedFingerprint?: string;
-  suppressedDomMessageId?: string;
+  suppressedDomMessageId?: string | undefined;
   status: AutomationRuntimeStatus;
 }
 
