@@ -67,6 +67,11 @@ function status(message: string): void {
   statusElement.textContent = message;
 }
 
+function setEditorVisible(visible: boolean): void {
+  form.hidden = !visible;
+  addButton.setAttribute("aria-expanded", String(visible));
+}
+
 function providerKind(): ProviderKind {
   if (kindSelect.value === "OPENROUTER") return "OPENROUTER";
   if (kindSelect.value === "NARAROUTER") return "NARAROUTER";
@@ -143,7 +148,7 @@ function updateKindFields(resetCatalog = true): void {
   if (resetCatalog) clearCatalog();
 }
 
-function resetEditor(): void {
+function resetEditor(visible = false): void {
   editingId = undefined;
   form.reset();
   kindSelect.value = "OPENROUTER";
@@ -154,6 +159,8 @@ function resetEditor(): void {
   editorTitle.textContent = "Add provider";
   editorNote.textContent = "Choose a preset, optionally load its live model catalog, or enter a model ID manually.";
   updateKindFields();
+  setEditorVisible(visible);
+  if (!visible) status("");
 }
 
 function beginEdit(profile: RedactedProviderProfile): void {
@@ -172,6 +179,7 @@ function beginEdit(profile: RedactedProviderProfile): void {
   editorNote.textContent = "Stored API keys are never displayed. Leave API key blank to retain it when provider type/origin is unchanged.";
   updateKindFields();
   modelInput.value = profile.model;
+  setEditorVisible(true);
   form.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
@@ -309,7 +317,7 @@ async function saveProvider(): Promise<void> {
     settings = response.providers;
     const savedId = mutation.id;
     const saved = currentProfile(savedId);
-    resetEditor();
+    resetEditor(false);
     status(saved === undefined ? "Provider saved." : `Saved ${saved.id} with model ${saved.model}. Stored API key remains hidden.`);
     renderProviderList();
   } catch (error) {
@@ -333,7 +341,7 @@ async function removeProvider(providerId: string): Promise<void> {
     if (response.type === "background:error") throw new Error(response.message);
     if (response.type !== "background:provider-settings") throw new Error("Guardian returned an unexpected provider-settings response.");
     settings = response.providers;
-    if (editingId === providerId) resetEditor();
+    if (editingId === providerId) resetEditor(false);
     status(`Removed ${providerId}. Unused provider-origin permission cleanup runs in the background.`);
   } catch (error) {
     status(error instanceof Error ? error.message : "Provider removal failed.");
@@ -382,8 +390,11 @@ filterSelect.addEventListener("change", () => {
   renderCatalog();
 });
 loadModelsButton.addEventListener("click", () => { void loadModels(); });
-addButton.addEventListener("click", () => resetEditor());
-cancelButton.addEventListener("click", () => resetEditor());
+addButton.addEventListener("click", () => {
+  resetEditor(true);
+  form.scrollIntoView({ behavior: "smooth", block: "nearest" });
+});
+cancelButton.addEventListener("click", () => resetEditor(false));
 form.addEventListener("submit", (event) => {
   event.preventDefault();
   void saveProvider();
@@ -393,7 +404,7 @@ document.addEventListener("visibilitychange", () => {
   if (!document.hidden && !busy) void refreshProviders().catch(() => undefined);
 });
 
-resetEditor();
+resetEditor(false);
 void refreshProviders().catch((error) => {
   status(error instanceof Error ? error.message : "Provider settings could not be loaded.");
 });

@@ -190,3 +190,31 @@ test("adapter represents blocking conditions conservatively", async () => {
   assert.equal(result.confidence, "LOW");
   assert.equal(result.generation, "UNKNOWN");
 });
+
+test("adapter ignores inert ChatGPT accessibility alert regions but keeps real alerts fail-closed", async () => {
+  const GuardianContent = await loadAdapter();
+  const inert = new FakeElement({
+    textContent: "",
+    attrs: {
+      role: "alert",
+      id: "aria-notify-live-region-assertive",
+      class: "sr-only",
+      "aria-live": "assertive",
+    },
+  });
+  const inertDocument = new FakeDocument([['[role="alert"]', [inert]]]);
+  const inertAdapter = new GuardianContent.BrowserChatGPTAdapter(inertDocument, { pathname: "/" });
+  const inertResult = await inertAdapter.observe(23);
+  assert.equal(inertResult.blocking.blocked, false);
+  assert.equal(inertResult.blocking.reasons.length, 0);
+
+  const real = new FakeElement({
+    textContent: "This action is blocked by platform policy.",
+    attrs: { role: "alert", class: "visible-banner" },
+  });
+  const realDocument = new FakeDocument([['[role="alert"]', [real]]]);
+  const realAdapter = new GuardianContent.BrowserChatGPTAdapter(realDocument, { pathname: "/" });
+  const realResult = await realAdapter.observe(24);
+  assert.equal(realResult.blocking.blocked, true);
+  assert.equal(realResult.blocking.reasons.includes("ERROR"), true);
+});

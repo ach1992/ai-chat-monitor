@@ -270,8 +270,11 @@ export class SessionRegistry {
   }
 
   invalidateTab(tabId: number): void {
-    const session = this.#sessions.get(tabId);
-    if (session !== undefined) this.#retireDocument(tabId, session.documentId);
+    // A tabs.onUpdated("loading") event does not identify which exact document caused it.
+    // Drop the live session so stale observations fail closed, but do not tombstone the
+    // document here: the same exact content agent may already have registered before the
+    // loading callback is delivered and must be allowed to reconnect. True document
+    // replacement is still retired by registerAgent when a newer document takes over.
     this.#sessions.delete(tabId);
   }
 

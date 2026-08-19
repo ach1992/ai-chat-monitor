@@ -180,23 +180,24 @@ test("service-worker restore invalidates observation-based control eligibility",
   assert.equal(restored.getTab(8)?.controlEligibility, "NONE");
 });
 
-test("loading invalidation retires the prior document until a fresh document registers", () => {
+test("loading invalidation drops live state but lets the same exact document reconnect", () => {
   const registry = new SessionRegistry();
   register(registry, 9, "before-refresh", 100, "doc-before");
   registry.invalidateTab(9);
   assert.equal(registry.getTab(9), undefined);
 
-  const delayedOld = registry.registerAgent({
+  const reconnected = registry.registerAgent({
     tabId: 9,
     documentId: "doc-before",
-    agentInstanceId: "agent-delayed",
+    agentInstanceId: "agent-9",
     pageEpoch: 1,
-    sequence: 1,
+    sequence: 2,
     routeKey: "/c/before-refresh",
     conversationId: "before-refresh",
-    sentAt: 9999,
+    sentAt: 200,
   });
-  assert.deepEqual(delayedOld, { accepted: false, reason: "STALE_DOCUMENT" });
+  assert.equal(reconnected.accepted, true);
+  assert.equal(registry.getTab(9)?.documentId, "doc-before");
 
   const fresh = registry.registerAgent({
     tabId: 9,
@@ -206,9 +207,21 @@ test("loading invalidation retires the prior document until a fresh document reg
     sequence: 1,
     routeKey: "/c/after-refresh",
     conversationId: "after-refresh",
-    sentAt: 200,
+    sentAt: 300,
   });
   assert.equal(fresh.accepted, true);
+
+  const staleOld = registry.registerAgent({
+    tabId: 9,
+    documentId: "doc-before",
+    agentInstanceId: "agent-9",
+    pageEpoch: 1,
+    sequence: 99,
+    routeKey: "/c/before-refresh",
+    conversationId: "before-refresh",
+    sentAt: 9999,
+  });
+  assert.deepEqual(staleOld, { accepted: false, reason: "STALE_DOCUMENT" });
 });
 
 test("retired document tombstones survive service-worker restore", () => {

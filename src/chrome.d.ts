@@ -82,6 +82,16 @@ declare namespace chrome {
     ): Promise<TResponse>;
   }
 
+  namespace sidePanel {
+    interface PanelOptions {
+      tabId?: number;
+      path?: string;
+      enabled?: boolean;
+    }
+
+    function setOptions(options: PanelOptions): Promise<void>;
+  }
+
   namespace permissions {
     interface Permissions {
       permissions?: string[];

@@ -133,11 +133,13 @@
               <p class="eyebrow">Priority order</p>
               <h3>Saved profiles</h3>
             </div>
-            <button type="button" class="secondary small" data-provider-add-v2>Add provider</button>
           </div>
           <div data-provider-list-v2 class="provider-list"></div>
+          <div class="provider-add-row">
+            <button type="button" class="secondary" data-provider-add-v2 aria-controls="provider-editor-v2" aria-expanded="false">Add provider</button>
+          </div>
 
-          <form data-provider-form-v2 class="form-grid provider-form provider-editor-v2">
+          <form id="provider-editor-v2" data-provider-form-v2 class="form-grid provider-form provider-editor-v2" hidden>
             <div class="wide">
               <p class="eyebrow">Profile editor</p>
               <h3 data-provider-editor-title-v2>Add provider</h3>
@@ -153,7 +155,7 @@
             </label>
             <label>
               <span>Profile ID</span>
-              <input data-provider-id-v2 type="text" maxlength="64" pattern="[A-Za-z0-9_-]+" required />
+              <input data-provider-id-v2 type="text" maxlength="64" pattern="[A-Za-z0-9_\-]+" required />
             </label>
             <div class="wide fixed-endpoint" data-provider-fixed-endpoint-v2></div>
             <label class="wide" data-provider-base-url-field-v2 hidden>
@@ -185,11 +187,11 @@
               <span>Make this the primary provider</span>
             </label>
             <div class="wide form-actions provider-editor-actions">
-              <button type="button" class="secondary" data-provider-cancel-v2>Reset</button>
+              <button type="button" class="secondary" data-provider-cancel-v2>Cancel</button>
               <button type="submit">Save provider</button>
             </div>
-            <p class="wide meta" data-provider-status-v2 aria-live="polite"></p>
           </form>
+          <p class="meta provider-status" data-provider-status-v2 aria-live="polite"></p>
         </div>
 
         <div hidden aria-hidden="true">
@@ -204,7 +206,7 @@
             </label>
             <label>
               <span>Profile ID</span>
-              <input name="id" type="text" maxlength="64" pattern="[A-Za-z0-9_-]+" required />
+              <input name="id" type="text" maxlength="64" pattern="[A-Za-z0-9_\-]+" required />
             </label>
             <label class="wide">
               <span>Model</span>
