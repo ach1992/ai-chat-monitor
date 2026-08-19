@@ -22,6 +22,7 @@ export interface ResolvedAutomationPolicy {
   timing: AutomationTiming;
   continuationText: string;
   notificationTriggers: NotificationTrigger[];
+  hardFuseMaxAutoContinues: number;
   emergencyPaused: boolean;
 }
 
@@ -48,6 +49,7 @@ export interface AutomationDecisionEnvelope {
   conversationId: string;
   routeKey: string;
   assistantFingerprint: string;
+  outcomeSignature: string;
   assistantDomMessageId?: string;
   lastUserInteractionAt?: number;
   policyRevision: number;
