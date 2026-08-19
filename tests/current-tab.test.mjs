@@ -1,0 +1,86 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { ensureCurrentTabConnected, isSupportedChatGptUrl } from "../dist/sidepanel/current-tab.js";
+
+test("supported ChatGPT URL detection is exact and fail-closed", () => {
+  assert.equal(isSupportedChatGptUrl("https://chatgpt.com/c/abc"), true);
+  assert.equal(isSupportedChatGptUrl("https://chat.openai.com/c/abc"), true);
+  assert.equal(isSupportedChatGptUrl("http://chatgpt.com/c/abc"), false);
+  assert.equal(isSupportedChatGptUrl("https://evil.chatgpt.com/c/abc"), false);
+  assert.equal(isSupportedChatGptUrl("https://example.com/?next=https://chatgpt.com"), false);
+  assert.equal(isSupportedChatGptUrl(undefined), false);
+});
+
+test("already connected exact tab does not reload or reconnect", async () => {
+  const calls = [];
+  const chat = { tabId: 7, conversationId: "conv-7", lastSeenAt: 100 };
+  const result = await ensureCurrentTabConnected({
+    now: () => 200,
+    readChat: async (tabId) => { calls.push(["read", tabId]); return chat; },
+    probe: async (tabId) => { calls.push(["probe", tabId]); return true; },
+    requestReconnect: async (tabId) => { calls.push(["reconnect", tabId]); return true; },
+    reload: async (tabId) => { calls.push(["reload", tabId]); },
+    wait: async (delayMs) => { calls.push(["wait", delayMs]); },
+  }, 7);
+
+  assert.equal(result, chat);
+  assert.deepEqual(calls, [["read", 7], ["probe", 7]]);
+});
+
+test("reachable agent with missing registry re-announces once and waits for fresh identity", async () => {
+  const calls = [];
+  const reads = [undefined, { tabId: 11, conversationId: "old", lastSeenAt: 499 }, { tabId: 11, conversationId: "fresh", lastSeenAt: 500 }];
+  const result = await ensureCurrentTabConnected({
+    now: () => 500,
+    readChat: async (tabId) => { calls.push(["read", tabId]); return reads.shift(); },
+    probe: async (tabId) => { calls.push(["probe", tabId]); return true; },
+    requestReconnect: async (tabId) => { calls.push(["reconnect", tabId]); return true; },
+    reload: async (tabId) => { calls.push(["reload", tabId]); },
+    wait: async (delayMs) => { calls.push(["wait", delayMs]); },
+  }, 11, { attempts: 3, intervalMs: 25 });
+
+  assert.equal(result.conversationId, "fresh");
+  assert.equal(calls.filter(([name]) => name === "reconnect").length, 1);
+  assert.equal(calls.filter(([name]) => name === "reload").length, 0);
+});
+
+test("stale registry with unreachable agent reloads once and rejects pre-reload state", async () => {
+  const calls = [];
+  const reads = [
+    { tabId: 23, conversationId: "stale", lastSeenAt: 800 },
+    { tabId: 23, conversationId: "stale", lastSeenAt: 800 },
+    { tabId: 23, conversationId: "current", lastSeenAt: 900 },
+  ];
+  const result = await ensureCurrentTabConnected({
+    now: () => 900,
+    readChat: async (tabId) => { calls.push(["read", tabId]); return reads.shift(); },
+    probe: async (tabId) => { calls.push(["probe", tabId]); return false; },
+    requestReconnect: async (tabId) => { calls.push(["reconnect", tabId]); return true; },
+    reload: async (tabId) => { calls.push(["reload", tabId]); },
+    wait: async (delayMs) => { calls.push(["wait", delayMs]); },
+  }, 23, { attempts: 3, intervalMs: 25 });
+
+  assert.equal(result.conversationId, "current");
+  assert.deepEqual(calls.filter(([name]) => name === "reload"), [["reload", 23]]);
+  assert.equal(calls.filter(([name]) => name === "reconnect").length, 0);
+});
+
+test("reconnect timeout is bounded and never falls through to a second recovery mutation", async () => {
+  let reads = 0;
+  let reloads = 0;
+  let reconnects = 0;
+  await assert.rejects(
+    ensureCurrentTabConnected({
+      now: () => 1000,
+      readChat: async () => { reads += 1; return undefined; },
+      probe: async () => false,
+      requestReconnect: async () => { reconnects += 1; return true; },
+      reload: async () => { reloads += 1; },
+      wait: async () => undefined,
+    }, 31, { attempts: 2, intervalMs: 0 }),
+    /did not reconnect/,
+  );
+  assert.equal(reads, 3);
+  assert.equal(reloads, 1);
+  assert.equal(reconnects, 0);
+});
