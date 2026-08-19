@@ -3,15 +3,13 @@ import type { ClassificationRequest, ClassificationResult } from "../classificat
 import {
   DEFAULT_PROVIDER_MIN_CONFIDENCE,
   DEFAULT_PROVIDER_TIMEOUT_MS,
-  OPENROUTER_BASE_URL,
   normalizeProviderProfile,
+  providerBaseUrl,
 } from "./settings.js";
 import {
   ProviderFailure,
   type AIProvider,
   type FetchLike,
-  type OpenAICompatibleProviderProfile,
-  type OpenRouterProviderProfile,
   type ProviderHealth,
   type ProviderProfile,
 } from "./types.js";
@@ -72,9 +70,9 @@ export class OpenAICompatibleProvider implements AIProvider {
   readonly #baseUrl: string;
   readonly #fetch: FetchLike;
 
-  constructor(profile: OpenAICompatibleProviderProfile | OpenRouterProviderProfile, fetchImpl: FetchLike = fetch) {
+  constructor(profile: ProviderProfile, fetchImpl: FetchLike = fetch) {
     this.#profile = normalizeProviderProfile(profile);
-    this.#baseUrl = this.#profile.kind === "OPENROUTER" ? OPENROUTER_BASE_URL : this.#profile.baseUrl;
+    this.#baseUrl = providerBaseUrl(this.#profile);
     this.#fetch = fetchImpl;
   }
 
