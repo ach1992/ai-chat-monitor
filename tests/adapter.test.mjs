@@ -206,7 +206,7 @@ test("adapter ignores inert ChatGPT accessibility alert regions but keeps real a
   const inertAdapter = new GuardianContent.BrowserChatGPTAdapter(inertDocument, { pathname: "/" });
   const inertResult = await inertAdapter.observe(23);
   assert.equal(inertResult.blocking.blocked, false);
-  assert.deepEqual(inertResult.blocking.reasons, []);
+  assert.equal(inertResult.blocking.reasons.length, 0);
 
   const real = new FakeElement({
     textContent: "This action is blocked by platform policy.",
