@@ -1,7 +1,18 @@
 import { unsureResult, type ClassificationRequest, type ClassificationResult } from "../classification/types.js";
 import { OpenAICompatibleProvider } from "./openai-compatible.js";
 import { normalizeProviderSettings } from "./settings.js";
-import type { AIProvider, FetchLike, ProviderSettingsState } from "./types.js";
+import {
+  ProviderFailure,
+  type AIProvider,
+  type FetchLike,
+  type ProviderSettingsState,
+} from "./types.js";
+
+interface ProviderFailureSummary {
+  providerId: string;
+  code: string;
+  message: string;
+}
 
 export class ProviderManager {
   readonly #providers: AIProvider[];
@@ -11,12 +22,33 @@ export class ProviderManager {
   }
 
   async classify(request: ClassificationRequest): Promise<ClassificationResult> {
+    let lastFailure: ProviderFailureSummary | undefined;
     for (const provider of this.#providers) {
       try {
         return await provider.classify(request);
-      } catch {
+      } catch (error) {
+        if (error instanceof ProviderFailure) {
+          lastFailure = {
+            providerId: provider.id,
+            code: error.code,
+            message: error.message,
+          };
+        } else {
+          lastFailure = {
+            providerId: provider.id,
+            code: "UNKNOWN",
+            message: "Provider failed unexpectedly.",
+          };
+        }
         // Operational/provider protocol failure may fall through to the next configured provider.
       }
+    }
+    if (lastFailure !== undefined) {
+      return unsureResult(
+        "PROVIDER_FAILURE",
+        `Provider ${lastFailure.providerId} failed (${lastFailure.code}): ${lastFailure.message}`,
+        { providerId: lastFailure.providerId },
+      );
     }
     return unsureResult("PROVIDER_FAILURE", "No configured provider produced a valid classification.");
   }
