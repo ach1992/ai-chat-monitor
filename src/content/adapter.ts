@@ -16,6 +16,7 @@ namespace GuardianContent {
   export interface PageObservation {
     conversationId?: string;
     routeKey: string;
+    pageTitle?: string;
     generation: GenerationState;
     latestUser?: {
       normalizedText: string;
@@ -52,6 +53,7 @@ namespace GuardianContent {
   }
 
   const MAX_NORMALIZED_RESPONSE_CHARS = 12_000;
+  const MAX_PAGE_TITLE_CHARS = 300;
   const SEND_VERIFICATION_TIMEOUT_MS = 5_000;
   const ASSISTANT_SELECTORS = ['[data-message-author-role="assistant"]', 'article[data-turn="assistant"]'] as const;
   const USER_SELECTORS = ['[data-message-author-role="user"]', 'article[data-turn="user"]'] as const;
@@ -273,8 +275,12 @@ namespace GuardianContent {
       const composerText = composer === undefined ? "" : elementText(composer);
       const activeElement = this.#document.activeElement;
       const composerFocused = composer !== undefined && activeElement !== null && (composer === activeElement || composer.contains(activeElement));
+      const pageTitle = typeof this.#document.title === "string"
+        ? normalizeAssistantText(this.#document.title).slice(0, MAX_PAGE_TITLE_CHARS)
+        : "";
       const observation: PageObservation = {
         routeKey: this.currentRouteKey(),
+        ...(pageTitle.length === 0 ? {} : { pageTitle }),
         generation,
         composer: { present: composer !== undefined, hasText: normalizeAssistantText(composerText).length > 0, focused: composerFocused },
         blocking: { blocked: reasons.size > 0, reasons: [...reasons].sort() },

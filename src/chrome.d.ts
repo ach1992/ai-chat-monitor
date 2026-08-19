@@ -23,6 +23,7 @@ declare namespace chrome {
   namespace tabs {
     interface Tab {
       id?: number;
+      active?: boolean;
     }
 
     interface TabChangeInfo {
@@ -52,11 +53,26 @@ declare namespace chrome {
       currentWindow?: boolean;
     }): Promise<Tab[]>;
 
+    function update(
+      tabId: number,
+      updateProperties: { active?: boolean },
+    ): Promise<Tab>;
+
     function sendMessage<TResponse = unknown>(
       tabId: number,
       message: unknown,
       options?: MessageSendOptions,
     ): Promise<TResponse>;
+  }
+
+  namespace permissions {
+    interface Permissions {
+      permissions?: string[];
+      origins?: string[];
+    }
+
+    function request(permissions: Permissions): Promise<boolean>;
+    function contains(permissions: Permissions): Promise<boolean>;
   }
 
   namespace storage {

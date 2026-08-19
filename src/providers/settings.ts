@@ -112,7 +112,7 @@ export function createOpenAICompatibleProfile(
   return normalizeProviderProfile({ kind: "OPENAI_COMPATIBLE", ...options }) as OpenAICompatibleProviderProfile;
 }
 
-function isProfileShape(value: unknown): value is ProviderProfile {
+export function isProviderProfile(value: unknown): value is ProviderProfile {
   if (!isRecord(value)) return false;
   if (value.kind !== "OPENROUTER" && value.kind !== "OPENAI_COMPATIBLE") return false;
   if (typeof value.id !== "string" || typeof value.apiKey !== "string" || typeof value.model !== "string") return false;
@@ -146,7 +146,7 @@ export function isProviderSettingsState(value: unknown): value is ProviderSettin
   if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.profiles) || !Array.isArray(value.order)) {
     return false;
   }
-  if (!value.profiles.every(isProfileShape) || !value.order.every((entry) => typeof entry === "string")) {
+  if (!value.profiles.every(isProviderProfile) || !value.order.every((entry) => typeof entry === "string")) {
     return false;
   }
   try {

@@ -7,22 +7,128 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <main>
-      <header>
-        <p class="eyebrow">Foundation status</p>
-        <h1>Chat Turn Guardian</h1>
-        <p>
-          This build verifies the Manifest V3 service worker, ChatGPT content agent,
-          and Side Panel message boundary. Automatic continuation is not enabled yet.
-        </p>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Chat supervision</p>
+          <h1>Chat Turn Guardian</h1>
+          <p class="lede">Supervise selected ChatGPT conversations while preserving human control.</p>
+        </div>
+        <div class="hero-actions">
+          <button type="button" class="secondary" data-refresh>Refresh</button>
+          <button type="button" class="danger" data-pause-all>Pause All</button>
+        </div>
       </header>
 
-      <section class="status-card" aria-live="polite">
-        <strong data-status>Checking current tab...</strong>
-        <span data-details>Waiting for the service worker.</span>
+      <section class="status-card" aria-live="polite" aria-atomic="true">
+        <strong data-status>Loading managed chats…</strong>
+        <span data-details>Reading the extension service worker.</span>
       </section>
 
-      <button type="button" data-refresh>Refresh status</button>
+      <section class="panel-section" aria-labelledby="current-tab-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Current tab</p>
+            <h2 id="current-tab-heading">Quick control</h2>
+          </div>
+        </div>
+        <div data-current-tab class="empty-state">Open a ChatGPT conversation to manage it here.</div>
+      </section>
+
+      <section class="panel-section" aria-labelledby="chats-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Managed surface</p>
+            <h2 id="chats-heading">Open ChatGPT chats</h2>
+          </div>
+          <span class="count-pill" data-chat-count>0</span>
+        </div>
+        <div data-chat-list class="chat-list"></div>
+      </section>
+
+      <section class="panel-section" aria-labelledby="defaults-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Global policy</p>
+            <h2 id="defaults-heading">Defaults</h2>
+          </div>
+        </div>
+        <form data-defaults-form class="form-grid">
+          <label>
+            <span>Settle delay (ms)</span>
+            <input name="settleDelayMs" type="number" min="0" max="60000" step="100" required />
+          </label>
+          <label>
+            <span>Continue delay (ms)</span>
+            <input name="continueDelayMs" type="number" min="0" max="60000" step="100" required />
+          </label>
+          <label>
+            <span>Cooldown (ms)</span>
+            <input name="cooldownMs" type="number" min="0" max="300000" step="100" required />
+          </label>
+          <label class="wide">
+            <span>Continuation text</span>
+            <input name="continuationText" type="text" maxlength="200" required />
+          </label>
+          <fieldset class="wide compact-fieldset">
+            <legend>Default notifications</legend>
+            <div data-default-notifications class="check-grid"></div>
+          </fieldset>
+          <div class="wide form-actions">
+            <button type="submit">Save defaults</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel-section" aria-labelledby="providers-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">AI classifier</p>
+            <h2 id="providers-heading">Providers</h2>
+          </div>
+        </div>
+        <p class="section-note">API keys stay in trusted extension storage and are never returned in ordinary status views.</p>
+        <div data-provider-list class="provider-list"></div>
+        <details class="provider-editor">
+          <summary>Add or replace provider</summary>
+          <form data-provider-form class="form-grid provider-form">
+            <label>
+              <span>Provider type</span>
+              <select name="kind">
+                <option value="OPENROUTER">OpenRouter</option>
+                <option value="OPENAI_COMPATIBLE">OpenAI-compatible</option>
+              </select>
+            </label>
+            <label>
+              <span>Profile ID</span>
+              <input name="id" type="text" maxlength="64" pattern="[A-Za-z0-9_-]+" required />
+            </label>
+            <label class="wide">
+              <span>Model</span>
+              <input name="model" type="text" maxlength="200" required />
+            </label>
+            <label class="wide" data-base-url-field hidden>
+              <span>Base URL</span>
+              <input name="baseUrl" type="url" placeholder="https://api.example.com/v1" />
+            </label>
+            <label class="wide">
+              <span>API key</span>
+              <input name="apiKey" type="password" maxlength="4096" autocomplete="off" required />
+            </label>
+            <label class="checkbox-row wide">
+              <input name="makePrimary" type="checkbox" />
+              <span>Make this the primary provider</span>
+            </label>
+            <div class="wide form-actions">
+              <button type="submit">Save provider</button>
+            </div>
+          </form>
+        </details>
+      </section>
+
+      <footer class="footer-note">
+        `AUTO` only sends the configured continuation after the local safety gates and exact-state revalidation pass.
+      </footer>
     </main>
 
     <script type="module" src="./index.js"></script>

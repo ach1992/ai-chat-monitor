@@ -1,11 +1,13 @@
 import type {
   AutomationTiming,
   ChatAutomationMode,
+  NotificationTrigger,
   ResolvedAutomationPolicy,
 } from "./types.js";
 
 export interface AutomationPolicyDefaults extends AutomationTiming {
   continuationText: string;
+  notificationTriggers: NotificationTrigger[];
 }
 
 export interface ChatAutomationPolicy {
@@ -15,6 +17,7 @@ export interface ChatAutomationPolicy {
   continueDelayMs?: number;
   cooldownMs?: number;
   continuationText?: string;
+  notificationTriggers?: NotificationTrigger[];
 }
 
 export interface AutomationPolicyState {
@@ -31,6 +34,7 @@ export interface ChatAutomationPolicyPatch {
   continueDelayMs?: number | null;
   cooldownMs?: number | null;
   continuationText?: string | null;
+  notificationTriggers?: NotificationTrigger[] | null;
 }
 
 export interface AutomationPolicyPersistence {
@@ -47,11 +51,19 @@ export const DEFAULT_AUTOMATION_POLICY: AutomationPolicyState = {
     continueDelayMs: 800,
     cooldownMs: 3_000,
     continuationText: "Continue.",
+    notificationTriggers: [],
   },
   chats: [],
 };
 
 const MODES = new Set<ChatAutomationMode>(["OFF", "OBSERVE", "AUTO", "NOTIFY_ONLY"]);
+const NOTIFICATION_TRIGGERS = new Set<NotificationTrigger>([
+  "RESPONSE_FINISHED",
+  "HOLD",
+  "UNSURE",
+  "ERROR",
+  "STAGNATION",
+]);
 
 function validDelay(value: unknown, maximum: number): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= maximum;
@@ -65,6 +77,22 @@ function normalizeContinuationText(value: string): string {
   return normalized;
 }
 
+function normalizeNotificationTriggers(value: unknown): NotificationTrigger[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > NOTIFICATION_TRIGGERS.size) {
+    throw new Error("Notification triggers are invalid.");
+  }
+  const normalized: NotificationTrigger[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string" || !NOTIFICATION_TRIGGERS.has(entry as NotificationTrigger)) {
+      throw new Error("Notification trigger is invalid.");
+    }
+    const trigger = entry as NotificationTrigger;
+    if (!normalized.includes(trigger)) normalized.push(trigger);
+  }
+  return normalized;
+}
+
 function normalizeDefaults(defaults: AutomationPolicyDefaults): AutomationPolicyDefaults {
   if (!validDelay(defaults.settleDelayMs, 60_000)) throw new Error("Settle delay is invalid.");
   if (!validDelay(defaults.continueDelayMs, 60_000)) throw new Error("Continue delay is invalid.");
@@ -74,6 +102,7 @@ function normalizeDefaults(defaults: AutomationPolicyDefaults): AutomationPolicy
     continueDelayMs: defaults.continueDelayMs,
     cooldownMs: defaults.cooldownMs,
     continuationText: normalizeContinuationText(defaults.continuationText),
+    notificationTriggers: normalizeNotificationTriggers(defaults.notificationTriggers),
   };
 }
 
@@ -94,6 +123,9 @@ function normalizeChatPolicy(policy: ChatAutomationPolicy): ChatAutomationPolicy
     ...(policy.continuationText === undefined
       ? {}
       : { continuationText: normalizeContinuationText(policy.continuationText) }),
+    ...(policy.notificationTriggers === undefined
+      ? {}
+      : { notificationTriggers: normalizeNotificationTriggers(policy.notificationTriggers) }),
   };
 }
 
@@ -130,7 +162,18 @@ export class AutomationPolicyRepository {
 
   async restore(): Promise<void> {
     const stored = await this.#persistence.load();
-    this.#state = stored === undefined ? cloneState(DEFAULT_AUTOMATION_POLICY) : normalizeState(stored);
+    if (stored === undefined) {
+      this.#state = cloneState(DEFAULT_AUTOMATION_POLICY);
+      return;
+    }
+    const migrated: AutomationPolicyState = {
+      ...stored,
+      defaults: {
+        ...stored.defaults,
+        notificationTriggers: stored.defaults.notificationTriggers ?? [],
+      },
+    };
+    this.#state = normalizeState(migrated);
   }
 
   snapshot(): AutomationPolicyState {
@@ -149,6 +192,9 @@ export class AutomationPolicyRepository {
         cooldownMs: chat?.cooldownMs ?? this.#state.defaults.cooldownMs,
       },
       continuationText: chat?.continuationText ?? this.#state.defaults.continuationText,
+      notificationTriggers: [
+        ...(chat?.notificationTriggers ?? this.#state.defaults.notificationTriggers),
+      ],
       emergencyPaused: this.#state.emergencyPaused,
     };
   }
@@ -160,6 +206,10 @@ export class AutomationPolicyRepository {
       const continueDelayMs = this.#patchedNumber(existing?.continueDelayMs, patch.continueDelayMs, 60_000, "Continue delay");
       const cooldownMs = this.#patchedNumber(existing?.cooldownMs, patch.cooldownMs, 300_000, "Cooldown");
       const continuationText = this.#patchedText(existing?.continuationText, patch.continuationText);
+      const notificationTriggers = this.#patchedNotificationTriggers(
+        existing?.notificationTriggers,
+        patch.notificationTriggers,
+      );
       const next: ChatAutomationPolicy = {
         conversationId,
         mode: patch.mode ?? existing?.mode ?? "OFF",
@@ -167,6 +217,7 @@ export class AutomationPolicyRepository {
         ...(continueDelayMs === undefined ? {} : { continueDelayMs }),
         ...(cooldownMs === undefined ? {} : { cooldownMs }),
         ...(continuationText === undefined ? {} : { continuationText }),
+        ...(notificationTriggers === undefined ? {} : { notificationTriggers }),
       };
       const normalized = normalizeChatPolicy(next);
       const chats = this.#state.chats.filter((candidate) => candidate.conversationId !== conversationId);
@@ -225,6 +276,15 @@ export class AutomationPolicyRepository {
     if (patch === undefined) return existing;
     if (patch === null) return undefined;
     return normalizeContinuationText(patch);
+  }
+
+  #patchedNotificationTriggers(
+    existing: NotificationTrigger[] | undefined,
+    patch: NotificationTrigger[] | null | undefined,
+  ): NotificationTrigger[] | undefined {
+    if (patch === undefined) return existing;
+    if (patch === null) return undefined;
+    return normalizeNotificationTriggers(patch);
   }
 
   #enqueue<T>(operation: () => Promise<T>): Promise<T> {

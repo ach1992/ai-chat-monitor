@@ -11,6 +11,7 @@ import { ConservativeStopClassifier } from "../classification/classifier.js";
 import type { SessionView } from "../core/session-registry.js";
 import { createProviderManager } from "../providers/manager.js";
 import { ProviderSettingsStore } from "../providers/settings-store.js";
+import type { ProviderProfile, ProviderSettingsState } from "../providers/types.js";
 import { createDurableStorage, createEphemeralStorage } from "../storage/index.js";
 
 const POLICY_KEY = "config";
@@ -150,6 +151,63 @@ export class AutomationService {
     if (this.#policyWritesInFlight === 0) this.#coordinator.emergencyPauseChanged();
     this.#rehydrateKnownSessions();
     return state;
+  }
+
+  async providerSettings(): Promise<ProviderSettingsState> {
+    await this.#ready;
+    return this.#providerSettings.load();
+  }
+
+  async upsertProviderProfile(profile: ProviderProfile, makePrimary = false): Promise<ProviderSettingsState> {
+    await this.#ready;
+    const saved = await this.#withPolicyWrite(async () => {
+      this.#invalidateAll("Provider settings changed; pending classifier decisions were cancelled before persistence.");
+      const current = await this.#providerSettings.load();
+      const profiles = current.profiles.filter((candidate) => candidate.id !== profile.id);
+      profiles.push(profile);
+      const wasActive = current.order.includes(profile.id);
+      const withoutProfile = current.order.filter((id) => id !== profile.id);
+      const order = makePrimary
+        ? [profile.id, ...withoutProfile]
+        : wasActive
+          ? [...current.order]
+          : [...withoutProfile, profile.id];
+      const next: ProviderSettingsState = { version: 1, profiles, order };
+      await this.#providerSettings.save(next);
+      return this.#providerSettings.load();
+    });
+    this.#rehydrateKnownSessions();
+    return saved;
+  }
+
+  async removeProviderProfile(providerId: string): Promise<ProviderSettingsState> {
+    await this.#ready;
+    const saved = await this.#withPolicyWrite(async () => {
+      this.#invalidateAll("Provider settings changed; pending classifier decisions were cancelled before persistence.");
+      const current = await this.#providerSettings.load();
+      const next: ProviderSettingsState = {
+        version: 1,
+        profiles: current.profiles.filter((profile) => profile.id !== providerId),
+        order: current.order.filter((id) => id !== providerId),
+      };
+      await this.#providerSettings.save(next);
+      return this.#providerSettings.load();
+    });
+    this.#rehydrateKnownSessions();
+    return saved;
+  }
+
+  async updateProviderOrder(order: string[]): Promise<ProviderSettingsState> {
+    await this.#ready;
+    const saved = await this.#withPolicyWrite(async () => {
+      this.#invalidateAll("Provider priority changed; pending classifier decisions were cancelled before persistence.");
+      const current = await this.#providerSettings.load();
+      const next: ProviderSettingsState = { ...current, order: [...order] };
+      await this.#providerSettings.save(next);
+      return this.#providerSettings.load();
+    });
+    this.#rehydrateKnownSessions();
+    return saved;
   }
 
   async status(tabId: number): Promise<AutomationServiceStatus> {
