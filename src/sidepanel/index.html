@@ -15,7 +15,7 @@
           <p class="lede">Supervise selected ChatGPT conversations while preserving human control.</p>
         </div>
         <div class="hero-actions">
-          <button type="button" class="secondary" data-refresh>Refresh</button>
+          <button type="button" class="secondary" data-refresh>Refresh status</button>
           <button type="button" class="danger" data-pause-all>Pause All</button>
         </div>
       </header>
@@ -25,34 +25,37 @@
         <span data-details>Reading the extension service worker.</span>
       </section>
 
-      <section class="panel-section" aria-labelledby="current-tab-heading">
+      <section class="panel-section current-tab-section" aria-labelledby="current-tab-heading">
         <div class="section-heading">
           <div>
             <p class="eyebrow">Current tab</p>
-            <h2 id="current-tab-heading">Quick control</h2>
+            <h2 id="current-tab-heading">Guardian for this tab</h2>
           </div>
         </div>
-        <div data-current-tab class="empty-state">Open a ChatGPT conversation to manage it here.</div>
+        <p class="section-note">Use one ON/OFF control for the active ChatGPT tab. Guardian reconnects a stale supported tab as part of turning it on.</p>
+        <div data-current-tab-live class="empty-state" aria-live="polite">Checking the active tab…</div>
+        <div data-current-tab class="current-tab-legacy" hidden></div>
       </section>
 
-      <section class="panel-section" aria-labelledby="chats-heading">
-        <div class="section-heading">
+      <details class="panel-section disclosure" aria-labelledby="chats-heading">
+        <summary class="section-heading">
           <div>
-            <p class="eyebrow">Managed surface</p>
+            <p class="eyebrow">Advanced per-chat controls</p>
             <h2 id="chats-heading">Open ChatGPT chats</h2>
           </div>
           <span class="count-pill" data-chat-count>0</span>
-        </div>
+        </summary>
+        <p class="section-note">Choose OBSERVE, AUTO, or NOTIFY_ONLY per conversation, adjust timing, and inspect OWNER/MIRROR isolation.</p>
         <div data-chat-list class="chat-list"></div>
-      </section>
+      </details>
 
-      <section class="panel-section" aria-labelledby="defaults-heading">
-        <div class="section-heading">
+      <details class="panel-section disclosure" aria-labelledby="defaults-heading">
+        <summary class="section-heading">
           <div>
             <p class="eyebrow">Global policy</p>
             <h2 id="defaults-heading">Defaults</h2>
           </div>
-        </div>
+        </summary>
         <form data-defaults-form class="form-grid">
           <label>
             <span>Settle delay (ms)</span>
@@ -78,15 +81,17 @@
             <button type="submit">Save defaults</button>
           </div>
         </form>
-      </section>
+      </details>
 
-      <section class="panel-section" aria-labelledby="reliability-heading">
-        <div class="section-heading">
+      <details class="panel-section disclosure" aria-labelledby="reliability-heading">
+        <summary class="section-heading">
           <div>
             <p class="eyebrow">Reliability</p>
             <h2 id="reliability-heading">Loop protection &amp; audit</h2>
           </div>
-          <button type="button" class="secondary small" data-reliability-refresh>Refresh</button>
+        </summary>
+        <div class="secondary-section-actions">
+          <button type="button" class="secondary small" data-reliability-refresh>Refresh reliability</button>
         </div>
         <p class="section-note">Progress-aware stagnation protection runs before the separate hard safety fuse. Audit history is bounded and excludes full chat text and provider secrets.</p>
         <form data-fuse-default-form class="form-grid">
@@ -111,15 +116,15 @@
         </div>
         <div data-audit-list class="audit-list"></div>
         <p class="meta" data-reliability-status aria-live="polite"></p>
-      </section>
+      </details>
 
-      <section class="panel-section" aria-labelledby="providers-heading">
-        <div class="section-heading">
+      <details class="panel-section disclosure" aria-labelledby="providers-heading">
+        <summary class="section-heading">
           <div>
             <p class="eyebrow">AI classifier</p>
             <h2 id="providers-heading">Providers</h2>
           </div>
-        </div>
+        </summary>
         <p class="section-note">API keys stay in trusted extension storage and are never returned in ordinary status views.</p>
         <div data-provider-list class="provider-list"></div>
         <details class="provider-editor">
@@ -157,7 +162,7 @@
             </div>
           </form>
         </details>
-      </section>
+      </details>
 
       <footer class="footer-note">
         `AUTO` only sends the configured continuation after the local safety gates and exact-state revalidation pass.
@@ -166,5 +171,6 @@
 
     <script type="module" src="./index.js"></script>
     <script type="module" src="./reliability.js"></script>
+    <script type="module" src="./current-tab-ui.js"></script>
   </body>
 </html>
