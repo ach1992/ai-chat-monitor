@@ -25,7 +25,7 @@ function resolvedPolicy(conversationId, notificationTriggers, mode = "NOTIFY_ONL
   };
 }
 
-function session(tabId, conversationId, fingerprint) {
+function session(tabId, conversationId, fingerprint, domMessageId) {
   return {
     tabId,
     documentId: `doc-${tabId}`,
@@ -49,6 +49,7 @@ function session(tabId, conversationId, fingerprint) {
         normalizedText: "Finished response",
         textLength: 17,
         fingerprint,
+        ...(domMessageId === undefined ? {} : { domMessageId }),
       },
     },
   };
@@ -85,6 +86,28 @@ test("NOTIFY_ONLY response-finished notification is deduplicated and never depen
   assert.equal(notifications.length, 1);
   assert.equal(notifications[0].title, "ChatGPT response finished");
   assert.deepEqual(service.history().map((event) => event.kind), ["RESPONSE_COMPLETE"]);
+});
+
+test("distinct assistant DOM response ids do not collapse identical-text response fingerprints", async () => {
+  const notifications = [];
+  const policies = new Map([
+    ["conv-a", resolvedPolicy("conv-a", ["RESPONSE_FINISHED"], "NOTIFY_ONLY")],
+  ]);
+  const { service } = createService({
+    policies,
+    notify: async (notification) => { notifications.push(notification); },
+  });
+  await service.restore();
+
+  const fingerprint = "f".repeat(64);
+  service.captureSession(session(1, "conv-a", fingerprint, "assistant-1"));
+  service.captureSession(session(1, "conv-a", fingerprint, "assistant-1"));
+  service.captureSession(session(1, "conv-a", fingerprint, "assistant-2"));
+  await service.flush();
+
+  assert.equal(notifications.length, 2);
+  assert.equal(service.history().filter((event) => event.kind === "RESPONSE_COMPLETE").length, 2);
+  assert.notEqual(notifications[0].id, notifications[1].id);
 });
 
 test("notification delivery failure is observational and records a generic audit error", async () => {
