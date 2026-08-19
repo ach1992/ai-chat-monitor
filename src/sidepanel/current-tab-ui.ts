@@ -7,6 +7,7 @@ import {
   type PanelOverviewResponse,
 } from "../shared/protocol.js";
 import {
+  currentTabIdentityMatches,
   desiredCurrentTabMode,
   ensureCurrentTabConnected,
   isSupportedChatGptUrl,
@@ -34,6 +35,7 @@ interface CurrentTabState {
   chat: ManagedChatStatus | undefined;
   supported: boolean;
   agentReachable: boolean;
+  identityCurrent: boolean;
 }
 
 function q<T extends Element>(selector: string): T {
@@ -105,15 +107,15 @@ async function readManagedChat(tabId: number): Promise<ManagedChatStatus | undef
   return response.chats.find((candidate) => candidate.tabId === tabId);
 }
 
-async function probeContentAgent(tabId: number): Promise<boolean> {
+async function probeContentAgent(tabId: number): Promise<AgentProbeResponse | undefined> {
   try {
     const response = await chrome.tabs.sendMessage<unknown>(tabId, {
       type: "panel:agent-probe",
       protocolVersion: PROTOCOL_VERSION,
     });
-    return isAgentProbeResponse(response);
+    return isAgentProbeResponse(response) ? response : undefined;
   } catch {
-    return false;
+    return undefined;
   }
 }
 
@@ -207,20 +209,22 @@ function renderCurrentTab(state: CurrentTabState): void {
   head.append(title, stateBlock);
 
   const connection = e("div", "current-connection");
-  if (state.agentReachable && chat?.conversationId !== undefined) {
-    connection.append(e("strong", undefined, "Connected"), e("span", "meta", "Current tab has a live Guardian content agent."));
+  if (state.identityCurrent) {
+    connection.append(e("strong", undefined, "Connected"), e("span", "meta", "Content-agent and registry identities match this exact route and conversation."));
   } else if (state.agentReachable) {
-    connection.append(e("strong", undefined, "Recovering registration"), e("span", "meta", "The content agent is reachable and can re-register this tab."));
+    connection.append(e("strong", undefined, "Identity reconnect needed"), e("span", "meta", "The content agent is live, but its route/conversation identity does not match the last registered state."));
   } else {
     connection.append(e("strong", undefined, "Reconnect needed"), e("span", "meta", "One action can reload this ChatGPT tab and restore the content agent."));
   }
 
   const meta = e("div", "meta-row");
   badge(meta, modeLabel(mode), mode === "AUTO" ? "ok" : undefined);
-  if (chat !== undefined) {
+  if (chat !== undefined && state.identityCurrent) {
     badge(meta, chat.controlEligibility, chat.controlEligibility === "OWNER" ? "ok" : "warn");
     if (chat.runtime !== undefined) badge(meta, chat.runtime.phase, chat.runtime.phase === "AMBIGUOUS_WRITE" ? "warn" : undefined);
     if (chat.runtime?.lastDecision !== undefined) badge(meta, `Decision: ${chat.runtime.lastDecision.decision}`);
+  } else if (chat !== undefined) {
+    badge(meta, "Identity stale", "warn");
   }
 
   const actions = e("div", "current-actions");
@@ -231,7 +235,7 @@ function renderCurrentTab(state: CurrentTabState): void {
     void setCurrentTabEnabled(tabId, !enabled);
   });
   actions.append(toggle);
-  if (enabled && (!state.agentReachable || chat?.conversationId === undefined)) {
+  if (enabled && !state.identityCurrent) {
     const reconnect = e("button", "secondary", "Reconnect");
     reconnect.type = "button";
     reconnect.disabled = currentTabBusy;
@@ -246,12 +250,12 @@ function renderCurrentTab(state: CurrentTabState): void {
   );
 
   root.append(head, connection, meta);
-  if (chat?.controlEligibility === "MIRROR") {
+  if (state.identityCurrent && chat?.controlEligibility === "MIRROR") {
     root.append(e("div", "reason", "This is a MIRROR of the same conversation. Automated control remains isolated to the OWNER tab."));
-  } else if (chat?.controlEligibility === "NONE") {
+  } else if (state.identityCurrent && chat?.controlEligibility === "NONE") {
     root.append(e("div", "reason", "This tab is not currently eligible for automated control."));
   }
-  if (chat?.runtime?.reason !== undefined) root.append(e("div", "reason", chat.runtime.reason));
+  if (state.identityCurrent && chat?.runtime?.reason !== undefined) root.append(e("div", "reason", chat.runtime.reason));
   root.append(e("div", "meta", primaryProviderText(state.overview)), actions, advanced);
 }
 
@@ -305,8 +309,9 @@ async function doRefreshCurrentTab(serial: number): Promise<void> {
     const overview = await loadOverview();
     const chat = activeTabId === undefined ? undefined : overview.chats.find((candidate) => candidate.tabId === activeTabId);
     const supported = isSupportedChatGptUrl(tab?.url);
-    const agentReachable = supported && activeTabId !== undefined ? await probeContentAgent(activeTabId) : false;
-    if (serial === refreshSerial) renderCurrentTab({ tab, overview, chat, supported, agentReachable });
+    const probe = supported && activeTabId !== undefined ? await probeContentAgent(activeTabId) : undefined;
+    const identityCurrent = currentTabIdentityMatches(chat, probe);
+    if (serial === refreshSerial) renderCurrentTab({ tab, overview, chat, supported, agentReachable: probe !== undefined, identityCurrent });
   } catch (error) {
     if (serial === refreshSerial) {
       root.className = "current-card current-card-primary";
