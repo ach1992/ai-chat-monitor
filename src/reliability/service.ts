@@ -94,6 +94,7 @@ export class ReliabilityService {
       const assistant = observation?.latestAssistant;
       if (
         conversationId === undefined ||
+        observation === undefined ||
         assistant === undefined ||
         observation.generation !== "IDLE" ||
         observation.confidence !== "HIGH"
