@@ -111,6 +111,42 @@ test("background persists concurrent tab registrations without cross-tab loss", 
   assert.equal(status1.documentId, "doc-1");
   assert.equal(status2.documentId, "doc-2");
 
+  const initialOverview = await dispatchPanel({
+    type: "panel:overview-request",
+    protocolVersion: 2,
+  });
+  assert.equal(initialOverview.type, "background:overview");
+  assert.deepEqual(initialOverview.chats.map((chat) => chat.tabId), [1, 2]);
+  assert.equal(initialOverview.chats.find((chat) => chat.tabId === 1).policy.mode, "OFF");
+  assert.equal(initialOverview.chats.find((chat) => chat.tabId === 2).policy.mode, "OFF");
+
+  const update = await dispatchPanel({
+    type: "panel:automation-policy-update",
+    protocolVersion: 2,
+    tabId: 1,
+    conversationId: "conv-1",
+    patch: {
+      mode: "OBSERVE",
+      settleDelayMs: 2500,
+      notificationTriggers: ["HOLD", "UNSURE"],
+    },
+  });
+  assert.equal(update.type, "background:automation-policy");
+  assert.equal(update.policy.mode, "OBSERVE");
+  assert.equal(update.policy.timing.settleDelayMs, 2500);
+
+  const updatedOverview = await dispatchPanel({
+    type: "panel:overview-request",
+    protocolVersion: 2,
+  });
+  const chat1 = updatedOverview.chats.find((chat) => chat.tabId === 1);
+  const chat2 = updatedOverview.chats.find((chat) => chat.tabId === 2);
+  assert.equal(chat1.policy.mode, "OBSERVE");
+  assert.equal(chat1.overrides.settleDelayMs, 2500);
+  assert.deepEqual(chat1.overrides.notificationTriggers, ["HOLD", "UNSURE"]);
+  assert.equal(chat2.policy.mode, "OFF", "updating one conversation must not change another chat");
+  assert.equal(chat2.overrides, undefined);
+
   const untrustedStatus = await dispatchContent(
     { type: "panel:status-request", protocolVersion: 2, tabId: 1 },
     99,
