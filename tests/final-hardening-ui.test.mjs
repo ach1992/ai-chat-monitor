@@ -23,7 +23,7 @@ test("provider UI exposes real classifier readiness and bounded model catalog su
   assert.match(styles, /max-height:\s*14rem/);
   assert.match(providerScript, /Test classifier/);
   assert.match(providerScript, /panel:provider-classifier-readiness-request/);
-  assert.match(backgroundScript, /panel:provider-classifier-readiness-request/);
+  assert.match(backgroundScript, /isPanelProviderClassifierReadinessRequest/);
   assert.match(backgroundScript, /background:provider-classifier-readiness/);
   assert.equal(providerScript.includes(".innerHTML"), false);
 });
