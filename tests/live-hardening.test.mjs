@@ -35,6 +35,9 @@ test("browser notification uses a Chromium-compatible raster data URL", async ()
   assert.equal(captured.notificationId, "guardian:test");
   assert.match(captured.options.iconUrl, /^data:image\/png;base64,/);
   assert.doesNotMatch(captured.options.iconUrl, /image\/svg\+xml/);
+  const encoded = captured.options.iconUrl.slice("data:image/png;base64,".length);
+  const signature = Buffer.from(encoded, "base64").subarray(0, 8).toString("hex");
+  assert.equal(signature, "89504e470d0a1a0a");
 });
 
 test("Side Panel live-hardening UX is wired without broadening browser authority", async () => {
@@ -54,6 +57,13 @@ test("Side Panel live-hardening UX is wired without broadening browser authority
   assert.match(html, /pattern="\[A-Za-z0-9_\\-\]\+"/);
   assert.doesNotMatch(html, /pattern="\[A-Za-z0-9_-\]\+"/);
   assert.doesNotMatch(html, /pattern="\[-A-Za-z0-9_\]\+"/);
+  const profilePatterns = [...html.matchAll(/pattern="([^"]+)"/g)].map((match) => match[1]);
+  assert.equal(profilePatterns.length, 2);
+  for (const pattern of profilePatterns) {
+    const compiled = new RegExp(`^(?:${pattern})$`, "v");
+    assert.equal(compiled.test("main_profile-1"), true);
+    assert.equal(compiled.test("bad profile"), false);
+  }
   assert.doesNotMatch(html, /availability\.js/);
 
   const listIndex = html.indexOf("data-provider-list-v2");
