@@ -38,7 +38,7 @@ test("Side Panel exposes the MVP management, provider, and reliability controls"
   assert.match(html, /Guardian for this tab/);
   assert.match(html, /NaraRouter/);
   assert.match(html, /Generic OpenAI-compatible/);
-  assert.match(html, /Leave API key blank/);
+  assert.match(html, /Stored API keys stay in trusted extension storage/);
   assert.match(html, /class="panel-section disclosure"/);
   assert.match(html, /current-tab-ui\.js/);
   assert.match(html, /provider-ui\.js/);
