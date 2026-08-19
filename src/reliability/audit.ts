@@ -60,7 +60,7 @@ function validEvent(event: AuditEvent): boolean {
 
 function normalizedEvent(event: AuditEvent): AuditEvent {
   const { reason: originalReason, providerId: originalProviderId, ...rest } = event;
-  const reason = cleanReason(originalReason);
+  const reason = event.decision === undefined ? cleanReason(originalReason) : undefined;
   return {
     ...rest,
     ...(reason === undefined ? {} : { reason }),
