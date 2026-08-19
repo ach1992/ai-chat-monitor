@@ -5,6 +5,7 @@ export type WriteGuardDisposition = "ATTEMPTED" | "AMBIGUOUS" | "VERIFIED";
 export interface WriteGuardRecord {
   conversationId: string;
   assistantFingerprint: string;
+  outcomeSignature?: string;
   decisionId: string;
   documentId: string;
   attemptedAt: number;
@@ -27,6 +28,7 @@ function validRecord(record: WriteGuardRecord): boolean {
     record.conversationId.length > 0 &&
     typeof record.assistantFingerprint === "string" &&
     /^[a-f0-9]{64}$/.test(record.assistantFingerprint) &&
+    (record.outcomeSignature === undefined || /^[a-f0-9]{16}$/.test(record.outcomeSignature)) &&
     typeof record.decisionId === "string" &&
     record.decisionId.length > 0 &&
     typeof record.documentId === "string" &&
@@ -38,10 +40,7 @@ function validRecord(record: WriteGuardRecord): boolean {
 
 function normalizeState(state: AutomationWriteJournalState | undefined): AutomationWriteJournalState {
   if (state?.version !== 1 || !Array.isArray(state.records)) return { version: 1, records: [] };
-  return {
-    version: 1,
-    records: state.records.filter(validRecord).map((record) => ({ ...record })),
-  };
+  return { version: 1, records: state.records.filter(validRecord).map((record) => ({ ...record })) };
 }
 
 export class AutomationWriteJournal {
@@ -49,22 +48,26 @@ export class AutomationWriteJournal {
   #state: AutomationWriteJournalState = { version: 1, records: [] };
   #mutationQueue: Promise<void> = Promise.resolve();
 
-  constructor(persistence: AutomationWriteJournalPersistence) {
-    this.#persistence = persistence;
-  }
+  constructor(persistence: AutomationWriteJournalPersistence) { this.#persistence = persistence; }
 
-  async restore(): Promise<void> {
-    this.#state = normalizeState(await this.#persistence.load());
-  }
-
-  snapshot(): AutomationWriteJournalState {
-    return structuredClone(this.#state);
-  }
+  async restore(): Promise<void> { this.#state = normalizeState(await this.#persistence.load()); }
+  snapshot(): AutomationWriteJournalState { return structuredClone(this.#state); }
 
   hasGuard(conversationId: string, assistantFingerprint: string): boolean {
     return this.#state.records.some(
       (record) => record.conversationId === conversationId && record.assistantFingerprint === assistantFingerprint,
     );
+  }
+
+  verifiedSince(conversationId: string, since: number): WriteGuardRecord[] {
+    return this.#state.records
+      .filter(
+        (record) =>
+          record.conversationId === conversationId &&
+          record.disposition === "VERIFIED" &&
+          record.attemptedAt > since,
+      )
+      .map((record) => ({ ...record }));
   }
 
   reserve(envelope: AutomationDecisionEnvelope): Promise<boolean> {
@@ -73,15 +76,13 @@ export class AutomationWriteJournal {
       const record: WriteGuardRecord = {
         conversationId: envelope.conversationId,
         assistantFingerprint: envelope.assistantFingerprint,
+        outcomeSignature: envelope.outcomeSignature,
         decisionId: envelope.decisionId,
         documentId: envelope.documentId,
         attemptedAt: envelope.createdAt,
         disposition: "ATTEMPTED",
       };
-      const next: AutomationWriteJournalState = {
-        version: 1,
-        records: [...this.#state.records, record],
-      };
+      const next: AutomationWriteJournalState = { version: 1, records: [...this.#state.records, record] };
       await this.#persistence.save(next);
       this.#state = next;
       return true;
