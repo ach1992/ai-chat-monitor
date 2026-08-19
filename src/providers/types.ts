@@ -1,4 +1,9 @@
-import type { ClassificationRequest, ClassificationResult } from "../classification/types.js";
+import type {
+  ClassificationDecision,
+  ClassificationReasonCode,
+  ClassificationRequest,
+  ClassificationResult,
+} from "../classification/types.js";
 
 export type ProviderKind = "OPENROUTER" | "NARAROUTER" | "OPENAI_COMPATIBLE";
 
@@ -127,6 +132,23 @@ export type ProviderFailureCode =
   | "NETWORK_ERROR"
   | "INVALID_RESPONSE"
   | "INVALID_CONFIG";
+
+export type ProviderClassifierReadinessResult =
+  | {
+      ok: true;
+      providerId: string;
+      model: string;
+      decision: ClassificationDecision;
+      reasonCode: ClassificationReasonCode;
+      confidence?: number;
+    }
+  | {
+      ok: false;
+      providerId: string;
+      model: string;
+      code: ProviderFailureCode;
+      message: string;
+    };
 
 export class ProviderFailure extends Error {
   override readonly name = "ProviderFailure";
