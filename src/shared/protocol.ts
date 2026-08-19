@@ -2,6 +2,7 @@ import { isPageObservation, type PageObservation } from "./observation.js";
 import type { ControlEligibility, SessionView } from "../core/session-registry.js";
 import type {
   AutomationPolicyDefaults,
+  ChatAutomationPolicy,
   ChatAutomationPolicyPatch,
 } from "../automation/policy.js";
 import type {
@@ -132,9 +133,11 @@ export interface ManagedChatStatus {
   tabId: number;
   conversationId?: string;
   routeKey: string;
+  pageTitle?: string;
   controlEligibility: ControlEligibility;
   lastSeenAt: number;
   generation?: PageObservation["generation"];
+  overrides?: ChatAutomationPolicy;
   policy?: ResolvedAutomationPolicy;
   runtime?: AutomationRuntimeStatus;
 }
