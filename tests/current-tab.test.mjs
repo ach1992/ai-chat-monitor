@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   currentTabIdentityMatches,
+  currentTabRouteMatchesChat,
   desiredCurrentTabMode,
   ensureCurrentTabConnected,
   isSupportedChatGptUrl,
@@ -18,6 +19,14 @@ test("supported ChatGPT URL detection is exact and returns the adapter-compatibl
   assert.equal(isSupportedChatGptUrl("https://evil.chatgpt.com/c/abc"), false);
   assert.equal(isSupportedChatGptUrl("https://example.com/?next=https://chatgpt.com"), false);
   assert.equal(isSupportedChatGptUrl(undefined), false);
+});
+
+test("route-bound display state never reuses policy from a previous conversation", () => {
+  const chat = { tabId: 7, conversationId: "conv-7", routeKey: "/c/conv-7", lastSeenAt: 100 };
+  assert.equal(currentTabRouteMatchesChat(chat, "/c/conv-7"), true);
+  assert.equal(currentTabRouteMatchesChat(chat, "/c/conv-8"), false);
+  assert.equal(currentTabRouteMatchesChat(chat, undefined), false);
+  assert.equal(currentTabRouteMatchesChat(undefined, "/c/conv-7"), false);
 });
 
 test("current-tab identity requires exact route and conversation agreement", () => {
