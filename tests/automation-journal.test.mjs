@@ -6,7 +6,7 @@ function fingerprint(index) {
   return index.toString(16).padStart(64, "0").slice(-64);
 }
 
-function envelope({ decisionId, assistantFingerprint = fingerprint(1) }) {
+function envelope({ decisionId, assistantFingerprint = fingerprint(1), assistantDomMessageId }) {
   return {
     decisionId,
     tabId: 1,
@@ -16,6 +16,7 @@ function envelope({ decisionId, assistantFingerprint = fingerprint(1) }) {
     conversationId: "chat-1",
     routeKey: "/c/chat-1",
     assistantFingerprint,
+    ...(assistantDomMessageId === undefined ? {} : { assistantDomMessageId }),
     policyRevision: 1,
     classification: {
       decision: "CONTINUE",
@@ -70,6 +71,52 @@ test("concurrent reservations for the same conversation fingerprint serialize to
   assert.deepEqual([first, second], [true, false]);
   assert.equal(journal.snapshot().records.length, 1);
   assert.equal(journal.hasGuard("chat-1", fingerprint(1)), true);
+});
+
+test("exact DOM response identity allows distinct identical-text assistant turns without weakening same-instance guards", async () => {
+  const store = persistence();
+  const journal = new AutomationWriteJournal(store);
+  await journal.restore();
+
+  assert.equal(await journal.reserve(envelope({
+    decisionId: "decision-a",
+    assistantDomMessageId: "assistant-1",
+  })), true);
+  assert.equal(await journal.reserve(envelope({
+    decisionId: "decision-b",
+    assistantDomMessageId: "assistant-2",
+  })), true);
+  assert.equal(await journal.reserve(envelope({
+    decisionId: "decision-c",
+    assistantDomMessageId: "assistant-1",
+  })), false);
+
+  assert.equal(journal.snapshot().records.length, 2);
+  assert.equal(journal.hasGuard("chat-1", fingerprint(1), "assistant-1"), true);
+  assert.equal(journal.hasGuard("chat-1", fingerprint(1), "assistant-2"), true);
+  assert.equal(journal.hasGuard("chat-1", fingerprint(1), "assistant-3"), false);
+});
+
+test("legacy fingerprint-only guards remain conservative when exact DOM response identity was unavailable", async () => {
+  const store = persistence({
+    version: 1,
+    records: [{
+      conversationId: "chat-1",
+      assistantFingerprint: fingerprint(1),
+      decisionId: "legacy-decision",
+      documentId: "doc-1",
+      attemptedAt: 50,
+      disposition: "AMBIGUOUS",
+    }],
+  });
+  const journal = new AutomationWriteJournal(store);
+  await journal.restore();
+
+  assert.equal(journal.hasGuard("chat-1", fingerprint(1), "assistant-new"), true);
+  assert.equal(await journal.reserve(envelope({
+    decisionId: "decision-new",
+    assistantDomMessageId: "assistant-new",
+  })), false);
 });
 
 test("outcome reconciliation fails closed if its reserved guard is unexpectedly missing", async () => {
