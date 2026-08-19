@@ -6,11 +6,14 @@ import {
   ensureCurrentTabConnected,
   isSupportedChatGptUrl,
   shouldRefreshCurrentTabForUpdate,
+  supportedChatGptRouteKey,
 } from "../dist/sidepanel/current-tab.js";
 
-test("supported ChatGPT URL detection is exact and fail-closed", () => {
+test("supported ChatGPT URL detection is exact and returns the adapter-compatible route key", () => {
   assert.equal(isSupportedChatGptUrl("https://chatgpt.com/c/abc"), true);
-  assert.equal(isSupportedChatGptUrl("https://chat.openai.com/c/abc"), true);
+  assert.equal(isSupportedChatGptUrl("https://chat.openai.com/c/abc/"), true);
+  assert.equal(supportedChatGptRouteKey("https://chatgpt.com/c/abc/?temporary-chat=true"), "/c/abc");
+  assert.equal(supportedChatGptRouteKey("https://chat.openai.com/"), "/");
   assert.equal(isSupportedChatGptUrl("http://chatgpt.com/c/abc"), false);
   assert.equal(isSupportedChatGptUrl("https://evil.chatgpt.com/c/abc"), false);
   assert.equal(isSupportedChatGptUrl("https://example.com/?next=https://chatgpt.com"), false);
@@ -55,13 +58,13 @@ test("already connected exact tab does not reload or reconnect", async () => {
     requestReconnect: async (tabId) => { calls.push(["reconnect", tabId]); return true; },
     reload: async (tabId) => { calls.push(["reload", tabId]); },
     wait: async (delayMs) => { calls.push(["wait", delayMs]); },
-  }, 7);
+  }, 7, { expectedRouteKey: "/c/conv-7" });
 
   assert.equal(result, chat);
   assert.deepEqual(calls, [["read", 7], ["probe", 7]]);
 });
 
-test("reachable agent with missing registry re-announces once and waits for fresh identity", async () => {
+test("reachable agent with missing registry re-announces once and waits for matching fresh identity", async () => {
   const calls = [];
   const reads = [undefined, { tabId: 11, conversationId: "old", routeKey: "/c/old", lastSeenAt: 499 }, { tabId: 11, conversationId: "fresh", routeKey: "/c/fresh", lastSeenAt: 500 }];
   const result = await ensureCurrentTabConnected({
@@ -71,7 +74,7 @@ test("reachable agent with missing registry re-announces once and waits for fres
     requestReconnect: async (tabId) => { calls.push(["reconnect", tabId]); return true; },
     reload: async (tabId) => { calls.push(["reload", tabId]); },
     wait: async (delayMs) => { calls.push(["wait", delayMs]); },
-  }, 11, { attempts: 3, intervalMs: 25 });
+  }, 11, { attempts: 3, intervalMs: 25, expectedRouteKey: "/c/fresh" });
 
   assert.equal(result.conversationId, "fresh");
   assert.equal(calls.filter(([name]) => name === "reconnect").length, 1);
@@ -90,32 +93,70 @@ test("reachable route mismatch cannot trust stale registry and forces re-registr
     requestReconnect: async (tabId) => { calls.push(["reconnect", tabId]); return true; },
     reload: async (tabId) => { calls.push(["reload", tabId]); },
     wait: async (delayMs) => { calls.push(["wait", delayMs]); },
-  }, 19, { attempts: 2, intervalMs: 0 });
+  }, 19, { attempts: 2, intervalMs: 0, expectedRouteKey: "/c/conv-b" });
 
   assert.equal(result, fresh);
   assert.deepEqual(calls.filter(([name]) => name === "reconnect"), [["reconnect", 19]]);
   assert.equal(calls.filter(([name]) => name === "reload").length, 0);
 });
 
-test("stale registry with unreachable agent reloads once and rejects pre-reload state", async () => {
+test("unreachable stale registry reloads once and requires matching post-reload content identity", async () => {
   const calls = [];
   const reads = [
     { tabId: 23, conversationId: "stale", routeKey: "/c/stale", lastSeenAt: 800 },
     { tabId: 23, conversationId: "stale", routeKey: "/c/stale", lastSeenAt: 800 },
-    { tabId: 23, conversationId: "current", routeKey: "/c/current", lastSeenAt: 900 },
+    { tabId: 23, conversationId: "current", routeKey: "/c/current", lastSeenAt: 901 },
   ];
+  const probes = [undefined, undefined, { conversationId: "current", routeKey: "/c/current" }];
   const result = await ensureCurrentTabConnected({
     now: () => 900,
     readChat: async (tabId) => { calls.push(["read", tabId]); return reads.shift(); },
-    probe: async (tabId) => { calls.push(["probe", tabId]); return undefined; },
+    probe: async (tabId) => { calls.push(["probe", tabId]); return probes.shift(); },
     requestReconnect: async (tabId) => { calls.push(["reconnect", tabId]); return true; },
     reload: async (tabId) => { calls.push(["reload", tabId]); },
     wait: async (delayMs) => { calls.push(["wait", delayMs]); },
-  }, 23, { attempts: 3, intervalMs: 25 });
+  }, 23, { attempts: 3, intervalMs: 25, expectedRouteKey: "/c/current" });
 
   assert.equal(result.conversationId, "current");
   assert.deepEqual(calls.filter(([name]) => name === "reload"), [["reload", 23]]);
   assert.equal(calls.filter(([name]) => name === "reconnect").length, 0);
+});
+
+test("navigation during recovery invalidates the user action instead of retargeting policy", async () => {
+  const calls = [];
+  const reads = [undefined, { tabId: 29, conversationId: "conv-b", routeKey: "/c/conv-b", lastSeenAt: 1101 }];
+  const probes = [undefined, { conversationId: "conv-b", routeKey: "/c/conv-b" }];
+  await assert.rejects(
+    ensureCurrentTabConnected({
+      now: () => 1100,
+      readChat: async (tabId) => { calls.push(["read", tabId]); return reads.shift(); },
+      probe: async (tabId) => { calls.push(["probe", tabId]); return probes.shift(); },
+      requestReconnect: async (tabId) => { calls.push(["reconnect", tabId]); return true; },
+      reload: async (tabId) => { calls.push(["reload", tabId]); },
+      wait: async (delayMs) => { calls.push(["wait", delayMs]); },
+    }, 29, { attempts: 2, intervalMs: 0, expectedRouteKey: "/c/conv-a" }),
+    /navigated while Guardian was recovering/,
+  );
+  assert.deepEqual(calls.filter(([name]) => name === "reload"), [["reload", 29]]);
+  assert.equal(calls.filter(([name]) => name === "reconnect").length, 0);
+});
+
+test("route drift before recovery starts fails closed", async () => {
+  let reconnects = 0;
+  let reloads = 0;
+  await assert.rejects(
+    ensureCurrentTabConnected({
+      now: () => 1200,
+      readChat: async () => undefined,
+      probe: async () => ({ conversationId: "conv-b", routeKey: "/c/conv-b" }),
+      requestReconnect: async () => { reconnects += 1; return true; },
+      reload: async () => { reloads += 1; },
+      wait: async () => undefined,
+    }, 37, { expectedRouteKey: "/c/conv-a" }),
+    /navigated before Guardian could start/,
+  );
+  assert.equal(reconnects, 0);
+  assert.equal(reloads, 0);
 });
 
 test("reconnect timeout is bounded and never falls through to a second recovery mutation", async () => {
@@ -130,7 +171,7 @@ test("reconnect timeout is bounded and never falls through to a second recovery 
       requestReconnect: async () => { reconnects += 1; return true; },
       reload: async () => { reloads += 1; },
       wait: async () => undefined,
-    }, 31, { attempts: 2, intervalMs: 0 }),
+    }, 31, { attempts: 2, intervalMs: 0, expectedRouteKey: "/c/conv-31" }),
     /did not reconnect/,
   );
   assert.equal(reads, 3);
