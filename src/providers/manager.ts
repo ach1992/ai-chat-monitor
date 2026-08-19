@@ -59,7 +59,7 @@ export class ProviderManager {
 
 export function createProviderManager(
   settings: ProviderSettingsState,
-  fetchImpl: FetchLike = fetch,
+  fetchImpl: FetchLike = globalThis.fetch.bind(globalThis),
 ): ProviderManager {
   const normalized = normalizeProviderSettings(settings);
   const byId = new Map(normalized.profiles.map((profile) => [profile.id, profile] as const));
