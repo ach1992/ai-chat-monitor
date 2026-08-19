@@ -157,6 +157,19 @@ namespace GuardianContent {
     return undefined;
   }
 
+  function hasUserAfterAssistant(document: Document, assistant: Element): boolean {
+    for (const user of userMatches(document)) {
+      try {
+        const position = assistant.compareDocumentPosition(user);
+        if ((position & Node.DOCUMENT_POSITION_DISCONNECTED) !== 0) return true;
+        if ((position & Node.DOCUMENT_POSITION_FOLLOWING) !== 0) return true;
+      } catch {
+        return true;
+      }
+    }
+    return false;
+  }
+
   function elementText(element: Element): string {
     if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) return element.value;
     return element.textContent ?? "";
@@ -267,7 +280,10 @@ namespace GuardianContent {
       const conversationId = this.currentConversationId();
       const composer = firstMatch<HTMLElement>(this.#document, COMPOSER_SELECTORS);
       const stopControl = firstMatch<HTMLElement>(this.#document, STOP_SELECTORS);
-      const latestAssistantElement = assistantMatches(this.#document).at(-1);
+      const latestAssistantCandidate = assistantMatches(this.#document).at(-1);
+      const latestAssistantElement = latestAssistantCandidate !== undefined && !hasUserAfterAssistant(this.#document, latestAssistantCandidate)
+        ? latestAssistantCandidate
+        : undefined;
       const latestUserElement = latestAssistantElement === undefined
         ? undefined
         : latestUserBeforeAssistant(this.#document, latestAssistantElement);

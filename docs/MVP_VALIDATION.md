@@ -39,6 +39,9 @@ The MVP intentionally has one narrow write capability: after a conservative clas
 | Two copies of one conversation both sending | One `OWNER`; other copies are `MIRROR`/observe-only until fresh takeover | `tests/session-registry.test.mjs`, coordinator tests |
 | User types/sends/edits/stops while automation waits | Human interaction cancels or stales pending automation; final pre-mutation checks repeat after asynchronous waits | coordinator and guarded-send race tests |
 | Navigation/response replacement during provider or timer delay | Evidence key and immutable decision envelope are re-read; stale result is dropped | coordinator delayed-provider/navigation tests |
+| Silent terminal leaves the prior assistant in the DOM | A user turn newer than the last assistant suppresses that assistant as a response candidate; idle state alone cannot create classifier or send authority | `tests/revision7-regressions.test.mjs`, adapter/coordinator tests |
+| Red Retry/platform error appears | Existing blocking-surface detection holds before classification/action; guarded send rechecks blocking UI immediately before mutation and never clicks Retry/dismiss controls | `tests/revision7-regressions.test.mjs`, adapter/guarded-send tests |
+| Independent-review or external human relay is required | Deterministic human-operation rules HOLD before provider classification; provider contract independently requires human-relay HOLD and has no DOM authority | `tests/revision7-regressions.test.mjs`, `tests/provider-classifier-contract.test.mjs` |
 | Service-worker restart revives stale action | Restored sessions lose observation authority and must produce fresh evidence | session-registry restart tests, automation-service startup tests |
 | Ambiguous page write produces duplicate continuation | Write intent reserved before mutation; ambiguous/unknown outcome remains a no-retry guard | automation journal/coordinator/guarded-send tests |
 | AI/provider gains browser authority | Provider receives bounded data and returns normalized advisory result only; no provider API has DOM/tab mutation authority | classification/provider modules and protocol boundaries |
@@ -67,7 +70,7 @@ ChatGPT DOM observation
   -> configured continuation only
 ```
 
-No layer before the guarded content adapter has general browser-action authority. No safe path converts provider failure, uncertainty, policy/storage failure, notification failure, or stale evidence into `CONTINUE`.
+No layer before the guarded content adapter has general browser-action authority. No safe path converts provider failure, uncertainty, policy/storage failure, notification failure, stale/nonexistent response evidence, or blocking UI into `CONTINUE`.
 
 ## 3. Automated MVP acceptance evidence
 
@@ -81,7 +84,11 @@ Coordinator and Side Panel integration tests cover `OFF`, `OBSERVE`, `AUTO`, and
 
 ### Conservative classification
 
-Classifier tests cover approval/material-decision boundaries, explicit stop, provider failure, low confidence, malformed output, prompt-injection-style content, secret redaction, and bounded recent context. Expected result: only a high-confidence, schema-consistent `CONTINUE / NEEDLESS_TURN_BOUNDARY` can become an action candidate.
+Classifier tests cover approval/material-decision boundaries, human relay/external-operation boundaries, explicit stop, provider failure, low confidence, malformed output, prompt-injection-style content, secret redaction, and bounded recent context. Expected result: only a high-confidence, schema-consistent `CONTINUE / NEEDLESS_TURN_BOUNDARY` can become an action candidate. A required relay to another chat/person/tool is a deterministic `HOLD / HUMAN_OPERATION_REQUIRED` before provider classification.
+
+### Fresh response and blocking UI
+
+Revision-7 regressions cover an idle page with a newer user turn but no new assistant response, plus a red Retry/error surface. Expected result: no stale assistant is promoted to a new response instance, no classifier runs for a nonexistent response, blocking UI prevents evaluation/action, and neither Retry nor the configured continuation is clicked/sent.
 
 ### Guarded write and race safety
 
@@ -99,111 +106,140 @@ Tests cover notification routing/failure isolation, bounded audit history, progr
 
 These scenarios require a Chromium browser profile in which the user can open real ChatGPT conversations. They are intentionally not simulated as proof of the current production ChatGPT DOM.
 
-Record the browser version, extension commit/package SHA, ChatGPT host, provider profile/model, and result for each run.
+Record the browser version, extension commit/package SHA, ChatGPT host, provider profile/model, and result for each run. Run one high-signal scenario at a time; a failure is evidence to inspect, not a reason for blind retry or weaker guards.
 
-### Scenario A — OBSERVE, no mutation
+### Scenario A — first-use / recovery
 
-1. Load the candidate extension and open a real ChatGPT conversation.
-2. Enable the conversation in `OBSERVE`.
-3. Submit a normal request and let the assistant finish.
-4. Keep the composer untouched while settle/classification completes.
+Load or reload the unpacked extension and verify the Side Panel reconnects to the current logged-in ChatGPT tab without stale action replay.
+
+Expected:
+
+- current tab/conversation becomes visible after fresh content-agent evidence;
+- no old delayed decision is replayed;
+- saved extension identity/state is preserved when upgrading in place.
+
+### Scenario B — clean OBSERVE
+
+1. Enable a real ChatGPT conversation in `OBSERVE`.
+2. Submit a normal request and let the assistant finish.
+3. Keep the composer untouched while settle/classification completes.
 
 Expected:
 
 - Side Panel shows the exact connected conversation/tab;
-- runtime progresses through observation/evaluation as applicable;
-- a decision/reason may be recorded;
+- a real bounded provider classification may be recorded;
 - no continuation message is inserted or sent.
 
-### Scenario B — safe AUTO continuation
+### Scenario C — safe AUTO continuation
 
-1. Use a selected conversation whose active workflow clearly has bounded remaining work and whose finished assistant turn is a needless turn boundary rather than a human decision/approval boundary.
-2. Set the chat to `AUTO` with conservative delays.
-3. Leave the page and composer untouched.
+1. Use a selected OWNER conversation whose active workflow clearly has bounded remaining executable work and whose finished assistant turn is a needless turn boundary rather than a human boundary.
+2. Set the chat to `AUTO` with configured continuation text `Continue.` and leave the page/composer untouched.
 
 Expected:
 
-- only the `OWNER` copy is eligible;
-- classifier returns a safe `CONTINUE` candidate;
-- the same assistant response remains current through final revalidation;
-- exactly one configured continuation user turn appears;
-- ChatGPT generation starts;
-- Side Panel enters cooldown and audit records the structured continuation outcome.
+- classifier returns valid `CONTINUE / NEEDLESS_TURN_BOUNDARY`;
+- exact tab/document/content-agent/page epoch/route/conversation/assistant-response identity remains current through final synchronous revalidation;
+- exactly one configured `Continue.` user turn appears and ChatGPT generation starts;
+- the next response that completes the requested outcome HOLDs/stops;
+- no second send or loop occurs.
 
-If the classifier returns `HOLD`/`UNSURE`, that is a safe result, not a reason to weaken the classifier to force Scenario B.
+If classification is `HOLD`/`UNSURE`, treat it as evidence and inspect the current audit/runtime state; do not retry blindly or weaken the classifier.
 
-### Scenario C — legitimate human boundary
+### Scenario D — legitimate human boundary
 
-1. Ask the chat to stop and request a real material choice, approval, credential, external human operation, or other genuine human-only decision before proceeding.
-2. Run in `AUTO`.
+Ask the chat to stop for a real material choice, approval, credential, confirmation, or other human-only decision.
 
 Expected:
 
 - decision is `HOLD` (or conservatively `UNSURE`);
-- no continuation text is inserted;
-- configured attention notification may fire;
-- audit shows the structured hold/uncertainty reason code without storing full chat text.
+- no continuation is inserted/sent;
+- audit/notification remains bounded and secret-free.
 
-### Scenario D — NOTIFY_ONLY response completion
+### Scenario D2 — independent-review / human relay
 
-1. Set a chat to `NOTIFY_ONLY`.
-2. Enable only the `Response finished` notification trigger.
-3. Submit a request and let the assistant finish.
+Use a real response whose correct next step explicitly requires the user to carry a prompt/result to a separate independent chat, reviewer, person, or external tool. Do not manufacture an AUTO send merely to exercise this case.
 
 Expected:
 
-- one response-finished notification for the completed response;
-- no classifier-driven automatic send state;
-- no page mutation.
+- response is `HOLD / HUMAN_OPERATION_REQUIRED` (or conservatively `UNSURE`), never `CONTINUE`;
+- Guardian does not paste the generated handoff prompt back into the same chat;
+- if the prompt/handoff itself was the requested final deliverable, completion still stops rather than continuing automatically.
 
-### Scenario E — human typing race
+### Scenario E — NOTIFY_ONLY distinct response instances
 
-1. Set a suitable chat to `AUTO` with a visible continuation delay (for example several seconds).
-2. Allow a `CONTINUE` candidate to reach the waiting state.
-3. Type into or focus the composer before the automatic delay expires.
+Use `NOTIFY_ONLY` with the `Response finished` notification trigger and produce two distinct assistant response instances, including a case where their visible text is identical when practical.
 
 Expected:
 
-- pending automatic action is cancelled/staled;
-- the extension never overwrites or competes with the human composer content;
-- no automatic continuation is sent for that response.
+- each distinct completed response instance can produce its own notification;
+- no classifier-driven send state and no page mutation occurs.
 
-### Scenario F — duplicate conversation tabs
+### Scenario F — human interaction race
 
-1. Open the same ChatGPT conversation in two browser tabs.
-2. Observe both in the Side Panel.
-
-Expected:
-
-- one tab is `OWNER`, the other `MIRROR`;
-- the mirror cannot auto-send;
-- after owner closure/navigation, any takeover requires fresh valid observation before automation eligibility.
-
-### Scenario G — provider/error failure
-
-1. Use an invalid provider key/model or intentionally revoke the provider origin permission.
-2. Let an ambiguous stop require AI classification.
+1. Let a suitable `AUTO` conversation reach the visible continuation delay.
+2. Perform a real trusted composer interaction before the delay expires.
 
 Expected:
 
-- provider failure becomes `UNSURE`/error handling, never `CONTINUE`;
-- no automatic send;
-- configured error/uncertainty notification may fire;
-- audit remains secret-free.
+- pending automation is cancelled/staled for that exact response;
+- Guardian never overwrites or competes with human composer state;
+- automatic platform/browser refocus without matching human intent does not falsely cancel supervision.
 
-### Scenario H — blocking/platform UI
+### Scenario G — duplicate conversation OWNER/MIRROR isolation
 
-When ChatGPT displays a real rate-limit, error, confirmation, account-verification, or other blocking surface:
+Open the same conversation in two tabs and exercise a safe AUTO candidate only on the exact OWNER copy.
+
+Expected:
+
+- exactly one tab is `OWNER`; duplicate copy is `MIRROR`;
+- MIRROR never auto-sends;
+- takeover after owner loss requires fresh valid observation before automation eligibility.
+
+### Scenario H — provider readiness / failure
+
+Exercise the configured provider readiness path and a real provider failure such as rate limit, timeout, invalid output, or invalid configuration when available.
+
+Expected:
+
+- successful readiness uses bounded synthetic context;
+- provider failures remain fail-closed and never become `CONTINUE`;
+- no automatic send occurs because of provider failure.
+
+### Scenario I1 — silent terminal / no assistant output
+
+Use a real occurrence where ChatGPT leaves working/generating state and returns to idle without creating a fresh assistant response.
+
+Expected:
+
+- no assistant response instance is invented from the UI transition;
+- classifier is not called for the nonexistent response;
+- no continuation is inserted/sent;
+- Guardian remains fail-closed until a fresh exact assistant response actually exists.
+
+### Scenario I2 — red Retry/error blocker
+
+When ChatGPT shows its real red Retry/error surface:
+
+Expected:
+
+- the surface is treated as blocking/platform UI and supervision HOLDs/fails closed;
+- provider output cannot authorize a continuation through the blocker;
+- Guardian never clicks Retry or dismisses the error;
+- no automatic continuation is sent until the user/platform resolves the condition and fresh valid evidence exists.
+
+### Scenario I — other blocking/platform UI
+
+When ChatGPT displays another real rate-limit, confirmation, account-verification, modal, CAPTCHA, network, or blocking error surface:
 
 Expected:
 
 - automation holds/fails closed;
 - no attempt is made to bypass, answer, or dismiss the safeguard automatically.
 
-### Scenario I — service-worker/extension restart
+### Scenario J — service-worker / extension restart
 
 1. With a managed chat open, reload the extension from `chrome://extensions` or otherwise restart the extension service worker.
-2. Do not generate new page evidence yet.
+2. Do not rely on pre-restart observations as action authority.
 
 Expected:
 
@@ -216,8 +252,8 @@ Expected:
 Use one row per scenario/candidate:
 
 | Candidate SHA / package SHA-256 | Browser | ChatGPT host | Scenario | Result | Notes |
-| --- | --- | --- | --- | --- | --- |
-| `<sha>` | `<version>` | `chatgpt.com` | A | PASS/FAIL | `<brief evidence>` |
+| --- | --- | --- | --- | --- |
+| `<sha>` | `<version>` | `chatgpt.com` | C | PASS/FAIL | `<brief evidence>` |
 
 A failed live scenario should be treated as a current adapter/product defect, not worked around by weakening identity, human-precedence, provider-output, blocking-UI, or no-blind-retry gates.
 
