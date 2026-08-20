@@ -32,6 +32,7 @@ interface TelegramUpdateRequest {
 interface TelegramTestRequest {
   type: "panel:telegram-test-notification";
   protocolVersion: typeof PROTOCOL_VERSION;
+  settings?: TelegramSettingsMutation;
 }
 
 export interface TelegramSettingsResponse {
@@ -92,7 +93,9 @@ function parseRequest(value: unknown): TelegramPanelRequest | undefined {
     return hasOnlyKeys(value, new Set(["type", "protocolVersion"])) ? value as unknown as TelegramReadRequest : undefined;
   }
   if (value.type === "panel:telegram-test-notification") {
-    return hasOnlyKeys(value, new Set(["type", "protocolVersion"])) ? value as unknown as TelegramTestRequest : undefined;
+    if (!hasOnlyKeys(value, new Set(["type", "protocolVersion", "settings"]))) return undefined;
+    if (value.settings !== undefined && !isMutation(value.settings)) return undefined;
+    return value as unknown as TelegramTestRequest;
   }
   if (value.type === "panel:telegram-settings-update" && isMutation(value.settings)) {
     return hasOnlyKeys(value, new Set(["type", "protocolVersion", "settings"])) ? value as unknown as TelegramUpdateRequest : undefined;
@@ -144,7 +147,7 @@ async function handleRequest(request: TelegramPanelRequest, sender: chrome.runti
     return {
       type: "background:telegram-test-result",
       protocolVersion: PROTOCOL_VERSION,
-      telegram: await manager.testTelegram(),
+      telegram: await manager.testTelegram(request.settings),
     };
   } catch (error) {
     if (error instanceof TelegramConfigurationError) return errorResponse("INVALID_CONFIG", error.message);
