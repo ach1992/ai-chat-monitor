@@ -85,6 +85,8 @@ test("NOTIFY_ONLY response-finished notification is deduplicated and never depen
 
   assert.equal(notifications.length, 1);
   assert.equal(notifications[0].title, "ChatGPT response finished");
+  assert.equal(notifications[0].event, "RESPONSE_COMPLETE");
+  assert.equal(notifications[0].browserEnabled, true);
   assert.deepEqual(service.history().map((event) => event.kind), ["RESPONSE_COMPLETE"]);
 });
 
@@ -128,7 +130,7 @@ test("notification delivery failure is observational and records a generic audit
   assert.doesNotMatch(history.at(-1).reason ?? "", /secret transport detail/);
 });
 
-test("per-chat notification policy remains isolated and local stagnation is routed explicitly", async () => {
+test("per-chat browser policy remains isolated while generic routing exposes events to optional channels", async () => {
   const notifications = [];
   const policies = new Map([
     ["conv-a", resolvedPolicy("conv-a", ["RESPONSE_FINISHED", "STAGNATION"], "AUTO")],
@@ -155,9 +157,16 @@ test("per-chat notification policy remains isolated and local stagnation is rout
   });
   await service.flush();
 
-  assert.equal(notifications.length, 2);
-  assert.equal(notifications[0].title, "ChatGPT response finished");
-  assert.equal(notifications[1].title, "Chat needs attention: stagnation");
+  assert.equal(notifications.length, 3);
+  assert.deepEqual(
+    notifications.map((item) => [item.event, item.browserEnabled]),
+    [
+      ["RESPONSE_COMPLETE", true],
+      ["RESPONSE_COMPLETE", false],
+      ["STAGNATION", true],
+    ],
+  );
+  assert.equal(notifications[2].title, "Chat needs attention: stagnation");
   assert.equal(service.history().some((event) => event.kind === "STAGNATION"), true);
   assert.equal(service.history().filter((event) => event.conversationId === "conv-b").length, 1);
 });
