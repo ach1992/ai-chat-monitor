@@ -4,9 +4,11 @@ import { tmpdir } from "node:os";
 import { delimiter, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
+import { verifyManifestAssets } from "./verify-manifest-assets.mjs";
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const extensionPath = await realpath(resolve(repoRoot, "dist"));
+await verifyManifestAssets(extensionPath);
 const profilePath = await mkdtemp(resolve(tmpdir(), "chat-turn-guardian-chrome-"));
 
 function findOnPath(command) {
