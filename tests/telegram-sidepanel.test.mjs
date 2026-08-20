@@ -7,10 +7,11 @@ async function readDist(path) {
 }
 
 test("Side Panel exposes Telegram v1 configuration without rendering the saved secret", async () => {
-  const [html, ui, background, worker] = await Promise.all([
+  const [html, ui, background, transport, worker] = await Promise.all([
     readDist("sidepanel/index.html"),
     readDist("sidepanel/telegram-ui.js"),
     readDist("notifications/background.js"),
+    readDist("notifications/telegram.js"),
     readDist("background/worker.js"),
   ]);
 
@@ -39,7 +40,8 @@ test("Side Panel exposes Telegram v1 configuration without rendering the saved s
     assert.match(background, new RegExp(messageType));
   }
 
-  assert.match(ui, /https:\/\/api\.telegram\.org\/\*/);
+  assert.match(ui, /TELEGRAM_ORIGIN_PATTERN/);
+  assert.match(transport, /https:\/\/api\.telegram\.org\/\*/);
   assert.match(ui, /chrome\.permissions\.request/);
   assert.match(background, /sender\.tab === undefined/);
   assert.match(worker, /notifications\/background\.js/);
