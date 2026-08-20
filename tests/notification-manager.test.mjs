@@ -5,6 +5,7 @@ import { NotificationManager } from "../dist/notifications/manager.js";
 import { TelegramDeliveryError } from "../dist/notifications/telegram.js";
 
 const TOKEN = "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ_abc123";
+const DRAFT_TOKEN = "654321:ZYXWVUTSRQPONMLKJIHGFEDCBA_987";
 
 function state(overrides = {}) {
   return {
@@ -132,6 +133,37 @@ test("Test notification is bounded, explicit, and independent of the enabled tog
   assert.match(sent[0].text, /Test notification/);
   assert.doesNotMatch(sent[0].text, /conversation|assistant response/i);
   assert.equal(response.enabled, false);
+  assert.equal(response.health.status, "HEALTHY");
+  assert.equal(Object.hasOwn(response, "botToken"), false);
+});
+
+test("Test notification can use an unsaved Side Panel draft without persisting its credential", async () => {
+  const settings = settingsAccess(state({ enabled: false }));
+  const before = settings.snapshot();
+  const sent = [];
+  const manager = new NotificationManager({
+    settings,
+    browser: { async send() { throw new Error("browser must not be used by Telegram test"); } },
+    telegram: { async send(token, destination, text) { sent.push({ token, destination, text }); } },
+    now: () => 456,
+  });
+
+  const response = await manager.testTelegram({
+    enabled: true,
+    destination: "987654321",
+    botToken: DRAFT_TOKEN,
+    eventMode: "CUSTOM",
+    events: ["HUMAN_ATTENTION_REQUIRED"],
+  });
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].token, DRAFT_TOKEN);
+  assert.equal(sent[0].destination, "987654321");
+  assert.match(sent[0].text, /Test notification/);
+  assert.deepEqual(settings.snapshot(), before);
+  assert.equal(response.configured, true);
+  assert.equal(response.enabled, true);
+  assert.equal(response.destination, "987654321");
   assert.equal(response.health.status, "HEALTHY");
   assert.equal(Object.hasOwn(response, "botToken"), false);
 });

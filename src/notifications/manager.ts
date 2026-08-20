@@ -2,6 +2,7 @@ import {
   TelegramConfigurationError,
   TelegramSettingsStore,
   redactTelegramSettings,
+  resolveTelegramSettingsMutation,
   type TelegramConfigurationIdentity,
 } from "./settings.js";
 import {
@@ -18,7 +19,7 @@ import type {
   TelegramSettingsState,
 } from "./types.js";
 
-const NOTIFICATION_ICON = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAACmklEQVR4nO3byVEjQQAF0c94ACfGAvDfmvGA27jAHAgCNGqhXqpry0wH1NH/aYno0sPj88t7DNuv1hdgbRMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBVOrv25/Wl7CYACr0OX6PCARwcv+P3hsCAZzYrbF7QiCAk7o3ci8IBHBCa8ftAYEACrd11NYIBFCwvWO2RCCAQh0dsRUCARSoxHhPv18LXMn2BHCwkcdPBHCo0cdPBLC7GcZPBLCrWcZPBLC5mcZPBLCp2cZPBLC6GcdPBLCqWcdPBHC3mcdPBPBjs4+fCOBmhPETASxGGT8RwFWk8RMBXEQbP+kYQO3n48Txk04B1D5HTx0/6RBA7XP05PGTzgDUPkdPHz/pCEDtc/SO/1EXAGqfo3f8r5oDqH2O3vEvawqg9jl6x7+uGYDa72THX64ZgBI3s+ZvhxnHTxp/BdRA4Pg/1/xH4JkIHP9+zQEk5yBw/HV1ASApi8Dx1/fw+Pzy3voivtf6//IJZ/yko0+Az1rf/NavX7vuACTtRqCNn3QKIKk/BnH8pGMASb1RqOMnnQNIzh+HPH4yAIDkvJHo4yeDAEjKj+X4Hw0DICk3muN/NRSA5Ph4jn/ZcACS/SM6/nVDAki2j+n4yw0LIFk/quPfrruHQXtbeojk8PebBoDta+ivADueAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOD9A59V1Pv7P/C7AAAAAElFTkSuQmCC";
+const NOTIFICATION_ICON = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAACmklEQVR4nO3byVEjQQAF0c94ACfGAvDfmvGA27jAHAgCNGqhXqpry0wH1NH/aYno0sPj88t7DNuv1hdgbRMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBVOrv25/Wl7CYACr0OX6PCARwcv+P3hsCAZzYrbF7QiCAk7o3ci8IBHBCa8ftAYEACrd11NYIBFCwvWO2RCCAQh0dsRUCARSoxHhPv18LXMn2BHCwkcdPBHCo0cdPBLC7GcZPBLCrWcZPBLC5mcZPBLCp2cZPBLC6GcdPBLCqWcdPBHC3mcdPBPBjs4+fCOBmhPETASxGGT8RwFWk8RMBXEQbP+kYQO3n48Txk04B1D5HTx0/6RBA7XP05PGTzgDUPkdPHz/pCEDtc/SO/1EXAGqfo3f8r5oDqH2O3vEvawqg9jl6x7+uGYDa72THX64ZgBI3s+ZvhxnHTxp/BdRA4Pg/1/xH4JkIHP9+zQEk5yBw/HV1ASApi8Dx1/fw+Pzy3voivtf6//IJZ/yko0+Az1rf/NavX7vuACTtRqCNn3QKIKk/BnH8pGMASb1RqOMnnQNIzh+HPH4yAIDkvJHo4yeDAEjKj+X4Hw0DICk3muN/NRSA5Ph4jn/ZcACS/SM6/nVDAki2j+n4yw0LIFk/quPfrruHQXtbeojk8PebBoDta+ivADueAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOD9A59V1Pv7P/C7AAAAAElFTkSuQmCC";
 const MAX_TELEGRAM_MESSAGE_LENGTH = 700;
 
 export interface TelegramSettingsAccess {
@@ -50,6 +51,13 @@ function telegramSelected(settings: TelegramSettingsState, notification: Guardia
 
 function configurationIdentity(settings: TelegramSettingsState & { botToken: string }): TelegramConfigurationIdentity {
   return { destination: settings.destination, botToken: settings.botToken };
+}
+
+function sameConfiguration(
+  stored: TelegramSettingsState,
+  candidate: TelegramSettingsState & { botToken: string },
+): boolean {
+  return stored.botToken === candidate.botToken && stored.destination === candidate.destination;
 }
 
 export function telegramNotificationText(notification: GuardianNotification): string {
@@ -140,12 +148,17 @@ export class NotificationManager {
     if (failed) throw new Error("One or more notification channels failed; automation state was not changed.");
   }
 
-  async testTelegram(): Promise<RedactedTelegramSettings> {
-    const settings = await this.#settings.load();
+  async testTelegram(mutation?: TelegramSettingsMutation): Promise<RedactedTelegramSettings> {
+    const stored = await this.#settings.load();
+    const settings = mutation === undefined
+      ? stored
+      : resolveTelegramSettingsMutation(stored, mutation);
     if (!configured(settings)) {
       throw new TelegramConfigurationError("Configure a Telegram bot token and Chat ID before sending a test notification.");
     }
+
     const identity = configurationIdentity(settings);
+    const shouldPersistHealth = sameConfiguration(stored, settings);
     try {
       await this.#telegram.send(
         settings.botToken,
@@ -153,11 +166,16 @@ export class NotificationManager {
         "Chat Turn Guardian\nTest notification\nTelegram delivery is configured. No chat content was included.",
       );
       const health: TelegramHealth = { status: "HEALTHY", checkedAt: this.#now() };
-      const persisted = await this.#saveHealth(health, identity);
-      return redactTelegramSettings(persisted ?? { ...settings, health });
+      if (shouldPersistHealth) {
+        const persisted = await this.#saveHealth(health, identity);
+        if (persisted !== undefined) return redactTelegramSettings(persisted);
+      }
+      return redactTelegramSettings({ ...settings, health });
     } catch (error) {
       const code = error instanceof TelegramDeliveryError ? error.code : "API_ERROR";
-      await this.#saveHealth({ status: "ERROR", checkedAt: this.#now(), code }, identity);
+      if (shouldPersistHealth) {
+        await this.#saveHealth({ status: "ERROR", checkedAt: this.#now(), code }, identity);
+      }
       throw error instanceof TelegramDeliveryError ? error : new TelegramDeliveryError("API_ERROR");
     }
   }
