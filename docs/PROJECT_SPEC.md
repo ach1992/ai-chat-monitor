@@ -1,6 +1,6 @@
 # Chat Turn Guardian — Project Specification
 
-Status: Accepted initial specification  
+Status: Accepted living specification  
 Repository: `ach1992/chat-turn-guardian`  
 Initial target: ChatGPT Web on Chromium-based browsers
 
@@ -19,6 +19,8 @@ Build a standalone browser extension that lets the user explicitly supervise sel
 - only notifies the user according to that chat's notification policy.
 
 The extension must safely supervise multiple tabs/conversations concurrently with no cross-tab interference.
+
+The product should remain modular and evolvable: additional notification channels, provider adapters, page adapters, and release/distribution surfaces must be addable without coupling them to guarded-send authority or weakening the core safety model.
 
 ## 3. Core product boundary
 
@@ -150,6 +152,8 @@ Browser notifications are part of the MVP management layer. Per-chat notificatio
 
 Notification delivery must not itself modify the chat.
 
+Notification delivery must use a channel abstraction so additional destinations do not become coupled to coordinator or guarded-send logic. The first Telegram version is outbound notification-only: a user who has installed the extension can configure their own bot token, destination/chat ID, enabled events, and a safe test notification. Telegram must not gain authority to send ChatGPT messages, answer approvals, alter classifier decisions, change `AUTO`, or retry browser mutations. Telegram failures/timeouts/rate limits must remain observational only. Notification payloads should be bounded/minimized and must not export full chat content by default.
+
 ### 4.11 AI-provider architecture
 
 The extension must be standalone: no local daemon, local LLM, 9Router installation, server, or companion app is required for normal operation.
@@ -170,7 +174,9 @@ The provider layer receives only the bounded classification input and returns on
 
 Do not send the entire conversation to a classifier by default. Prefer the smallest recent context that can safely decide the stop, such as the latest assistant response plus the immediately relevant preceding turn(s), with large logs/code blocks omitted or bounded when they do not affect the decision.
 
-Provider credentials must never be committed, logged, embedded in the distributed extension source, or exposed to page scripts. Configuration is user-supplied and locally stored using the safest practical browser-extension mechanism for the chosen architecture.
+Provider credentials and notification credentials such as Telegram bot tokens must never be committed, logged, embedded in distributed extension source, rendered back into ordinary status UI, or exposed to page/content scripts. Configuration is user-supplied and locally stored using the safest practical browser-extension mechanism for the chosen architecture.
+
+Any external transfer of user/chat-derived data must be minimized to the implemented feature, clearly disclosed where required, and kept consistent with the product's privacy policy and current Chrome Web Store requirements when distributed through that channel.
 
 ### 4.13 Persistence and service-worker resilience
 
@@ -188,6 +194,8 @@ Persist durable user policy/configuration separately from ephemeral runtime stat
 6. **No approval fabrication:** never auto-answer a real approval/material decision/human-operation request.
 7. **No hidden global automation:** chats are opt-in; the user can always see/pause managed chats.
 8. **Minimal authority:** AI providers classify; only the guarded page adapter may perform the narrow configured continuation action.
+9. **Notification isolation:** external notification channels are observational only and can never authorize or mutate a ChatGPT conversation.
+10. **Extensible boundaries:** new channels/providers/adapters must use narrow interfaces and cannot inherit authority merely by being added to the product.
 
 ## 6. Initial supported environment
 
@@ -199,6 +207,8 @@ MVP support target:
 - functionality only while the browser/page environment needed by the extension is available.
 
 The architecture should permit additional chat-site adapters later, but supporting other sites is not an MVP requirement.
+
+Chrome Web Store publication is not required to prove the MVP, but **Chrome Web Store publishability is a standing engineering constraint**: implementation choices should preserve Manifest V3 reviewability, minimal permissions, self-contained extension logic, secure credential handling, accurate privacy/data disclosure, and a narrow understandable product purpose so a later store release does not require architectural rework or weaker safeguards. Current store policy must be re-verified at release time because distribution requirements can change.
 
 ## 7. Non-goals for MVP
 
@@ -212,20 +222,37 @@ The architecture should permit additional chat-site adapters later, but supporti
 - bypassing ChatGPT/provider usage limits or platform safeguards;
 - Chrome Web Store publication as a prerequisite for proving the MVP.
 
+The final bullet does not make store compatibility optional: public publication is a later release milestone, while store-ready architecture/privacy/permissions are project-wide constraints from now on.
+
 ## 8. Future extension points
 
 Design clean interfaces so later versions may add:
 
-- Telegram/Discord/webhook notification channels;
-- read-only remote status queries;
+- additional notification channels beyond browser notifications and Telegram;
+- read-only remote status queries after a separate bounded security/privacy design;
 - additional AI provider adapters;
 - additional supported chat-site adapters;
 - richer audit/export/diagnostics;
 - optional remote commands only after a separate security/authorization design.
 
-Telegram is deliberately **not** required for the initial MVP. The first future Telegram capability should be notification/read-only status, not arbitrary message injection.
+The first post-MVP Telegram capability is notification-only and user-configured. Arbitrary message injection, approvals, or remote control are not part of Telegram v1. Later Telegram capabilities, if any, require separate scope and security review.
 
-## 9. MVP success criteria
+## 9. Distribution and Chrome Web Store readiness
+
+The codebase and release process must stay suitable for a later Chrome Web Store submission. Engineering should therefore preserve:
+
+- one narrow, accurately described product purpose;
+- Manifest V3 with extension logic contained in the packaged code rather than remotely hosted executable logic;
+- the smallest permissions/host access needed by implemented features, avoiding permissions requested only for hypothetical future functionality;
+- secure local handling of API keys/bot tokens and HTTPS transport to external services;
+- explicit, minimized, purpose-bound data transfer to configured AI/notification services;
+- accurate in-product/store/privacy-policy disclosure of collected/processed/transferred data when required;
+- production-quality icon/listing assets and versioned deterministic package/provenance;
+- validation of every advertised feature before submission.
+
+See [`STORE_READINESS.md`](STORE_READINESS.md) for the engineering/release checklist. Actual store submission/publication is a separate release action and requires current policy review plus explicit human authorization.
+
+## 10. MVP success criteria
 
 The MVP is successful when all of the following are demonstrated with automated tests and/or high-signal manual integration scenarios as appropriate:
 
@@ -244,6 +271,6 @@ The MVP is successful when all of the following are demonstrated with automated 
 - service-worker restart/recovery does not cause stale or duplicate actions;
 - a new developer can install the unpacked extension, configure a provider, run the test suite, and reproduce the core supervised-chat flow from repository documentation.
 
-## 10. Product principle
+## 11. Product principle
 
 Chat Turn Guardian should make an existing high-quality chat workflow more continuous, not more autonomous than the workflow itself intended to be. When in doubt, preserve the chat, preserve the user's control, and do nothing automatically.
