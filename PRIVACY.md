@@ -72,6 +72,8 @@ Data is shared only with an external provider or Telegram when the user enables 
 
 Chat Turn Guardian limits collection, use, and transmission of user data to the extension's disclosed single purpose and related security/reliability operations. Credentials are kept in trusted extension storage; external transports require HTTPS; transport errors are sanitized; provider redirects are refused; and external notification/classification systems are isolated from chat mutation authority.
 
+Chat Turn Guardian's use and transfer of user data adheres to the Chrome Web Store User Data Policy, including its Limited Use requirements. User data is not used or transferred for personalized advertising, unrelated profiling, credit-worthiness, or any purpose unrelated to the extension's disclosed user-facing functionality and the security/reliability needed to provide it.
+
 ## Changes to this policy
 
 If runtime data handling changes materially, this policy and the relevant in-product disclosures will be updated before that changed handling is released. Historical versions remain available through the public Git repository.
