@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseInChatSelfCheckResponse } from "../dist/classification/self-check.js";
+import { DEFAULT_IN_CHAT_SELF_CHECK_PROMPT, parseInChatSelfCheckResponse } from "../dist/classification/self-check.js";
 import { DEFAULT_AUTOMATION_POLICY } from "../dist/automation/policy.js";
 
 test("in-chat self-check accepts only the compact strict decision schema", () => {
@@ -20,6 +20,13 @@ test("in-chat self-check accepts only the compact strict decision schema", () =>
   ]) {
     assert.equal(parseInChatSelfCheckResponse(malformed).decision, "UNSURE");
   }
+});
+
+test("the self-check prompt is compact and visibly structured", () => {
+  assert.match(DEFAULT_IN_CHAT_SELF_CHECK_PROMPT, /^\[Guardian control check — do not continue yet\]\n/);
+  assert.match(DEFAULT_IN_CHAT_SELF_CHECK_PROMPT, /Reply only with JSON:/);
+  assert.match(DEFAULT_IN_CHAT_SELF_CHECK_PROMPT, /Use CONTINUE only if work remains and no human input is needed\./);
+  assert.ok(DEFAULT_IN_CHAT_SELF_CHECK_PROMPT.length < 300);
 });
 
 test("the default resume prompt remains contextual and preserves human-precedence boundaries", () => {

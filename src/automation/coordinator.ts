@@ -49,6 +49,7 @@ interface RuntimeEntry {
   evidenceKey?: string;
   suppressedFingerprint?: string;
   suppressedDomMessageId?: string | undefined;
+  humanTurnBaseline?: string;
   selfCheck?: {
     original: CandidateEvidence;
     probeText: string;
@@ -93,6 +94,12 @@ function suppressedAssistantMatches(
     domMessageId === undefined ||
     runtime.suppressedDomMessageId === domMessageId
   );
+}
+
+function userTurnIdentity(session: SessionView): string | undefined {
+  const user = session.observation?.latestUser;
+  if (user === undefined) return undefined;
+  return JSON.stringify([user.domMessageId ?? null, user.normalizedText]);
 }
 
 export class AutomationCoordinator {
@@ -183,6 +190,59 @@ export class AutomationCoordinator {
         reason: "Global emergency pause is active.",
       });
       return;
+    }
+
+    if (
+      policy.mode === "AUTO" &&
+      existing?.humanTurnBaseline !== undefined &&
+      userTurnIdentity(session) !== existing.humanTurnBaseline
+    ) {
+      delete existing.humanTurnBaseline;
+      existing.suppressedFingerprint = fingerprint;
+      existing.suppressedDomMessageId = assistant?.domMessageId;
+      this.#setStatus(existing, {
+        mode: "AUTO",
+        phase: "HOLD",
+        conversationId: session.conversationId,
+        policyRevision: policy.revision,
+        assistantFingerprint: fingerprint,
+        reason: "A human turn followed the interaction that cancelled automation; its response is not eligible for automatic control.",
+      });
+      return;
+    }
+
+    if (policy.mode === "AUTO" && existing?.status.phase !== "WAITING_TO_CONTINUE") {
+      const latestUserText = observation.latestUser?.normalizedText;
+      if (this.#journal.hasVerifiedSelfCheckProbeForUserTurn?.(
+        session.conversationId,
+        latestUserText,
+        session.lastUserInteractionAt,
+      )) {
+        this.#replaceRuntime(session.tabId, {
+          mode: "AUTO",
+          phase: "HOLD",
+          conversationId: session.conversationId,
+          policyRevision: policy.revision,
+          assistantFingerprint: fingerprint,
+          reason: "This response belongs to an already verified self-check probe; stale control episodes cannot be replayed.",
+        });
+        return;
+      }
+      if (this.#journal.hasVerifiedSelfCheckContinuationForUserTurn?.(
+        session.conversationId,
+        latestUserText,
+        session.lastUserInteractionAt,
+      )) {
+        this.#replaceRuntime(session.tabId, {
+          mode: "AUTO",
+          phase: "HOLD",
+          conversationId: session.conversationId,
+          policyRevision: policy.revision,
+          assistantFingerprint: fingerprint,
+          reason: "The response follows a self-check-approved continuation; chained self-check probes are blocked until a new human turn.",
+        });
+        return;
+      }
     }
 
     if (
@@ -308,6 +368,9 @@ export class AutomationCoordinator {
       runtime.suppressedFingerprint = fingerprint;
       runtime.suppressedDomMessageId = assistant?.domMessageId;
     }
+    const baseline = userTurnIdentity(session);
+    if (baseline === undefined) delete runtime.humanTurnBaseline;
+    else runtime.humanTurnBaseline = baseline;
   }
 
   invalidateTab(tabId: number, reason = "Session identity changed; pending automation was cancelled."): void {

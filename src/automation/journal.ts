@@ -11,6 +11,9 @@ export interface WriteGuardRecord {
   documentId: string;
   attemptedAt: number;
   disposition: WriteGuardDisposition;
+  action?: AutomationDecisionEnvelope["action"];
+  continuationText?: string;
+  selfCheckDerivedContinuation?: boolean;
 }
 
 export interface AutomationWriteJournalState {
@@ -27,6 +30,12 @@ function boundedDomMessageId(value: string | undefined): string | undefined {
   return value !== undefined && value.length > 0 && value.length <= 200 ? value : undefined;
 }
 
+function boundedControlText(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const normalized = value.replace(/\r\n?/g, "\n").trim();
+  return normalized.length > 0 && normalized.length <= 1_000 ? normalized : undefined;
+}
+
 function validRecord(record: WriteGuardRecord): boolean {
   return (
     typeof record.conversationId === "string" &&
@@ -40,7 +49,10 @@ function validRecord(record: WriteGuardRecord): boolean {
     typeof record.documentId === "string" &&
     record.documentId.length > 0 &&
     Number.isFinite(record.attemptedAt) &&
-    (record.disposition === "ATTEMPTED" || record.disposition === "AMBIGUOUS" || record.disposition === "VERIFIED")
+    (record.disposition === "ATTEMPTED" || record.disposition === "AMBIGUOUS" || record.disposition === "VERIFIED") &&
+    (record.action === undefined || record.action === "CONTINUATION" || record.action === "SELF_CHECK_PROBE") &&
+    (record.continuationText === undefined || boundedControlText(record.continuationText) !== undefined) &&
+    (record.selfCheckDerivedContinuation === undefined || typeof record.selfCheckDerivedContinuation === "boolean")
   );
 }
 
@@ -91,9 +103,37 @@ export class AutomationWriteJournal {
       .map((record) => ({ ...record }));
   }
 
+  hasVerifiedSelfCheckProbeForUserTurn(
+    conversationId: string,
+    latestUserText: string | undefined,
+    lastUserInteractionAt: number | undefined,
+  ): boolean {
+    return this.#hasVerifiedControlTurn(
+      conversationId,
+      "SELF_CHECK_PROBE",
+      latestUserText,
+      lastUserInteractionAt,
+    );
+  }
+
+  hasVerifiedSelfCheckContinuationForUserTurn(
+    conversationId: string,
+    latestUserText: string | undefined,
+    lastUserInteractionAt: number | undefined,
+  ): boolean {
+    return this.#hasVerifiedControlTurn(
+      conversationId,
+      "CONTINUATION",
+      latestUserText,
+      lastUserInteractionAt,
+      true,
+    );
+  }
+
   reserve(envelope: AutomationDecisionEnvelope): Promise<boolean> {
     return this.#enqueue(async () => {
       const assistantDomMessageId = boundedDomMessageId(envelope.assistantDomMessageId);
+      const continuationText = boundedControlText(envelope.continuationText);
       if (this.hasGuard(envelope.conversationId, envelope.assistantFingerprint, assistantDomMessageId)) return false;
       const record: WriteGuardRecord = {
         conversationId: envelope.conversationId,
@@ -103,6 +143,10 @@ export class AutomationWriteJournal {
         documentId: envelope.documentId,
         attemptedAt: envelope.createdAt,
         disposition: "ATTEMPTED",
+        action: envelope.action,
+        ...(continuationText === undefined ? {} : { continuationText }),
+        selfCheckDerivedContinuation:
+          envelope.action === "CONTINUATION" && envelope.classification.source === "SELF_CHECK",
       };
       const next: AutomationWriteJournalState = { version: 1, records: [...this.#state.records, record] };
       await this.#persistence.save(next);
@@ -157,5 +201,24 @@ export class AutomationWriteJournal {
     const run = this.#mutationQueue.then(operation, operation);
     this.#mutationQueue = run.then(() => undefined, () => undefined);
     return run;
+  }
+
+  #hasVerifiedControlTurn(
+    conversationId: string,
+    action: AutomationDecisionEnvelope["action"],
+    latestUserText: string | undefined,
+    lastUserInteractionAt: number | undefined,
+    selfCheckDerivedContinuation = false,
+  ): boolean {
+    const controlText = boundedControlText(latestUserText);
+    if (controlText === undefined) return false;
+    return this.#state.records.some((record) =>
+      record.conversationId === conversationId &&
+      record.disposition === "VERIFIED" &&
+      record.action === action &&
+      record.continuationText === controlText &&
+      (selfCheckDerivedContinuation === false || record.selfCheckDerivedContinuation === true) &&
+      (lastUserInteractionAt === undefined || record.attemptedAt > lastUserInteractionAt),
+    );
   }
 }

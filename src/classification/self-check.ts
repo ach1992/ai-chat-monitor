@@ -28,11 +28,10 @@ const ALLOWED_DECISIONS = new Set<InChatSelfCheckDecision>([
 ]);
 
 export const DEFAULT_IN_CHAT_SELF_CHECK_PROMPT = [
-  "Do not continue the task yet. Classify only why it stopped.",
-  "Reply with exactly one JSON object: {\"decision\":\"...\"}.",
-  "Allowed decisions: CONTINUE, HOLD_APPROVAL, HOLD_DECISION, HOLD_HUMAN_OPERATION, COMPLETE, PLATFORM_ERROR, RATE_LIMIT, UNSURE.",
-  "Use CONTINUE only when work remains and no human approval, decision, information, credential, or human-only action is needed. Use UNSURE if uncertain.",
-].join(" ");
+  "[Guardian control check — do not continue yet]",
+  "Reply only with JSON: {\"decision\":\"CONTINUE|HOLD_APPROVAL|HOLD_DECISION|HOLD_HUMAN_OPERATION|COMPLETE|PLATFORM_ERROR|RATE_LIMIT|UNSURE\"}",
+  "Use CONTINUE only if work remains and no human input is needed.",
+].join("\n");
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

@@ -55,6 +55,7 @@ function makeSession(overrides = {}) {
     conversationId,
     registeredAt: 100,
     lastSeenAt: 200,
+    ...(overrides.lastUserInteractionAt === undefined ? {} : { lastUserInteractionAt: overrides.lastUserInteractionAt }),
     controlEligibility: overrides.controlEligibility ?? "OWNER",
     observation: {
       conversationId,
@@ -114,8 +115,27 @@ function makeHarness({ mode = "AUTO", classifier, deterministic, sender } = {}) 
       const key = `${envelope.conversationId}:${envelope.assistantFingerprint}:${envelope.assistantDomMessageId ?? "none"}`;
       if (guards.has(key)) return false;
       guards.set(key, envelope.decisionId);
-      decisions.set(envelope.decisionId, { key, state: "ATTEMPTED" });
+      decisions.set(envelope.decisionId, { key, state: "ATTEMPTED", envelope: structuredClone(envelope) });
       return true;
+    },
+    hasVerifiedSelfCheckProbeForUserTurn(conversationId, latestUserText, lastUserInteractionAt) {
+      return [...decisions.values()].some((decision) =>
+        decision.state === "VERIFIED" &&
+        decision.envelope.conversationId === conversationId &&
+        decision.envelope.action === "SELF_CHECK_PROBE" &&
+        decision.envelope.continuationText === latestUserText &&
+        (lastUserInteractionAt === undefined || decision.envelope.createdAt > lastUserInteractionAt),
+      );
+    },
+    hasVerifiedSelfCheckContinuationForUserTurn(conversationId, latestUserText, lastUserInteractionAt) {
+      return [...decisions.values()].some((decision) =>
+        decision.state === "VERIFIED" &&
+        decision.envelope.conversationId === conversationId &&
+        decision.envelope.action === "CONTINUATION" &&
+        decision.envelope.classification.source === "SELF_CHECK" &&
+        decision.envelope.continuationText === latestUserText &&
+        (lastUserInteractionAt === undefined || decision.envelope.createdAt > lastUserInteractionAt),
+      );
     },
     async releaseNotStarted(decisionId) {
       const decision = decisions.get(decisionId);
@@ -319,6 +339,60 @@ test("an ambiguous AUTO stop uses one bound self-check response before contextua
   assert.equal(harness.sendCalls.length, 2);
   assert.equal(harness.sendCalls[1].action, "CONTINUATION");
   assert.equal(harness.sendCalls[1].assistantFingerprint, "b".repeat(64));
+});
+
+test("a self-check-approved continuation cannot start another self-check episode", async () => {
+  const harness = makeHarness({ deterministic: () => undefined });
+  harness.coordinator.handleSession(harness.getSession());
+  harness.clock.advance(10);
+  await flushAsync();
+
+  harness.setSession(makeSession({
+    user: harness.sendCalls[0].continuationText,
+    userMessageId: "self-check-user-1",
+    assistant: '{"decision":"CONTINUE"}',
+    assistantMessageId: "self-check-assistant-1",
+    fingerprint: "b".repeat(64),
+  }));
+  harness.coordinator.handleSession(harness.getSession());
+  harness.clock.advance(20);
+  await flushAsync();
+  assert.equal(harness.sendCalls.length, 2);
+
+  harness.setSession(makeSession({
+    user: harness.sendCalls[1].continuationText,
+    userMessageId: "guardian-resume-user-1",
+    assistant: "I still need more task context before I can continue.",
+    assistantMessageId: "assistant-after-resume-1",
+    fingerprint: "c".repeat(64),
+  }));
+  harness.clock.advance(30);
+  await flushAsync();
+
+  assert.equal(harness.sendCalls.length, 2);
+  assert.equal(harness.coordinator.status(7).phase, "HOLD");
+  assert.match(harness.coordinator.status(7).reason, /chained self-check probes are blocked/i);
+});
+
+test("a human message after interaction suppresses its resulting AUTO response", async () => {
+  const harness = makeHarness({ deterministic: () => undefined });
+  harness.coordinator.handleHumanInteraction(harness.getSession());
+
+  harness.setSession(makeSession({
+    user: "Please stop automation and answer this directly.",
+    userMessageId: "human-user-2",
+    assistant: "I will answer your request directly.",
+    assistantMessageId: "assistant-after-human-2",
+    fingerprint: "d".repeat(64),
+    lastUserInteractionAt: 1_100,
+  }));
+  harness.coordinator.handleSession(harness.getSession());
+  harness.clock.advance(60_000);
+  await flushAsync();
+
+  assert.equal(harness.sendCalls.length, 0);
+  assert.equal(harness.coordinator.status(7).phase, "HOLD");
+  assert.match(harness.coordinator.status(7).reason, /human turn followed/i);
 });
 
 test("a recoverable delivery error may send one self-check probe but a hard blocker cannot", async () => {

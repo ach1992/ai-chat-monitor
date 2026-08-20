@@ -150,3 +150,28 @@ test("outcome reconciliation fails closed if its reserved guard is unexpectedly 
     /guard disappeared/i,
   );
 });
+
+test("verified self-check control turns remain identifiable after journal restore", async () => {
+  const store = persistence();
+  const journal = new AutomationWriteJournal(store);
+  await journal.restore();
+
+  const probe = { ...envelope({ decisionId: "probe" }), action: "SELF_CHECK_PROBE", continuationText: "[Guardian control check]" };
+  assert.equal(await journal.reserve(probe), true);
+  await journal.mark("probe", "VERIFIED");
+
+  const resume = {
+    ...envelope({ decisionId: "resume", assistantFingerprint: fingerprint(2) }),
+    action: "CONTINUATION",
+    continuationText: "Continue the work from where you stopped.",
+    classification: { decision: "CONTINUE", reasonCode: "NEEDLESS_TURN_BOUNDARY", reason: "Continue.", source: "SELF_CHECK" },
+  };
+  assert.equal(await journal.reserve(resume), true);
+  await journal.mark("resume", "VERIFIED");
+
+  const restored = new AutomationWriteJournal(store);
+  await restored.restore();
+  assert.equal(restored.hasVerifiedSelfCheckProbeForUserTurn("chat-1", probe.continuationText, 50), true);
+  assert.equal(restored.hasVerifiedSelfCheckContinuationForUserTurn("chat-1", resume.continuationText, 50), true);
+  assert.equal(restored.hasVerifiedSelfCheckContinuationForUserTurn("chat-1", resume.continuationText, 101), false);
+});

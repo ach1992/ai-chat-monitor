@@ -141,7 +141,7 @@ and:
 resume -> no progress -> self-check -> resume -> no progress -> ...
 ```
 
-At most one self-check probe should be allowed for one exact stop/error episode. Existing stagnation protection and the hard fuse remain defense in depth and should account for self-check/resume cycles.
+At most one self-check probe should be allowed for one exact stop/error episode. A response to a self-check-approved contextual resume is held rather than treated as a fresh probe episode until a new human turn exists. This durable control-turn boundary also prevents a service-worker restart from replaying a completed self-check episode. Existing stagnation protection and the hard fuse remain defense in depth.
 
 ## 9. External provider role
 
