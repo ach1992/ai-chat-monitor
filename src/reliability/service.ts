@@ -1,7 +1,7 @@
 import type { AutomationRuntimeStatus, ResolvedAutomationPolicy } from "../automation/types.js";
 import type { SessionView } from "../core/session-registry.js";
 import { redactSecrets } from "../classification/context.js";
-import { defaultNotificationManager } from "../notifications/manager.js";
+import { browserNotification, defaultNotificationManager } from "../notifications/manager.js";
 import type { GuardianNotification, GuardianNotificationEvent } from "../notifications/types.js";
 import type { AuditEvent, AuditEventKind } from "./audit.js";
 import { AuditHistoryRepository } from "./audit.js";
@@ -207,6 +207,7 @@ export class ReliabilityService {
   async flush(): Promise<void> { await this.#queue; }
 
   static browserNotify(notification: GuardianNotification): Promise<void> {
+    if (typeof chrome.storage === "undefined") return browserNotification(notification);
     return defaultNotificationManager().deliver(notification);
   }
 
