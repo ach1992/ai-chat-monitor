@@ -87,7 +87,7 @@ The Telegram live acceptance followed a real defect investigation rather than a 
 
 ## 5. Opportunistic platform-state evidence
 
-Three rare current-platform states were previously tracked as mandatory MVP closeout items:
+Three rare current-platform states were previously tracked as mandatory pre-v1 closeout items:
 
 - a naturally occurring silent terminal/no-fresh-assistant-response state;
 - the real red Retry/error blocker;
