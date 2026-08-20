@@ -398,3 +398,114 @@ The test suite explicitly includes adversarial race cases: delayed provider resu
 Telegram v1 is strictly outbound notification-only. The extension does not poll for inbound commands, register a webhook, inject Telegram messages into ChatGPT, answer approvals remotely, change `AUTO`/`OFF`/`OBSERVE`, start/stop supervision, or expose arbitrary commands/status controls through Telegram.
 
 Any future inbound/read-only/remote-control Telegram capability is a separate product outcome and requires a separate threat model and authorization design covering authentication, destination/chat binding, replay protection, target selection, authorization, secret handling, and interaction with pending local automation. It cannot inherit authority from the outbound notification channel.
+
+## 14. Accepted next-state architecture — in-chat self-check (Issue #51)
+
+This section records the accepted next architecture direction. It is **not** a claim about the shipped v1.0 runtime. The current sections above remain authoritative for v1.0 behavior until Issue #51 is implemented and integrated.
+
+The next classifier path should make the current ChatGPT conversation the primary classifier for eligible ambiguous stop episodes:
+
+```text
+STOP / ERROR EPISODE
+  -> hard local safety + identity checks
+  -> deterministic obvious decision when trustworthy
+  -> SELF_CHECK_ELIGIBLE?
+       no  -> HOLD / notify
+       yes -> SELF_CHECK_WAIT
+              -> final synchronous pre-probe revalidation
+              -> send exactly one bounded self-check probe
+              -> verify probe write
+              -> await the response instance caused by that probe
+              -> strict parse + episode/result revalidation
+                   CONTINUE -> CONTINUE_WAIT -> guarded resume send
+                   HOLD_*   -> HOLD
+                   COMPLETE -> HOLD/complete
+                   ERROR/RATE_LIMIT -> HOLD
+                   UNSURE/malformed/stale -> HOLD/UNSURE
+```
+
+### 14.1 Stop/self-check episode identity
+
+The implementation needs an explicit identity for the stop/error episode being classified. It must be at least as strict as the existing action identity and must prevent a self-check response from being confused with the original task response.
+
+Conceptually, a self-check envelope should bind:
+
+- `tabId`;
+- document/content-agent identity;
+- `pageEpoch` and route;
+- conversation identity;
+- the originating assistant-response identity when one exists;
+- the current eligible error/stop fingerprint when the episode is UI-derived;
+- policy revision;
+- OWNER state;
+- the specific probe write/result identity.
+
+Any mismatch makes the result stale.
+
+### 14.2 Self-check probe is a separate mutation type
+
+The probe is not ordinary `CONTINUE` and must not inherit authorization implicitly from the old send path.
+
+It requires:
+
+- explicit `AUTO`-mode/user opt-in semantics;
+- OWNER-only authority;
+- empty/unchanged composer;
+- final synchronous revalidation immediately before the probe mutation;
+- a bounded write journal or equivalent no-replay/no-blind-retry guard;
+- verification that the intended probe user message appeared and generation began;
+- restart recovery that cannot replay stale probe authority.
+
+If probe-write success is ambiguous, freeze automatic retry and HOLD.
+
+### 14.3 Eligible Retry/red-error episodes
+
+The next design may classify a visible ChatGPT `Retry`, red delivery error, or `Message delivery timed out` episode through one in-chat self-check **without clicking Retry**, provided the ordinary composer remains safely usable and every fresh identity/human-precedence/write guard passes.
+
+This is a deliberate change from the v1 rule that any Retry/error UI blocked all automatic mutation. The adapter should therefore distinguish:
+
+- **self-check-eligible recoverable error UI** — e.g. Retry/red delivery-error state where a new normal user message can still be sent safely; from
+- **hard no-probe UI** — capacity/context exhaustion requiring a new chat, unavailable/disabled composer, authentication/account verification/CAPTCHA/permission/safety controls, or other states that require human action or cannot establish safe episode identity.
+
+The extension still never clicks/dismisses Retry/error controls automatically.
+
+### 14.4 Self-check output
+
+Self-check output is structured advisory data. The minimum semantic vocabulary is:
+
+- `CONTINUE`;
+- `HOLD_APPROVAL`;
+- `HOLD_DECISION`;
+- `HOLD_HUMAN_OPERATION`;
+- `COMPLETE`;
+- `PLATFORM_ERROR`;
+- `RATE_LIMIT`;
+- `UNSURE`.
+
+Strict parsing is required. Extra/malformed/contradictory or stale output must not become `CONTINUE`.
+
+The self-check prompt must explicitly say not to continue the task yet; it should only classify the previous/current stop episode.
+
+### 14.5 Resume message
+
+After a valid `CONTINUE`, Guardian should use a concise contextual resume instruction rather than relying only on bare `Continue.`. The intended default meaning is:
+
+```text
+Continue the work from where you stopped. If you need approval, a decision, information, or an action from the human, say so; otherwise continue until the requested work is complete.
+```
+
+Do not turn this into a second orchestration prompt. Keep it short and task-neutral.
+
+### 14.6 Provider role after self-check
+
+The provider subsystem remains modular and supported, but normal classification should not require an external API when in-chat self-check is enabled and reliable.
+
+External providers may remain optional fallback/diagnostic paths. They never override hard local blockers, human precedence, stale-state rejection, or self-check result safety.
+
+### 14.7 Loop/stagnation protection
+
+The runtime must recognize self-check turns as control traffic and prevent recursive classification loops. At most one probe is allowed for one exact stop/error episode.
+
+Existing stagnation tracking and the hard fuse must include repeated probe/resume no-progress cycles so the new path cannot create an infinite conversation loop.
+
+See [`IN_CHAT_SELF_CHECK.md`](IN_CHAT_SELF_CHECK.md) and Issue #51 for the accepted next-state details and acceptance scenarios.

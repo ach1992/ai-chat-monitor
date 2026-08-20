@@ -1,6 +1,6 @@
 # Chat Turn Guardian — Project Specification
 
-Status: Accepted living specification; v1.0 feature-complete and release-ready  
+Status: Accepted living specification; v1.0 feature-complete and release-ready; next outcome accepted in Issue #51  
 Repository: `ach1992/chat-turn-guardian`  
 Primary target: ChatGPT Web on Chromium-based browsers
 
@@ -249,3 +249,27 @@ Rare platform states that can only occur naturally are not to be manufactured. T
 ## 11. Product principle
 
 Chat Turn Guardian should make an existing high-quality chat workflow more continuous, not more autonomous than the workflow itself intended to be. When in doubt, preserve the conversation, preserve the user's control, and do nothing automatically.
+
+## 12. Accepted next outcome — in-chat self-check classification
+
+Issue #51 is the authoritative next product outcome after the completed v1.0 baseline.
+
+The intended next design changes the **normal ambiguous-stop classifier** from an external-provider-first dependency to an **in-chat self-check** performed in the same ChatGPT conversation:
+
+- local deterministic/high-confidence signals continue to handle obvious safe boundaries first;
+- for an eligible ambiguous stop/error episode, Guardian may send exactly one short self-check probe asking the current chat to classify why it stopped;
+- the reply must be compact and machine-readable and must distinguish continuation from approval, material-decision, human-operation, completion, platform-error, rate-limit, and uncertainty cases;
+- malformed, contradictory, stale, missing, or uncertain self-check output fails closed;
+- external AI providers remain optional fallback/diagnostic capability rather than a required normal-path dependency if the in-chat path proves reliable.
+
+A visible ChatGPT `Retry`, red delivery error, or `Message delivery timed out` state is **probe-eligible** in the next design only when the page still has a safe ordinary composer and all exact identity, ownership, human-precedence, stale-state, and write-safety guards pass. Guardian still never clicks `Retry` automatically and never blindly retries an ambiguous or failed probe write.
+
+Hard no-probe boundaries remain, including conversation/context exhaustion that explicitly requires a **new chat**, unavailable/unsafe composer state, authentication/account verification/CAPTCHA/permission/safety UI that requires human action, human takeover, or unprovable current episode identity. Automatic creation or migration to a new ChatGPT conversation is not authorized by this outcome.
+
+The intended default resume message should remain simple and approximately mean:
+
+> Continue the work from where you stopped. If you need approval, a decision, information, or an action from the human, say so; otherwise continue until the requested work is complete.
+
+The self-check probe is itself a new automatic mutation before the resume decision. It therefore requires explicit stop/self-check episode identity, final synchronous revalidation before each mutation, OWNER/MIRROR isolation, service-worker restart safety, no-blind-retry/ambiguous-write semantics, and loop/stagnation protection. Self-check output remains advisory data and cannot bypass local safety gates.
+
+Until Issue #51 is implemented, integrated, and live-validated, this section describes an accepted **next-state requirement**, not shipped v1.0 runtime behavior. See [`IN_CHAT_SELF_CHECK.md`](IN_CHAT_SELF_CHECK.md) for the bounded design direction and Issue #51 for implementation/acceptance ownership.
