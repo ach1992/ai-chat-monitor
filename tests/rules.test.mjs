@@ -70,6 +70,28 @@ test("explicitly pre-authorized generic continue boundary continues deterministi
   assert.equal(providers.calls, 0);
 });
 
+test("deterministic HOLD keeps precedence over an explicit continue token", async () => {
+  const providers = new NeverProviderManager();
+  const classifier = new ConservativeStopClassifier(providers);
+  const result = await classifier.classify({
+    turns: [
+      {
+        role: "user",
+        content: "Continue the work without asking me for routine approval or confirmation.",
+      },
+      {
+        role: "assistant",
+        content: "I need your approval before I can continue. Say continue to approve.",
+      },
+    ],
+  });
+
+  assert.equal(result.decision, "HOLD");
+  assert.equal(result.reasonCode, "HUMAN_APPROVAL_REQUIRED");
+  assert.equal(result.source, "RULE");
+  assert.equal(providers.calls, 0);
+});
+
 test("generic continue wording does not override a real human condition", async () => {
   const providers = new FixedProviderManager({
     decision: "HOLD",
