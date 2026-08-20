@@ -102,11 +102,45 @@ The current-tab card refreshes automatically during normal use and shows connect
 
 In the Side Panel, add one of:
 
-- **OpenRouter**: profile ID, model, and API key;
+- **OpenRouter**: profile ID, model, and API key using Guardian's built-in OpenRouter preset;
 - **NaraRouter**: profile ID, model, and API key using its fixed provider endpoint; or
-- **OpenAI-compatible**: profile ID, HTTPS base URL, model, and API key.
+- **Generic OpenAI-compatible**: profile ID, HTTPS base URL, model, and API key.
 
-The browser asks for host access to the exact provider origin at configuration time. Provider profiles can be reordered for fallback priority. Removing or replacing the last profile that uses an origin revokes that now-unused origin permission on a best-effort basis.
+`Profile ID` is a local Guardian label, not a value supplied by the API provider. Use a short unique name such as `openai`, `gemini-main`, or `groq-fast`.
+
+For a generic profile, Guardian currently expects an OpenAI-style HTTPS API that supports Bearer-token authentication, `GET <base-url>/models`, and `POST <base-url>/chat/completions`. `Try loading models` uses the provider's `/models` endpoint. If a compatible provider does not expose a usable model catalog, you can still enter the exact model ID manually. After saving a profile, use **Test classifier** before relying on it for `AUTO`; protocol compatibility alone does not guarantee that every model will reliably follow Guardian's conservative JSON classification contract.
+
+#### Known provider configurations
+
+The following widely used services match Guardian's current generic transport as of 2026-08-20. Provider APIs, model IDs, quotas, and pricing can change, so re-check the linked vendor documentation when configuring a profile.
+
+| Service | Guardian provider type | Base URL | Where to get the API credential / verify compatibility | Notes |
+| --- | --- | --- | --- | --- |
+| OpenAI API | `Generic OpenAI-compatible` | `https://api.openai.com/v1` | [OpenAI API Platform](https://platform.openai.com/) / [API keys](https://platform.openai.com/api-keys) | ChatGPT web subscriptions and OpenAI API billing are separate. A ChatGPT Business subscription does **not** include API usage. |
+| Google Gemini API | `Generic OpenAI-compatible` | `https://generativelanguage.googleapis.com/v1beta/openai` | [Gemini OpenAI compatibility](https://ai.google.dev/gemini-api/docs/openai) / [Google AI Studio](https://aistudio.google.com/apikey) | Google's OpenAI-compatibility layer is currently documented as beta. Use `Try loading models` or enter a compatible Gemini model ID manually. |
+| DeepSeek API | `Generic OpenAI-compatible` | `https://api.deepseek.com` | [DeepSeek API docs](https://api-docs.deepseek.com/) / [DeepSeek platform](https://platform.deepseek.com/) | DeepSeek exposes OpenAI-format `/models` and `/chat/completions`; model names can change, so prefer the live catalog. |
+| Groq | `Generic OpenAI-compatible` | `https://api.groq.com/openai/v1` | [Groq OpenAI compatibility](https://console.groq.com/docs/openai) / [Groq Console](https://console.groq.com/) | Groq documents its API as mostly OpenAI-compatible and exposes Chat Completions. |
+| xAI | `Generic OpenAI-compatible` | `https://api.x.ai/v1` | [xAI Inference API](https://docs.x.ai/developers/rest-api-reference/inference) / [xAI Console](https://console.x.ai/) | xAI currently exposes `/v1/models` and `/v1/chat/completions`; xAI labels Chat Completions as legacy, so compatibility should be rechecked over time. |
+| Together AI | `Generic OpenAI-compatible` | `https://api.together.ai/v1` | [Together OpenAI compatibility](https://docs.together.ai/docs/inference/openai-compatibility) / [Together quickstart](https://docs.together.ai/docs/quickstart) | Together supports both `models.list` and Chat Completions through its OpenAI-compatible endpoint. |
+| OpenRouter | `OpenRouter` preset | Managed by Guardian | [OpenRouter](https://openrouter.ai/) / [API keys](https://openrouter.ai/keys) | Prefer Guardian's built-in preset rather than recreating OpenRouter as a generic profile. |
+
+For **OpenAI specifically**, your ChatGPT account and your API account can use the same sign-in identity, but API service/billing is separate from ChatGPT. ChatGPT Free, Plus, Pro, Business, or other chat access does not by itself provide a usable Guardian API key. OpenAI's current Business FAQ explicitly states that ChatGPT Business does not include API usage: [ChatGPT Business FAQ](https://help.openai.com/en/articles/8542115).
+
+For **Claude / Anthropic**, do **not** enter `https://api.anthropic.com` as a Generic OpenAI-compatible provider. Guardian's current generic adapter uses OpenAI-style `/chat/completions` plus Bearer authentication, while the native Claude API uses the Messages API (`/v1/messages`) and Anthropic-specific authentication/version headers. Claude therefore needs a dedicated Guardian provider adapter before it can be treated as a supported native provider. See [Claude Platform getting started](https://platform.claude.com/docs/en/get-started).
+
+A recommended generic-provider setup flow is:
+
+1. Create an API credential in the provider's developer/API console. Never use a browser-session cookie or copy a secret from a consumer chat application's web session.
+2. In **Add provider**, choose the provider preset when one exists; otherwise choose **Generic OpenAI-compatible**.
+3. Set a local `Profile ID`.
+4. For Generic, enter the exact HTTPS `Base URL` from the table/vendor documentation.
+5. Paste the API key locally into the extension.
+6. Choose **Try loading models**. Select a suitable text/chat model from the returned catalog, or enter a documented model ID manually if catalog discovery is unavailable.
+7. Optionally select **Make this the primary provider**.
+8. Save the provider, grant the exact requested origin permission, then run **Test classifier**.
+9. Keep the profile only if the readiness test succeeds. Configure additional profiles if you want ordered fallback.
+
+Provider API usage may incur separate charges from the provider. Guardian never treats a provider subscription, consumer chat subscription, or web login as an API credential. The browser asks for host access to the exact provider origin at configuration time. Provider profiles can be reordered for fallback priority. Removing or replacing the last profile that uses an origin revokes that now-unused origin permission on a best-effort basis.
 
 Provider API keys are never returned in ordinary management/status responses. When remote classification is needed, Guardian sends only the bounded, minimized, secret-redacted classification context directly to the selected HTTPS provider. Provider output remains advisory.
 
@@ -202,7 +236,9 @@ Check the displayed reason/runtime state. Common safe causes are:
 
 ### Provider requests fail
 
-Verify the profile model/base URL/API key, confirm the requested exact-origin host permission is still granted, and use an HTTPS endpoint. Provider/model availability and quotas are external service facts and are intentionally not hardcoded into the extension.
+Verify the profile model/base URL/API key, confirm the requested exact-origin host permission is still granted, and use an HTTPS endpoint. For Generic profiles, confirm that the service actually supports OpenAI-compatible Bearer authentication and the `/models` and `/chat/completions` routes described above. Run **Try loading models** and then **Test classifier** to distinguish catalog/auth/network problems from model-output/readiness problems.
+
+Provider/model availability, quotas, pricing, and compatibility are external service facts and are intentionally not hardcoded into the extension. Re-check the provider's official documentation if a previously working endpoint or model changes.
 
 ### Notifications do not appear
 
