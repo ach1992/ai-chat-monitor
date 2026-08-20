@@ -46,6 +46,30 @@ const ASSISTANT_HOLD_RULES: readonly HoldRule[] = [
 
 const USER_STOP_PATTERN = /^(?:stop|pause|hold|do not continue|don't continue|wait|cancel|متوقف شو|صبر کن|ادامه نده)[.!\s]*$/iu;
 
+const USER_PREAUTHORIZED_CONTINUATION_PATTERNS: readonly RegExp[] = [
+  /\bwithout asking (?:me )?(?:any )?[\s\S]{0,180}\b(?:approval|confirmation|choice|decision|credential|new information|human input)\b/i,
+  /\b(?:do not|don't) (?:ask|wait) (?:me )?(?:for )?[\s\S]{0,160}\b(?:approval|confirmation|choice|decision|credential|new information|human input)\b/i,
+  /\b(?:continue|proceed|complete)[\s\S]{0,120}\bwithout (?:further )?(?:human input|approval|confirmation)\b/i,
+];
+
+const GENERIC_CONTINUATION_REQUEST_PATTERN = /\b(?:say|reply(?:\s+with)?|respond(?:\s+with)?|type|send)\s+["'`]*(?:continue|go ahead|proceed)["'`]*\b/i;
+const GENERIC_CONTINUATION_DISQUALIFIER_PATTERN = /\b(?:when|once|after)\b|\b(?:provide|upload|attach|share|choose|select|approve|confirm|authenticate|sign in|log in)\b/i;
+
+function isExplicitPreauthorizedContinuationBoundary(
+  latestUser: SanitizedContext["turns"][number] | undefined,
+  latestAssistant: SanitizedContext["turns"][number],
+): boolean {
+  if (latestUser === undefined) return false;
+  if (!USER_PREAUTHORIZED_CONTINUATION_PATTERNS.some((pattern) => pattern.test(latestUser.content))) {
+    return false;
+  }
+
+  const terminalTail = latestAssistant.content.trim().slice(-240);
+  if (!GENERIC_CONTINUATION_REQUEST_PATTERN.test(terminalTail)) return false;
+  if (GENERIC_CONTINUATION_DISQUALIFIER_PATTERN.test(terminalTail)) return false;
+  return true;
+}
+
 export function evaluateDeterministicRules(context: SanitizedContext): ClassificationResult | undefined {
   const latestAssistant = [...context.turns].reverse().find((turn) => turn.role === "assistant");
   const latestUser = [...context.turns].reverse().find((turn) => turn.role === "user");
@@ -67,6 +91,16 @@ export function evaluateDeterministicRules(context: SanitizedContext): Classific
       decision: "HOLD",
       reasonCode: rule.code,
       reason: boundedReason(rule.reason),
+      source: "RULE",
+      confidence: 1,
+    };
+  }
+
+  if (isExplicitPreauthorizedContinuationBoundary(latestUser, latestAssistant)) {
+    return {
+      decision: "CONTINUE",
+      reasonCode: "NEEDLESS_TURN_BOUNDARY",
+      reason: "The assistant is waiting only for a generic continuation token that the user already pre-authorized.",
       source: "RULE",
       confidence: 1,
     };
