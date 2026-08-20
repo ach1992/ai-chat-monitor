@@ -42,7 +42,11 @@ test("Telegram redacted settings never disclose the saved bot token", () => {
 
 test("blank token retains only the same destination while explicit token replaces the credential", () => {
   const first = resolveTelegramSettingsMutation(DEFAULT_TELEGRAM_SETTINGS, mutation());
-  const retained = resolveTelegramSettingsMutation(first, mutation({ botToken: "", eventMode: "CUSTOM", events: ["HOLD"].map(() => "HUMAN_ATTENTION_REQUIRED") }));
+  const retained = resolveTelegramSettingsMutation(first, mutation({
+    botToken: "",
+    eventMode: "CUSTOM",
+    events: ["HUMAN_ATTENTION_REQUIRED"],
+  }));
   assert.equal(retained.botToken, TOKEN_A);
   assert.equal(retained.eventMode, "CUSTOM");
 
@@ -66,6 +70,21 @@ test("Telegram settings persist across store instances without exposing the cred
   assert.equal(loaded.botToken, TOKEN_A);
   assert.deepEqual(loaded.events, ["RESPONSE_COMPLETE", "PROVIDER_ERROR"]);
   assert.equal(redactTelegramSettings(loaded).configured, true);
+});
+
+test("stale delivery health cannot overwrite health for a replaced Telegram credential", async () => {
+  const store = new TelegramSettingsStore(memoryPersistence());
+  await store.update(mutation());
+  const stale = await store.load();
+
+  await store.update(mutation({ botToken: TOKEN_B }));
+  const afterStaleHealth = await store.updateHealth(
+    { status: "HEALTHY", checkedAt: 42 },
+    { destination: stale.destination, botToken: stale.botToken },
+  );
+
+  assert.equal(afterStaleHealth.botToken, TOKEN_B);
+  assert.deepEqual(afterStaleHealth.health, { status: "NEVER_TESTED" });
 });
 
 test("Telegram cannot be enabled without both credential and destination", () => {
