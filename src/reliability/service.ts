@@ -1,6 +1,8 @@
 import type { AutomationRuntimeStatus, ResolvedAutomationPolicy } from "../automation/types.js";
 import type { SessionView } from "../core/session-registry.js";
 import { redactSecrets } from "../classification/context.js";
+import { browserNotification, defaultNotificationManager } from "../notifications/manager.js";
+import type { GuardianNotification, GuardianNotificationEvent } from "../notifications/types.js";
 import type { AuditEvent, AuditEventKind } from "./audit.js";
 import { AuditHistoryRepository } from "./audit.js";
 
@@ -14,22 +16,15 @@ export interface ReliabilityRuntimePersistence {
   save(state: ReliabilityRuntimeState): Promise<void>;
 }
 
-export interface ReliabilityNotification {
-  id: string;
-  title: string;
-  message: string;
-}
-
 export interface ReliabilityServiceOptions {
   audit: AuditHistoryRepository;
   runtimePersistence: ReliabilityRuntimePersistence;
   resolvePolicy(conversationId: string): ResolvedAutomationPolicy;
-  notify(notification: ReliabilityNotification): Promise<void>;
+  notify(notification: GuardianNotification): Promise<void>;
   now?: () => number;
 }
 
 const MAX_SEEN_KEYS = 256;
-const NOTIFICATION_ICON = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAACmklEQVR4nO3byVEjQQAF0c94ACfGAvDfmvGA27jAHAgCNGqhXqpry0wH1NH/aYno0sPj88t7DNuv1hdgbRMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBVOrv25/Wl7CYACr0OX6PCARwcv+P3hsCAZzYrbF7QiCAk7o3ci8IBHBCa8ftAYEACrd11NYIBFCwvWO2RCCAQh0dsRUCARSoxHhPv18LXMn2BHCwkcdPBHCo0cdPBLC7GcZPBLCrWcZPBLC5mcZPBLCp2cZPBLC6GcdPBLCqWcdPBHC3mcdPBPBjs4+fCOBmhPETASxGGT8RwFWk8RMBXEQbP+kYQO3n48Txk04B1D5HTx0/6RBA7XP05PGTzgDUPkdPHz/pCEDtc/SO/1EXAGqfo3f8r5oDqH2O3vEvawqg9jl6x7+uGYDa72THX64ZgBI3s+ZvhxnHTxp/BdRA4Pg/1/xH4JkIHP9+zQEk5yBw/HV1ASApi8Dx1/fw+Pzy3voivtf6//IJZ/yko0+Az1rf/NavX7vuACTtRqCNn3QKIKk/BnH8pGMASb1RqOMnnQNIzh+HPH4yAIDkvJHo4yeDAEjKj+X4Hw0DICk3muN/NRSA5Ph4jn/ZcACS/SM6/nVDAki2j+n4yw0LIFk/quPfrruHQXtbeojk8PebBoDta+ivADueAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOD9A59V1Pv7P/C7AAAAAElFTkSuQmCC";
 
 function normalizeRuntimeState(state: ReliabilityRuntimeState | undefined): ReliabilityRuntimeState {
   if (state?.version !== 1 || !Array.isArray(state.seenKeys)) return { version: 1, seenKeys: [] };
@@ -72,7 +67,7 @@ export class ReliabilityService {
   readonly #audit: AuditHistoryRepository;
   readonly #runtimePersistence: ReliabilityRuntimePersistence;
   readonly #resolvePolicy: (conversationId: string) => ResolvedAutomationPolicy;
-  readonly #notify: (notification: ReliabilityNotification) => Promise<void>;
+  readonly #notify: (notification: GuardianNotification) => Promise<void>;
   readonly #now: () => number;
   #runtime: ReliabilityRuntimeState = { version: 1, seenKeys: [] };
   #ready: Promise<void> = Promise.resolve();
@@ -123,9 +118,12 @@ export class ReliabilityService {
         assistantFingerprint: assistant.fingerprint,
       };
       await this.#appendAudit(event);
-      if (policy.notificationTriggers.includes("RESPONSE_FINISHED")) {
-        await this.#deliver(event, "A selected assistant response finished.");
-      }
+      await this.#deliver(
+        event,
+        "RESPONSE_COMPLETE",
+        policy.notificationTriggers.includes("RESPONSE_FINISHED"),
+        "A selected assistant response finished.",
+      );
     });
   }
 
@@ -139,28 +137,34 @@ export class ReliabilityService {
       const localStagnation = status.phase === "HOLD" && status.reason?.startsWith("STAGNATION:") === true;
       const classifiedError = classification?.reasonCode === "PLATFORM_ERROR" || classification?.reasonCode === "RATE_LIMIT";
       let kind: AuditEventKind | undefined;
-      let shouldNotify = false;
+      let notificationEvent: GuardianNotificationEvent | undefined;
+      let browserEnabled = false;
 
       if (status.phase === "COOLDOWN" && classification?.decision === "CONTINUE") {
         kind = "CONTINUE";
       } else if (localStagnation || (status.phase === "HOLD" && classification?.reasonCode === "STAGNATION")) {
         kind = "STAGNATION";
-        shouldNotify = policy.notificationTriggers.includes("STAGNATION") || policy.notificationTriggers.includes("HOLD");
+        notificationEvent = "STAGNATION";
+        browserEnabled = policy.notificationTriggers.includes("STAGNATION") || policy.notificationTriggers.includes("HOLD");
       } else if (status.phase === "HOLD" && classification?.decision === "HOLD" && classifiedError) {
         kind = "ERROR";
-        shouldNotify = policy.notificationTriggers.includes("ERROR");
+        notificationEvent = "EXTENSION_ERROR";
+        browserEnabled = policy.notificationTriggers.includes("ERROR");
       } else if (status.phase === "HOLD" && classification?.decision === "HOLD") {
         kind = "HOLD";
-        shouldNotify = policy.notificationTriggers.includes("HOLD");
+        notificationEvent = "HUMAN_ATTENTION_REQUIRED";
+        browserEnabled = policy.notificationTriggers.includes("HOLD");
       } else if (status.phase === "UNSURE") {
         const providerError = classification?.reasonCode === "PROVIDER_FAILURE";
         kind = providerError ? "ERROR" : "UNSURE";
-        shouldNotify = providerError
+        notificationEvent = providerError ? "PROVIDER_ERROR" : "UNSURE";
+        browserEnabled = providerError
           ? policy.notificationTriggers.includes("ERROR") || policy.notificationTriggers.includes("UNSURE")
           : policy.notificationTriggers.includes("UNSURE");
       } else if (status.phase === "AMBIGUOUS_WRITE") {
         kind = "AMBIGUOUS_WRITE";
-        shouldNotify = policy.notificationTriggers.includes("ERROR");
+        notificationEvent = "EXTENSION_ERROR";
+        browserEnabled = policy.notificationTriggers.includes("ERROR");
       }
 
       if (kind === undefined) return;
@@ -192,7 +196,9 @@ export class ReliabilityService {
         ...(status.assistantFingerprint === undefined ? {} : { assistantFingerprint: status.assistantFingerprint }),
       };
       await this.#appendAudit(event);
-      if (shouldNotify) await this.#deliver(event, status.reason ?? "The chat requires attention.");
+      if (notificationEvent !== undefined) {
+        await this.#deliver(event, notificationEvent, browserEnabled, status.reason ?? "The chat requires attention.");
+      }
     });
   }
 
@@ -200,26 +206,9 @@ export class ReliabilityService {
   clearHistory(): Promise<void> { return this.#audit.clear(); }
   async flush(): Promise<void> { await this.#queue; }
 
-  static browserNotify(notification: ReliabilityNotification): Promise<void> {
-    return new Promise((resolve, reject) => {
-      chrome.notifications.create(
-        notification.id,
-        {
-          type: "basic",
-          iconUrl: NOTIFICATION_ICON,
-          title: notification.title,
-          message: notification.message,
-          priority: 0,
-        },
-        () => {
-          if (chrome.runtime.lastError !== undefined) {
-            reject(new Error("Browser notification delivery failed."));
-            return;
-          }
-          resolve();
-        },
-      );
-    });
+  static browserNotify(notification: GuardianNotification): Promise<void> {
+    if (typeof chrome.storage === "undefined") return browserNotification(notification);
+    return defaultNotificationManager().deliver(notification);
   }
 
   #schedule(operation: () => Promise<void>): void {
@@ -250,11 +239,19 @@ export class ReliabilityService {
     }
   }
 
-  async #deliver(event: AuditEvent, fallbackMessage: string): Promise<void> {
-    const notification: ReliabilityNotification = {
+  async #deliver(
+    event: AuditEvent,
+    notificationEvent: GuardianNotificationEvent,
+    browserEnabled: boolean,
+    fallbackMessage: string,
+  ): Promise<void> {
+    const notification: GuardianNotification = {
       id: `guardian:${event.id}`.slice(0, 500),
+      event: notificationEvent,
       title: notificationTitle(event.kind),
       message: boundedMessage(event.reason, fallbackMessage),
+      browserEnabled,
+      ...(event.conversationId === undefined ? {} : { conversationId: event.conversationId }),
     };
     try {
       await this.#notify(notification);
@@ -266,7 +263,7 @@ export class ReliabilityService {
         ...(event.conversationId === undefined ? {} : { conversationId: event.conversationId }),
         kind: "NOTIFICATION_ERROR",
         ...(event.mode === undefined ? {} : { mode: event.mode }),
-        reason: "Browser notification delivery failed; automation state was not changed.",
+        reason: "Notification delivery failed; automation state was not changed.",
         ...(event.assistantFingerprint === undefined ? {} : { assistantFingerprint: event.assistantFingerprint }),
       });
     }
