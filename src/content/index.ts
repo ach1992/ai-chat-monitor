@@ -47,6 +47,7 @@ namespace GuardianContentAgent {
   let outboundQueue: Promise<void> = Promise.resolve();
   let lastLocalUserInteractionAt: number | undefined;
   let lastKeyboardFocusIntentAt: number | undefined;
+  let guardedSendInFlight = false;
 
   function nextSequence(): number { sequence += 1; return sequence; }
 
@@ -110,16 +111,24 @@ namespace GuardianContentAgent {
     if (!humanStateIsCurrent()) {
       return { decisionId: message.decisionId, status: "NOT_STARTED", reason: "Trusted human interaction changed after the decision evidence." };
     }
-    const result = await adapter.guardedSend({
-      decisionId: message.decisionId,
-      conversationId: message.conversationId,
-      routeKey: message.routeKey,
-      assistantFingerprint: message.assistantFingerprint,
-      ...(message.assistantDomMessageId === undefined ? {} : { assistantDomMessageId: message.assistantDomMessageId }),
-      continuationText: message.continuationText,
-    }, humanStateIsCurrent);
-    scheduleObservation(0);
-    return result;
+    if (guardedSendInFlight) {
+      return { decisionId: message.decisionId, status: "NOT_STARTED", reason: "Another guarded send is already active for this content agent." };
+    }
+
+    guardedSendInFlight = true;
+    try {
+      return await adapter.guardedSend({
+        decisionId: message.decisionId,
+        conversationId: message.conversationId,
+        routeKey: message.routeKey,
+        assistantFingerprint: message.assistantFingerprint,
+        ...(message.assistantDomMessageId === undefined ? {} : { assistantDomMessageId: message.assistantDomMessageId }),
+        continuationText: message.continuationText,
+      }, humanStateIsCurrent);
+    } finally {
+      guardedSendInFlight = false;
+      scheduleObservation(0);
+    }
   }
 
   async function announceAgent(): Promise<boolean> {
@@ -183,6 +192,7 @@ namespace GuardianContentAgent {
   }
 
   function scheduleObservation(delayMs = 300): void {
+    if (guardedSendInFlight) return;
     observationGeneration += 1;
     const expectedGeneration = observationGeneration;
     if (observationTimer !== undefined) clearTimeout(observationTimer);
