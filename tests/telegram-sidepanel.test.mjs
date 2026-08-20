@@ -50,3 +50,27 @@ test("Side Panel exposes Telegram v1 configuration without rendering the saved s
   assert.doesNotMatch(ui, /getUpdates|webhook/i);
   assert.doesNotMatch(background, /getUpdates|webhook/i);
 });
+
+test("Telegram draft actions preserve unsaved form state and Test uses the current form", async () => {
+  const [ui, background] = await Promise.all([
+    readDist("sidepanel/telegram-ui.js"),
+    readDist("notifications/background.js"),
+  ]);
+
+  assert.match(ui, /let dirty = false/);
+  assert.match(ui, /render\(settings, !dirty\)/);
+  assert.match(ui, /function collectMutation\(\)/);
+  assert.match(ui, /panel:telegram-test-notification[\s\S]*settings: mutation/);
+  assert.match(ui, /Save settings to keep these values/);
+  assert.match(ui, /ui\.save\.disabled = value/);
+  assert.match(ui, /actions\.style\.gap = "0\.5rem"/);
+  assert.match(background, /manager\.testTelegram\(request\.settings\)/);
+});
+
+test("Privacy disclosure is collapsed and moved to the bottom of the Side Panel at runtime", async () => {
+  const ui = await readDist("sidepanel/telegram-ui.js");
+  assert.match(ui, /relocatePrivacyDisclosure/);
+  assert.match(ui, /"details", "panel-section disclosure privacy-disclosure"/);
+  assert.match(ui, /details\.open = false/);
+  assert.match(ui, /footer\.before\(details\)/);
+});
