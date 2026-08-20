@@ -43,6 +43,12 @@ async function reannounceCompletedChatGptTab(tab: chrome.tabs.Tab): Promise<void
 
 async function initializeSidePanelAvailability(): Promise<void> {
   try {
+    await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  } catch {
+    // Toolbar opening is UX-only. Per-tab availability still remains fail-closed below.
+  }
+
+  try {
     await chrome.sidePanel.setOptions({ enabled: false });
   } catch {
     // Keep the explicit per-tab deny path below even if the default update fails.
