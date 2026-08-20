@@ -300,6 +300,7 @@ test("content agent suppresses self-observation while guarded DOM transaction is
     const keepChannel = runtimeListener({
       type: "background:guarded-send",
       protocolVersion: 2,
+      action: "CONTINUATION",
       decisionId: "decision-agent-transaction",
       agentInstanceId: hello.agentInstanceId,
       pageEpoch: 1,

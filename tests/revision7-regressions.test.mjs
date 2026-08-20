@@ -158,9 +158,10 @@ function coordinatorSession({ latestAssistant = true, blocked = false } = {}) {
   };
 }
 
-function coordinatorHarness(session) {
+function coordinatorHarness(session, { inChatSelfCheck = false } = {}) {
   let classifyCalls = 0;
   let sendCalls = 0;
+  const reserved = new Set();
   const coordinator = new AutomationCoordinator({
     policies: {
       resolve(conversationId) {
@@ -176,9 +177,17 @@ function coordinatorHarness(session) {
     },
     journal: {
       hasGuard() { return false; },
+      async reserve(envelope) {
+        if (reserved.has(envelope.decisionId)) return false;
+        reserved.add(envelope.decisionId);
+        return true;
+      },
+      async releaseNotStarted(decisionId) { reserved.delete(decisionId); },
+      async mark() {},
     },
     sessions: { getTab: () => session },
     classifier: {
+      ...(inChatSelfCheck ? { classifyDeterministic() { return undefined; } } : {}),
       async classify() {
         classifyCalls += 1;
         return {
@@ -257,7 +266,7 @@ test("I1 silent terminal does not expose an older assistant after a newer user t
   assert.equal(harness.coordinator.status(71).phase, "IDLE");
 });
 
-test("I2 red Retry platform error blocks evaluation and guarded send", async () => {
+test("I2 red Retry never clicks Retry and allows only one guarded self-check probe", async () => {
   const GuardianContent = await loadAdapter();
   const user = attachToTurn(new FakeElement({ textContent: "Do the next step", order: 1 }), "user-1");
   const assistant = attachToTurn(new FakeElement({ textContent: "Partial result", order: 2 }), "assistant-1");
@@ -286,7 +295,7 @@ test("I2 red Retry platform error blocks evaluation and guarded send", async () 
   const blockedHarness = coordinatorHarness({
     ...coordinatorSession({ blocked: true }),
     observation,
-  });
+  }, { inChatSelfCheck: true });
   blockedHarness.coordinator.handleSession({
     ...coordinatorSession({ blocked: true }),
     observation,
@@ -303,8 +312,8 @@ test("I2 red Retry platform error blocks evaluation and guarded send", async () 
   });
   await new Promise((resolve) => setTimeout(resolve, 5));
   assert.equal(blockedHarness.classifyCalls(), 0);
-  assert.equal(blockedHarness.sendCalls(), 0);
-  assert.equal(blockedHarness.coordinator.status(71).phase, "HOLD");
+  assert.equal(blockedHarness.sendCalls(), 1);
+  assert.equal(blockedHarness.coordinator.status(71).phase, "WAITING_FOR_SELF_CHECK_RESPONSE");
 
   const fingerprint = await GuardianContent.fingerprintText("Partial result");
   const result = await adapter.guardedSend({

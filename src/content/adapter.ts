@@ -11,7 +11,8 @@ namespace GuardianContent {
     | "ERROR"
     | "CAPTCHA"
     | "ACCOUNT_VERIFICATION"
-    | "CONFIRMATION_REQUIRED";
+    | "CONFIRMATION_REQUIRED"
+    | "CONVERSATION_FULL";
   export type GuardedHumanStateCheck = () => boolean;
 
   export interface PageObservation {
@@ -37,6 +38,7 @@ namespace GuardianContent {
   }
 
   export interface GuardedContinuationExpectation {
+    purpose?: "CONTINUATION" | "SELF_CHECK_PROBE";
     decisionId: string;
     conversationId: string;
     routeKey: string;
@@ -207,15 +209,34 @@ namespace GuardianContent {
     if (/captcha|verify you are human|human verification/.test(lowered)) reasons.add("CAPTCHA");
     if (/verify (your )?account|account verification/.test(lowered)) reasons.add("ACCOUNT_VERIFICATION");
     if (/confirm|confirmation required|are you sure|permission required/.test(lowered)) reasons.add("CONFIRMATION_REQUIRED");
+    if (/conversation (?:is )?(?:full|at (?:its )?limit)|context (?:is )?full|new chat required|start a new chat/.test(lowered)) {
+      reasons.add("CONVERSATION_FULL");
+    }
     if (/error|something went wrong|failed/.test(lowered)) reasons.add("ERROR");
     return [...reasons];
   }
 
-  function pageHasBlockingUi(document: Document): boolean {
-    return allMatches(document, BLOCKING_SELECTORS).some((surface) => {
+  function pageBlockingReasons(document: Document): BlockingReason[] {
+    const reasons = new Set<BlockingReason>();
+    for (const surface of allMatches(document, BLOCKING_SELECTORS)) {
       const text = normalizeAssistantText(elementText(surface)).slice(0, 2_000);
-      return blockingReasons(surface, text).length > 0;
-    });
+      for (const reason of blockingReasons(surface, text)) reasons.add(reason);
+    }
+    return [...reasons];
+  }
+
+  function blockingAllowsPurpose(
+    reasons: readonly BlockingReason[],
+    purpose: GuardedContinuationExpectation["purpose"],
+  ): boolean {
+    if (reasons.length === 0) return true;
+    return purpose === "SELF_CHECK_PROBE" && reasons.every((reason) =>
+      reason === "ERROR" || reason === "NETWORK" || reason === "RATE_LIMIT",
+    );
+  }
+
+  function pageAllowsPurpose(document: Document, purpose: GuardedContinuationExpectation["purpose"]): boolean {
+    return blockingAllowsPurpose(pageBlockingReasons(document), purpose);
   }
 
   function targetMatches(target: EventTarget | null, selectors: readonly string[]): boolean {
@@ -385,7 +406,7 @@ namespace GuardianContent {
         observation.routeKey !== expectation.routeKey ||
         observation.confidence !== "HIGH" ||
         observation.generation !== "IDLE" ||
-        observation.blocking.blocked ||
+        !blockingAllowsPurpose(observation.blocking.reasons, expectation.purpose) ||
         !observation.composer.present ||
         observation.composer.hasText ||
         observation.latestAssistant?.fingerprint !== expectation.assistantFingerprint ||
@@ -414,7 +435,7 @@ namespace GuardianContent {
         composer === undefined ||
         normalizeAssistantText(elementText(composer)).length > 0 ||
         firstMatch<HTMLElement>(this.#document, STOP_SELECTORS) !== undefined ||
-        pageHasBlockingUi(this.#document)
+        !pageAllowsPurpose(this.#document, expectation.purpose)
       ) {
         return reject("Synchronous pre-mutation revalidation detected changed page or human state.");
       }
@@ -442,7 +463,7 @@ namespace GuardianContent {
           liveComposer !== undefined &&
           normalizeAssistantText(elementText(liveComposer)) === intendedComposerText &&
           firstMatch<HTMLElement>(this.#document, STOP_SELECTORS) === undefined &&
-          !pageHasBlockingUi(this.#document)
+          pageAllowsPurpose(this.#document, expectation.purpose)
         );
       };
 

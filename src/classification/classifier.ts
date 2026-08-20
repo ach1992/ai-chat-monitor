@@ -19,6 +19,14 @@ export class ConservativeStopClassifier {
     this.#sanitizerOptions = { ...sanitizerOptions };
   }
 
+  classifyDeterministic(input: StopClassifierInput): ClassificationResult | undefined {
+    const context = sanitizeContext(input.turns, this.#sanitizerOptions);
+    if (context.turns.length === 0) {
+      return unsureResult("AMBIGUOUS", "No usable recent conversation context was available.");
+    }
+    return evaluateDeterministicRules(context);
+  }
+
   async classify(input: StopClassifierInput): Promise<ClassificationResult> {
     const context = sanitizeContext(input.turns, this.#sanitizerOptions);
     if (context.turns.length === 0) {

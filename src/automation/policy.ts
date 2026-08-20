@@ -46,6 +46,7 @@ export interface AutomationPolicyPersistence {
 }
 
 export const DEFAULT_HARD_FUSE_MAX_AUTO_CONTINUES = 50;
+export const DEFAULT_CONTEXTUAL_RESUME_TEXT = "Continue the work from where you stopped. If you need approval, a decision, information, or an action from the human, say so; otherwise keep going until the requested work is complete.";
 export const DEFAULT_AUTOMATION_POLICY: AutomationPolicyState = {
   version: 1,
   revision: 1,
@@ -54,7 +55,7 @@ export const DEFAULT_AUTOMATION_POLICY: AutomationPolicyState = {
     settleDelayMs: 1_200,
     continueDelayMs: 800,
     cooldownMs: 3_000,
-    continuationText: "Continue.",
+    continuationText: DEFAULT_CONTEXTUAL_RESUME_TEXT,
     notificationTriggers: [],
     hardFuseMaxAutoContinues: DEFAULT_HARD_FUSE_MAX_AUTO_CONTINUES,
   },

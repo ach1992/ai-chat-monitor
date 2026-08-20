@@ -93,6 +93,7 @@ export class AutomationService {
       sessions: { getTab: (tabId) => this.#getSession(tabId) },
       onStatusChange: (status) => this.#reliability.captureRuntime(status),
       classifier: {
+        classifyDeterministic: (input) => new ConservativeStopClassifier().classifyDeterministic(input),
         classify: async (input) => {
           const settings = await this.#providerSettings.load();
           const providers = settings.order.length === 0 ? undefined : createProviderManager(settings);
@@ -108,6 +109,7 @@ export class AutomationService {
             {
               type: "background:guarded-send",
               protocolVersion: 2,
+              action: envelope.action,
               decisionId: envelope.decisionId,
               agentInstanceId: envelope.agentInstanceId,
               pageEpoch: envelope.pageEpoch,
@@ -323,7 +325,7 @@ export class AutomationService {
       policy.revision !== envelope.policyRevision ||
       policy.mode !== "AUTO" ||
       policy.emergencyPaused ||
-      policy.continuationText !== envelope.continuationText
+      (envelope.action === "CONTINUATION" && policy.continuationText !== envelope.continuationText)
     ) {
       return {
         decisionId: envelope.decisionId,
@@ -331,6 +333,8 @@ export class AutomationService {
         reason: "Reliability guard observed changed automation policy before page mutation.",
       };
     }
+
+    if (envelope.action === "SELF_CHECK_PROBE") return undefined;
 
     const signature = outcomeSignature(assistant.normalizedText);
     const verified = this.#journal.verifiedSince(envelope.conversationId, session.lastUserInteractionAt ?? 0);

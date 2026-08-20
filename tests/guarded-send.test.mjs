@@ -222,3 +222,41 @@ test("guarded send can activate a send control that is disabled while the compos
   assert.equal(result.observedConversationId, "chat-1");
   assert.equal(result.observedAssistantFingerprint, assistantFingerprint);
 });
+
+test("self-check probe may use a safe composer during a recoverable delivery error without clicking Retry", async () => {
+  const GuardianContent = await loadAdapter();
+  let clicks = 0;
+  const page = createSafePage({
+    onSend: ({ document, composer }) => {
+      clicks += 1;
+      const sentTurn = new FakeElement({ attrs: { "data-testid": "conversation-turn-user-2" } });
+      const sentUser = new FakeElement({ textContent: composer.value, order: 5 });
+      sentUser.parent = sentTurn;
+      document.set('[data-message-author-role="user"]', [
+        ...document.querySelectorAll('[data-message-author-role="user"]'),
+        sentUser,
+      ]);
+      document.set('button[data-testid="stop-button"]', [
+        new FakeButtonElement({ attrs: { "data-testid": "stop-button" }, order: 6 }),
+      ]);
+    },
+  });
+  page.document.set('[role="alert"]', [
+    new FakeElement({ textContent: "Message delivery timed out", attrs: { role: "alert" }, order: 5 }),
+  ]);
+  const assistantFingerprint = await sha256(page.assistant.textContent);
+  const adapter = new GuardianContent.BrowserChatGPTAdapter(page.document, { pathname: "/c/chat-1" });
+
+  const result = await adapter.guardedSend({
+    purpose: "SELF_CHECK_PROBE",
+    decisionId: "self-check-recovery",
+    conversationId: "chat-1",
+    routeKey: "/c/chat-1",
+    assistantFingerprint,
+    assistantDomMessageId: "assistant-1",
+    continuationText: "Classify this stop only.",
+  });
+
+  assert.equal(clicks, 1);
+  assert.equal(result.status, "VERIFIED");
+});
