@@ -141,7 +141,6 @@ const providersSection = providersHeading?.closest("details");
 if (providersSection !== null && providersSection !== undefined) providersSection.before(ui.root);
 else document.querySelector(".footer-note")?.before(ui.root);
 
-let current: RedactedTelegramSettings | undefined;
 let busy = false;
 
 function setStatus(message: string): void {
@@ -156,7 +155,6 @@ function healthText(settings: RedactedTelegramSettings): string {
 }
 
 function render(settings: RedactedTelegramSettings): void {
-  current = settings;
   ui.enabled.checked = settings.enabled;
   ui.destination.value = settings.destination;
   ui.token.value = "";
@@ -189,8 +187,8 @@ async function requestTelegramPermission(): Promise<boolean> {
   return chrome.permissions.request({ origins: [TELEGRAM_ORIGIN_PATTERN] });
 }
 
-async function refresh(): Promise<void> {
-  if (busy) return;
+async function refresh(allowWhileBusy = false): Promise<void> {
+  if (busy && !allowWhileBusy) return;
   try {
     render(await send({ type: "panel:telegram-settings-request", protocolVersion: PROTOCOL_VERSION }));
   } catch (error) {
@@ -243,7 +241,7 @@ ui.test.addEventListener("click", () => {
       setStatus("Telegram test notification delivered successfully.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Telegram test delivery failed.");
-      await refresh();
+      await refresh(true);
     } finally {
       busy = false;
       ui.test.disabled = false;
