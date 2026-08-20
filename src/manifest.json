@@ -7,6 +7,21 @@
   "permissions": ["storage", "sidePanel", "notifications"],
   "host_permissions": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
   "optional_host_permissions": ["https://*/*"],
+  "icons": {
+    "16": "assets/icon-16.png",
+    "32": "assets/icon-32.png",
+    "48": "assets/icon-48.png",
+    "128": "assets/icon-128.png"
+  },
+  "action": {
+    "default_title": "Open Chat Turn Guardian",
+    "default_icon": {
+      "16": "assets/icon-16.png",
+      "32": "assets/icon-32.png",
+      "48": "assets/icon-48.png",
+      "128": "assets/icon-128.png"
+    }
+  },
   "background": {
     "service_worker": "background/worker.js",
     "type": "module"

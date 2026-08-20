@@ -3,6 +3,7 @@ import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { verifyManifestAssets } from "./verify-manifest-assets.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const distRoot = resolve(repoRoot, "dist");
@@ -17,6 +18,7 @@ const build = spawnSync(process.execPath, [resolve(repoRoot, "scripts/build.mjs"
 });
 if (build.error !== undefined) throw build.error;
 if (build.status !== 0) process.exit(build.status ?? 1);
+await verifyManifestAssets(distRoot);
 
 async function filesUnder(directory) {
   const entries = await readdir(directory, { withFileTypes: true });

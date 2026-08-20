@@ -8,6 +8,10 @@ export const staticFiles = [
   ["src/manifest.json", "dist/manifest.json"],
   ["src/sidepanel/index.html", "dist/sidepanel/index.html"],
   ["src/sidepanel/styles.css", "dist/sidepanel/styles.css"],
+  ["src/assets/icon-16.png", "dist/assets/icon-16.png"],
+  ["src/assets/icon-32.png", "dist/assets/icon-32.png"],
+  ["src/assets/icon-48.png", "dist/assets/icon-48.png"],
+  ["src/assets/icon-128.png", "dist/assets/icon-128.png"],
 ];
 
 export async function copyStaticFiles() {

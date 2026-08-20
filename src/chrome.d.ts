@@ -89,7 +89,12 @@ declare namespace chrome {
       enabled?: boolean;
     }
 
+    interface PanelBehavior {
+      openPanelOnActionClick?: boolean;
+    }
+
     function setOptions(options: PanelOptions): Promise<void>;
+    function setPanelBehavior(behavior: PanelBehavior): Promise<void>;
   }
 
   namespace permissions {
