@@ -56,7 +56,7 @@ export function telegramNotificationText(notification: GuardianNotification): st
     .slice(0, MAX_TELEGRAM_MESSAGE_LENGTH);
 }
 
-async function browserNotification(notification: GuardianNotification): Promise<void> {
+export async function browserNotification(notification: GuardianNotification): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     chrome.notifications.create(
       notification.id,
