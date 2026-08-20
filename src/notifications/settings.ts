@@ -47,6 +47,11 @@ export interface TelegramSettingsPersistence {
   save(state: TelegramSettingsState): Promise<void>;
 }
 
+export interface TelegramConfigurationIdentity {
+  destination: string;
+  botToken?: string;
+}
+
 function cloneState(state: TelegramSettingsState): TelegramSettingsState {
   return structuredClone(state);
 }
@@ -212,9 +217,18 @@ export class TelegramSettingsStore {
     });
   }
 
-  updateHealth(health: TelegramHealth): Promise<TelegramSettingsState> {
+  updateHealth(
+    health: TelegramHealth,
+    expectedConfiguration?: TelegramConfigurationIdentity,
+  ): Promise<TelegramSettingsState> {
     return this.#enqueue(async () => {
       const current = normalizeStoredState(await this.#persistence.load());
+      if (
+        expectedConfiguration !== undefined &&
+        (current.destination !== expectedConfiguration.destination || current.botToken !== expectedConfiguration.botToken)
+      ) {
+        return cloneState(current);
+      }
       const next: TelegramSettingsState = { ...current, health: normalizeHealth(health) };
       await this.#persistence.save(next);
       return cloneState(next);
