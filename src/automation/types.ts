@@ -32,6 +32,8 @@ export type AutomationRuntimePhase =
   | "OBSERVING"
   | "SETTLING"
   | "EVALUATING"
+  | "SELF_CHECK_SENDING"
+  | "WAITING_FOR_SELF_CHECK_RESPONSE"
   | "WAITING_TO_CONTINUE"
   | "SENDING"
   | "COOLDOWN"
@@ -41,6 +43,7 @@ export type AutomationRuntimePhase =
   | "PAUSED";
 
 export interface AutomationDecisionEnvelope {
+  action: "CONTINUATION" | "SELF_CHECK_PROBE";
   decisionId: string;
   tabId: number;
   documentId: string;

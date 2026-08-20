@@ -76,14 +76,14 @@ function makeSession(overrides = {}) {
         hasText: overrides.composerHasText ?? false,
         focused: overrides.composerFocused ?? false,
       },
-      blocking: { blocked: overrides.blocked ?? false, reasons: [] },
+      blocking: { blocked: overrides.blocked ?? false, reasons: overrides.blockingReasons ?? [] },
       confidence: overrides.confidence ?? "HIGH",
       observedAt: 200,
     },
   };
 }
 
-function makeHarness({ mode = "AUTO", classifier, sender } = {}) {
+function makeHarness({ mode = "AUTO", classifier, deterministic, sender } = {}) {
   const clock = new FakeClock();
   let currentSession = makeSession();
   const policyState = {
@@ -134,6 +134,12 @@ function makeHarness({ mode = "AUTO", classifier, sender } = {}) {
     journal,
     sessions: { getTab: () => currentSession },
     classifier: {
+      ...(deterministic === undefined ? {} : {
+        classifyDeterministic(input) {
+          classifyCalls.push(structuredClone(input));
+          return deterministic(input);
+        },
+      }),
       async classify(input) {
         classifyCalls.push(structuredClone(input));
         return classifier === undefined ? CONTINUE : classifier(input);
@@ -285,6 +291,75 @@ test("AUTO sends only after settle and continue delays with the exact bound iden
   assert.equal(harness.sendCalls[0].policyRevision, 11);
   assert.equal(typeof harness.sendCalls[0].evidenceKey, "string");
   assert.equal(harness.coordinator.status(7).phase, "COOLDOWN");
+});
+
+test("an ambiguous AUTO stop uses one bound self-check response before contextual continuation", async () => {
+  const harness = makeHarness({ deterministic: () => undefined });
+  harness.coordinator.handleSession(harness.getSession());
+  harness.clock.advance(10);
+  await flushAsync();
+
+  assert.equal(harness.sendCalls.length, 1);
+  assert.equal(harness.sendCalls[0].action, "SELF_CHECK_PROBE");
+  assert.equal(harness.coordinator.status(7).phase, "WAITING_FOR_SELF_CHECK_RESPONSE");
+
+  harness.setSession(makeSession({
+    user: harness.sendCalls[0].continuationText,
+    userMessageId: "self-check-user-1",
+    assistant: '{"decision":"CONTINUE"}',
+    assistantMessageId: "self-check-assistant-1",
+    fingerprint: "b".repeat(64),
+  }));
+  harness.coordinator.handleSession(harness.getSession());
+  assert.equal(harness.coordinator.status(7).phase, "WAITING_TO_CONTINUE");
+
+  harness.clock.advance(20);
+  await flushAsync();
+
+  assert.equal(harness.sendCalls.length, 2);
+  assert.equal(harness.sendCalls[1].action, "CONTINUATION");
+  assert.equal(harness.sendCalls[1].assistantFingerprint, "b".repeat(64));
+});
+
+test("a recoverable delivery error may send one self-check probe but a hard blocker cannot", async () => {
+  const recoverable = makeHarness({ deterministic: () => undefined });
+  recoverable.setSession(makeSession({ blocked: true, blockingReasons: ["ERROR"] }));
+  recoverable.coordinator.handleSession(recoverable.getSession());
+  recoverable.clock.advance(10);
+  await flushAsync();
+  assert.equal(recoverable.sendCalls.length, 1);
+  assert.equal(recoverable.sendCalls[0].action, "SELF_CHECK_PROBE");
+
+  const hardBlocked = makeHarness({ deterministic: () => undefined });
+  hardBlocked.setSession(makeSession({ blocked: true, blockingReasons: ["CONVERSATION_FULL"] }));
+  hardBlocked.coordinator.handleSession(hardBlocked.getSession());
+  hardBlocked.clock.advance(10);
+  await flushAsync();
+  assert.equal(hardBlocked.sendCalls.length, 0);
+  assert.equal(hardBlocked.coordinator.status(7).phase, "HOLD");
+});
+
+test("a self-check HOLD response stays terminal and cannot become another probe episode", async () => {
+  const harness = makeHarness({ deterministic: () => undefined });
+  harness.coordinator.handleSession(harness.getSession());
+  harness.clock.advance(10);
+  await flushAsync();
+
+  harness.setSession(makeSession({
+    user: harness.sendCalls[0].continuationText,
+    userMessageId: "self-check-user-1",
+    assistant: '{"decision":"HOLD_APPROVAL"}',
+    assistantMessageId: "self-check-assistant-1",
+    fingerprint: "b".repeat(64),
+  }));
+  harness.coordinator.handleSession(harness.getSession());
+  assert.equal(harness.coordinator.status(7).phase, "HOLD");
+
+  harness.coordinator.handleSession(harness.getSession());
+  harness.clock.advance(60_000);
+  await flushAsync();
+  assert.equal(harness.sendCalls.length, 1);
+  assert.equal(harness.coordinator.status(7).phase, "HOLD");
 });
 
 test("user typing during the continue delay cancels the guarded send", async () => {

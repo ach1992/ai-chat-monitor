@@ -14,6 +14,7 @@ namespace GuardianContentAgent {
   interface GuardedSendMessage {
     type: "background:guarded-send";
     protocolVersion: 2;
+    action: "CONTINUATION" | "SELF_CHECK_PROBE";
     decisionId: string;
     agentInstanceId: string;
     pageEpoch: number;
@@ -70,6 +71,7 @@ namespace GuardianContentAgent {
     return (
       value.type === "background:guarded-send" &&
       value.protocolVersion === GuardianContent.PROTOCOL_VERSION &&
+      (value.action === "CONTINUATION" || value.action === "SELF_CHECK_PROBE") &&
       typeof value.decisionId === "string" && value.decisionId.length > 0 && value.decisionId.length <= 128 &&
       typeof value.agentInstanceId === "string" && value.agentInstanceId.length > 0 && value.agentInstanceId.length <= 128 &&
       typeof value.pageEpoch === "number" && Number.isInteger(value.pageEpoch) && value.pageEpoch >= 1 &&
@@ -78,7 +80,7 @@ namespace GuardianContentAgent {
       typeof value.assistantFingerprint === "string" && /^[a-f0-9]{64}$/.test(value.assistantFingerprint) &&
       (value.assistantDomMessageId === undefined || typeof value.assistantDomMessageId === "string") &&
       (value.lastUserInteractionAt === undefined || (typeof value.lastUserInteractionAt === "number" && Number.isFinite(value.lastUserInteractionAt))) &&
-      typeof value.continuationText === "string" && value.continuationText.trim().length > 0 && value.continuationText.length <= 200 &&
+      typeof value.continuationText === "string" && value.continuationText.trim().length > 0 && value.continuationText.length <= 1_000 &&
       typeof value.expiresAt === "number" && Number.isFinite(value.expiresAt)
     );
   }
@@ -123,6 +125,7 @@ namespace GuardianContentAgent {
     }
     try {
       return await adapter.guardedSend({
+        purpose: message.action,
         decisionId: message.decisionId,
         conversationId: message.conversationId,
         routeKey: message.routeKey,

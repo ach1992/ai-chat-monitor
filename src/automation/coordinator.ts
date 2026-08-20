@@ -1,4 +1,8 @@
 import type { ClassificationResult } from "../classification/types.js";
+import {
+  DEFAULT_IN_CHAT_SELF_CHECK_PROMPT,
+  parseInChatSelfCheckResponse,
+} from "../classification/self-check.js";
 import type { SessionView } from "../core/session-registry.js";
 import type { AutomationPolicyRepository } from "./policy.js";
 import type { AutomationWriteJournal } from "./journal.js";
@@ -11,6 +15,7 @@ import type {
 
 export interface AutomationClassifier {
   classify(input: { turns: Array<{ role: "user" | "assistant"; content: string }> }): Promise<ClassificationResult>;
+  classifyDeterministic?(input: { turns: Array<{ role: "user" | "assistant"; content: string }> }): ClassificationResult | undefined;
 }
 
 export interface AutomationSessionSource {
@@ -44,6 +49,11 @@ interface RuntimeEntry {
   evidenceKey?: string;
   suppressedFingerprint?: string;
   suppressedDomMessageId?: string | undefined;
+  selfCheck?: {
+    original: CandidateEvidence;
+    probeText: string;
+    decisionId: string;
+  };
   status: AutomationRuntimeStatus;
 }
 
@@ -146,6 +156,11 @@ export class AutomationCoordinator {
       return;
     }
 
+    if (existing?.selfCheck !== undefined) {
+      this.#handleSelfCheckObservation(session, policy, existing);
+      return;
+    }
+
     if (policy.mode === "NOTIFY_ONLY") {
       this.#replaceRuntime(session.tabId, {
         mode: policy.mode,
@@ -205,7 +220,7 @@ export class AutomationCoordinator {
       return;
     }
 
-    if (!this.#candidateUiIsSafe(session)) {
+    if (!this.#candidateUiIsSafe(session, true)) {
       this.#replaceRuntime(session.tabId, {
         mode: policy.mode,
         phase: "HOLD",
@@ -333,10 +348,149 @@ export class AutomationCoordinator {
     }
   }
 
+  #handleSelfCheckObservation(
+    session: SessionView,
+    policy: ResolvedAutomationPolicy,
+    runtime: RuntimeEntry,
+  ): void {
+    const pending = runtime.selfCheck;
+    if (pending === undefined) return;
+    const conversationId = session.conversationId;
+    if (conversationId === undefined) {
+      this.#replaceRuntime(session.tabId, {
+        mode: policy.mode,
+        phase: "HOLD",
+        policyRevision: policy.revision,
+        reason: "Self-check episode identity no longer identifies a conversation.",
+      });
+      return;
+    }
+    const origin = pending.original;
+    const stale = (
+      conversationId !== origin.conversationId ||
+      session.documentId !== origin.session.documentId ||
+      session.agentInstanceId !== origin.session.agentInstanceId ||
+      session.pageEpoch !== origin.session.pageEpoch ||
+      session.routeKey !== origin.session.routeKey ||
+      session.controlEligibility !== "OWNER" ||
+      policy.mode !== "AUTO" ||
+      policy.emergencyPaused ||
+      policy.revision !== origin.policy.revision ||
+      !optionalEqual(session.lastUserInteractionAt, origin.session.lastUserInteractionAt)
+    );
+    if (stale) {
+      this.#replaceRuntime(session.tabId, {
+        mode: policy.mode,
+        phase: "HOLD",
+        conversationId,
+        policyRevision: policy.revision,
+        reason: "Self-check episode identity or local authority became stale.",
+      });
+      return;
+    }
+
+    const observation = session.observation;
+    if (observation === undefined) return;
+    const assistant = observation?.latestAssistant;
+    if (assistant === undefined) return;
+    if (
+      observation.confidence !== "HIGH" ||
+      observation.generation !== "IDLE" ||
+      observation.blocking.blocked ||
+      !observation.composer.present ||
+      observation.composer.hasText
+    ) {
+      return;
+    }
+    if (observation.latestUser?.normalizedText !== pending.probeText) {
+      this.#replaceRuntime(session.tabId, {
+        mode: policy.mode,
+        phase: "HOLD",
+        conversationId,
+        policyRevision: policy.revision,
+        assistantFingerprint: assistant.fingerprint,
+        reason: "The self-check response was not bound to the expected probe turn.",
+      });
+      return;
+    }
+    if (
+      assistant.fingerprint === origin.fingerprint &&
+      (origin.domMessageId === undefined || assistant.domMessageId === origin.domMessageId)
+    ) return;
+
+    const classification = parseInChatSelfCheckResponse(assistant.normalizedText);
+    delete runtime.selfCheck;
+    const responseEvidence = this.#candidateEvidence(session, policy);
+    if (responseEvidence === undefined) return;
+    runtime.evidenceKey = responseEvidence.evidenceKey;
+    if (classification.decision === "HOLD") {
+      this.#setStatus(runtime, {
+        mode: "AUTO",
+        phase: "HOLD",
+        conversationId,
+        policyRevision: policy.revision,
+        assistantFingerprint: assistant.fingerprint,
+        lastDecision: classification,
+        decisionId: pending.decisionId,
+        reason: classification.reason,
+      });
+      return;
+    }
+    if (classification.decision !== "CONTINUE") {
+      this.#setStatus(runtime, {
+        mode: "AUTO",
+        phase: "UNSURE",
+        conversationId,
+        policyRevision: policy.revision,
+        assistantFingerprint: assistant.fingerprint,
+        lastDecision: classification,
+        decisionId: pending.decisionId,
+        reason: classification.reason,
+      });
+      return;
+    }
+
+    const fresh = responseEvidence;
+    const createdAt = this.#clock.now();
+    const envelope: AutomationDecisionEnvelope = {
+      action: "CONTINUATION",
+      decisionId: this.#createDecisionId(),
+      tabId: fresh.session.tabId,
+      documentId: fresh.session.documentId,
+      agentInstanceId: fresh.session.agentInstanceId,
+      pageEpoch: fresh.session.pageEpoch,
+      conversationId: fresh.conversationId,
+      routeKey: fresh.session.routeKey,
+      assistantFingerprint: fresh.fingerprint,
+      ...(fresh.domMessageId === undefined ? {} : { assistantDomMessageId: fresh.domMessageId }),
+      ...(fresh.session.lastUserInteractionAt === undefined ? {} : { lastUserInteractionAt: fresh.session.lastUserInteractionAt }),
+      policyRevision: fresh.policy.revision,
+      evidenceKey: fresh.evidenceKey,
+      classification,
+      continuationText: fresh.policy.continuationText,
+      createdAt,
+      expiresAt: createdAt + Math.max(DEFAULT_DECISION_TTL_MS, fresh.policy.timing.continueDelayMs + 15_000),
+    };
+    this.#setStatus(runtime, {
+      mode: "AUTO",
+      phase: "WAITING_TO_CONTINUE",
+      conversationId: envelope.conversationId,
+      policyRevision: envelope.policyRevision,
+      assistantFingerprint: envelope.assistantFingerprint,
+      lastDecision: classification,
+      decisionId: envelope.decisionId,
+      reason: "In-chat self-check permits guarded contextual continuation.",
+    });
+    runtime.timer = this.#clock.setTimeout(() => {
+      runtime.timer = undefined;
+      void this.#attemptGuardedSend(envelope, runtime.token);
+    }, fresh.policy.timing.continueDelayMs);
+  }
+
   async #evaluateAfterSettle(tabId: number, evidence: CandidateEvidence, token: number): Promise<void> {
     const runtime = this.#runtime.get(tabId);
     if (runtime === undefined || runtime.token !== token) return;
-    const fresh = this.#revalidateEvidence(evidence);
+    const fresh = this.#revalidateEvidence(evidence, true);
     if (fresh === undefined) {
       this.#staleRuntime(runtime, evidence, "Settle evidence became stale before classification.");
       return;
@@ -351,14 +505,21 @@ export class AutomationCoordinator {
       reason: "Classifying the stabilized assistant response.",
     });
 
+    const observation = fresh.session.observation;
+    const turns: Array<{ role: "user" | "assistant"; content: string }> = [];
+    const latestUser = observation?.latestUser?.normalizedText;
+    if (latestUser !== undefined && latestUser.length > 0) turns.push({ role: "user", content: latestUser });
+    turns.push({ role: "assistant", content: observation?.latestAssistant?.normalizedText ?? "" });
+
+    const deterministic = this.#classifier.classifyDeterministic?.({ turns });
+    if (deterministic === undefined && this.#classifier.classifyDeterministic !== undefined && fresh.policy.mode === "AUTO") {
+      this.#startSelfCheckProbe(fresh, runtime, token);
+      return;
+    }
+
     let classification: ClassificationResult;
     try {
-      const observation = fresh.session.observation;
-      const turns: Array<{ role: "user" | "assistant"; content: string }> = [];
-      const latestUser = observation?.latestUser?.normalizedText;
-      if (latestUser !== undefined && latestUser.length > 0) turns.push({ role: "user", content: latestUser });
-      turns.push({ role: "assistant", content: observation?.latestAssistant?.normalizedText ?? "" });
-      classification = await this.#classifier.classify({ turns });
+      classification = deterministic ?? await this.#classifier.classify({ turns });
     } catch {
       classification = {
         decision: "UNSURE",
@@ -370,7 +531,7 @@ export class AutomationCoordinator {
 
     const currentRuntime = this.#runtime.get(tabId);
     if (currentRuntime === undefined || currentRuntime.token !== token) return;
-    const postClassification = this.#revalidateEvidence(evidence);
+    const postClassification = this.#revalidateEvidence(evidence, true);
     if (postClassification === undefined) {
       this.#staleRuntime(currentRuntime, evidence, "Classification result arrived after the bound evidence changed.");
       return;
@@ -416,6 +577,7 @@ export class AutomationCoordinator {
 
     const createdAt = this.#clock.now();
     const envelope: AutomationDecisionEnvelope = {
+      action: "CONTINUATION",
       decisionId: this.#createDecisionId(),
       tabId: postClassification.session.tabId,
       documentId: postClassification.session.documentId,
@@ -448,6 +610,49 @@ export class AutomationCoordinator {
       currentRuntime.timer = undefined;
       void this.#attemptGuardedSend(envelope, token);
     }, postClassification.policy.timing.continueDelayMs);
+  }
+
+  #startSelfCheckProbe(evidence: CandidateEvidence, runtime: RuntimeEntry, token: number): void {
+    const createdAt = this.#clock.now();
+    const envelope: AutomationDecisionEnvelope = {
+      action: "SELF_CHECK_PROBE",
+      decisionId: this.#createDecisionId(),
+      tabId: evidence.session.tabId,
+      documentId: evidence.session.documentId,
+      agentInstanceId: evidence.session.agentInstanceId,
+      pageEpoch: evidence.session.pageEpoch,
+      conversationId: evidence.conversationId,
+      routeKey: evidence.session.routeKey,
+      assistantFingerprint: evidence.fingerprint,
+      ...(evidence.domMessageId === undefined ? {} : { assistantDomMessageId: evidence.domMessageId }),
+      ...(evidence.session.lastUserInteractionAt === undefined ? {} : { lastUserInteractionAt: evidence.session.lastUserInteractionAt }),
+      policyRevision: evidence.policy.revision,
+      evidenceKey: evidence.evidenceKey,
+      classification: {
+        decision: "UNSURE",
+        reasonCode: "AMBIGUOUS",
+        reason: "The stop requires an in-chat self-check before any continuation can be considered.",
+        source: "SYSTEM",
+      },
+      continuationText: DEFAULT_IN_CHAT_SELF_CHECK_PROMPT,
+      createdAt,
+      expiresAt: createdAt + DEFAULT_DECISION_TTL_MS,
+    };
+    runtime.selfCheck = {
+      original: evidence,
+      probeText: envelope.continuationText,
+      decisionId: envelope.decisionId,
+    };
+    this.#setStatus(runtime, {
+      mode: "AUTO",
+      phase: "SELF_CHECK_SENDING",
+      conversationId: envelope.conversationId,
+      policyRevision: envelope.policyRevision,
+      assistantFingerprint: envelope.assistantFingerprint,
+      decisionId: envelope.decisionId,
+      reason: "Sending one guarded in-chat self-check probe for this stop episode.",
+    });
+    void this.#attemptGuardedSend(envelope, token);
   }
 
   async #attemptGuardedSend(envelope: AutomationDecisionEnvelope, token: number): Promise<void> {
@@ -652,6 +857,19 @@ export class AutomationCoordinator {
       return;
     }
 
+    if (envelope.action === "SELF_CHECK_PROBE") {
+      this.#setStatus(runtime, {
+        mode: "AUTO",
+        phase: "WAITING_FOR_SELF_CHECK_RESPONSE",
+        conversationId: envelope.conversationId,
+        policyRevision: envelope.policyRevision,
+        assistantFingerprint: envelope.assistantFingerprint,
+        decisionId: envelope.decisionId,
+        reason: "The self-check probe was verified; waiting for its bound assistant response.",
+      });
+      return;
+    }
+
     const cooldownUntil = this.#clock.now() + fresh.policy.timing.cooldownMs;
     this.#setStatus(runtime, {
       mode: "AUTO",
@@ -672,13 +890,18 @@ export class AutomationCoordinator {
     }, fresh.policy.timing.cooldownMs);
   }
 
-  #candidateUiIsSafe(session: SessionView): boolean {
+  #candidateUiIsSafe(session: SessionView, allowRecoverableSelfCheckError = false): boolean {
     const observation = session.observation;
+    const recoverableErrorOnly = observation !== undefined &&
+      observation.blocking.reasons.length > 0 &&
+      observation.blocking.reasons.every((reason) =>
+        reason === "ERROR" || reason === "NETWORK" || reason === "RATE_LIMIT",
+      );
     return (
       observation !== undefined &&
       observation.confidence === "HIGH" &&
       observation.generation === "IDLE" &&
-      observation.blocking.blocked === false &&
+      (observation.blocking.blocked === false || (allowRecoverableSelfCheckError && recoverableErrorOnly)) &&
       observation.composer.present === true &&
       observation.composer.hasText === false &&
       observation.latestAssistant !== undefined &&
@@ -717,9 +940,16 @@ export class AutomationCoordinator {
     };
   }
 
-  #revalidateEvidence(evidence: CandidateEvidence): CandidateEvidence | undefined {
+  #revalidateEvidence(
+    evidence: CandidateEvidence,
+    allowRecoverableSelfCheckError = false,
+  ): CandidateEvidence | undefined {
     const fresh = this.#sessions.getTab(evidence.session.tabId);
-    if (fresh === undefined || fresh.conversationId === undefined || !this.#candidateUiIsSafe(fresh)) return undefined;
+    if (
+      fresh === undefined ||
+      fresh.conversationId === undefined ||
+      !this.#candidateUiIsSafe(fresh, allowRecoverableSelfCheckError)
+    ) return undefined;
     const policy = this.#policies.resolve(fresh.conversationId);
     const candidate = this.#candidateEvidence(fresh, policy);
     if (candidate === undefined) return undefined;
@@ -730,9 +960,13 @@ export class AutomationCoordinator {
 
   #revalidateEnvelope(envelope: AutomationDecisionEnvelope): CandidateEvidence | undefined {
     if (this.#clock.now() > envelope.expiresAt) return undefined;
-    if (envelope.classification.decision !== "CONTINUE") return undefined;
+    if (envelope.action === "CONTINUATION" && envelope.classification.decision !== "CONTINUE") return undefined;
     const fresh = this.#sessions.getTab(envelope.tabId);
-    if (fresh === undefined || fresh.conversationId !== envelope.conversationId || !this.#candidateUiIsSafe(fresh)) return undefined;
+    if (
+      fresh === undefined ||
+      fresh.conversationId !== envelope.conversationId ||
+      !this.#candidateUiIsSafe(fresh, envelope.action === "SELF_CHECK_PROBE")
+    ) return undefined;
     if (
       fresh.documentId !== envelope.documentId ||
       fresh.agentInstanceId !== envelope.agentInstanceId ||
@@ -752,7 +986,7 @@ export class AutomationCoordinator {
       policy.revision !== envelope.policyRevision ||
       policy.mode !== "AUTO" ||
       policy.emergencyPaused ||
-      policy.continuationText !== envelope.continuationText
+      (envelope.action === "CONTINUATION" && policy.continuationText !== envelope.continuationText)
     ) return undefined;
     const candidate = this.#candidateEvidence(fresh, policy);
     return candidate?.evidenceKey === envelope.evidenceKey ? candidate : undefined;

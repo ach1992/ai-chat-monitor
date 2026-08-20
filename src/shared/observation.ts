@@ -9,7 +9,8 @@ export type BlockingReason =
   | "ERROR"
   | "CAPTCHA"
   | "ACCOUNT_VERIFICATION"
-  | "CONFIRMATION_REQUIRED";
+  | "CONFIRMATION_REQUIRED"
+  | "CONVERSATION_FULL";
 
 export interface AssistantResponseSnapshot {
   normalizedText: string;
@@ -65,7 +66,8 @@ function isBlockingReason(value: unknown): value is BlockingReason {
     value === "ERROR" ||
     value === "CAPTCHA" ||
     value === "ACCOUNT_VERIFICATION" ||
-    value === "CONFIRMATION_REQUIRED"
+    value === "CONFIRMATION_REQUIRED" ||
+    value === "CONVERSATION_FULL"
   );
 }
 
