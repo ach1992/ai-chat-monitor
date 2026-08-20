@@ -27,6 +27,24 @@ test("Telegram transport uses HTTPS sendMessage POST with JSON chat_id and text"
   assert.equal(calls[0].init.redirect, "error");
 });
 
+test("Telegram default transport binds fetch to the global service-worker receiver", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  let observedReceiver;
+  globalThis.fetch = async function () {
+    observedReceiver = this;
+    if (this !== globalThis) throw new TypeError("Illegal invocation");
+    return jsonResponse({ ok: true, result: { message_id: 1 } });
+  };
+
+  const transport = new TelegramBotApiTransport();
+  await transport.send(TOKEN, "123456789", "bounded message");
+  assert.equal(observedReceiver, globalThis);
+});
+
 test("Telegram rate limit and API descriptions are sanitized", async () => {
   const transport = new TelegramBotApiTransport(async () => jsonResponse({
     ok: false,
