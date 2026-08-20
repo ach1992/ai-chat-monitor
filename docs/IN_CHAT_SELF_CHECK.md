@@ -1,8 +1,8 @@
-# In-chat self-check classifier — accepted next outcome
+# In-chat self-check classifier — v1.1.0 implementation
 
-Status: Accepted product direction for Issue #51; not implemented in the v1.0 runtime yet.
+Status: Implemented for Issue #51 and validated by exact-head CI. Live ChatGPT smoke evidence remains pending because the release environment has no Chrome/Chromium runtime.
 
-This document records the intended next-state design without rewriting the already validated v1.0 behavior as if the feature exists today. Issue #51 owns implementation and acceptance.
+This document records the v1.1.0 design added to the already validated v1.0 baseline. Issue #51 owns implementation and acceptance.
 
 ## 1. Goal
 
@@ -176,8 +176,8 @@ Issue #51 should add focused automated and live coverage for at least:
 
 ## 11. Documentation truth
 
-Until Issue #51 is implemented and integrated:
+After Issue #51 integration:
 
-- `README.md`, `docs/ARCHITECTURE.md`, and `docs/V1_VALIDATION.md` continue to describe the actual v1.0 runtime;
-- this document and Issue #51 describe the accepted **next** product direction;
-- do not claim in-chat self-check as a shipped feature before exact-head validation and live acceptance.
+- `README.md` and `docs/ARCHITECTURE.md` describe the shipped v1.1.0 runtime;
+- `docs/V1_VALIDATION.md` remains the historical v1.0 acceptance record;
+- exact-head CI validates the implementation; live ChatGPT smoke evidence must not be claimed until it exists.

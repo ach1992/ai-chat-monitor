@@ -1,19 +1,21 @@
 # Chat Turn Guardian
 
-Chat Turn Guardian is a standalone Chromium Manifest V3 extension for safely supervising explicitly selected ChatGPT Web conversations. It can recognize a finished response that appears to be a needless turn boundary and, only after conservative classification plus final exact-state safety checks, send the configured continuation message.
+Chat Turn Guardian is a standalone Chromium Manifest V3 extension for safely supervising explicitly selected ChatGPT Web conversations. It uses local deterministic rules first, then an identity-bound in-chat self-check for eligible ambiguous stops; only final exact-state safety checks may allow the configured continuation message.
 
-**Current status: v1.0 feature-complete and release-ready.** The engineering/product baseline is complete; the extension has **not** been submitted to or published on the Chrome Web Store. Store publication remains a separate human-authorized release action.
+**Current status: v1.1.0 release-ready.** The extension has **not** been submitted to or published on the Chrome Web Store. Store publication remains a separate human-authorized release action.
 
 The chat's own agent, Skill, or workflow remains responsible for **what work should happen**. Guardian only decides whether another ordinary turn may be requested without genuine human involvement.
 
-## v1.0 capabilities
+## v1.1.0 capabilities
 
 - Independent supervision of multiple ChatGPT tabs/conversations.
 - Current-tab ON/OFF control with bounded reconnect/recovery.
 - Per-chat modes: `OFF`, `OBSERVE`, `AUTO`, `NOTIFY_ONLY`.
 - Global timing defaults plus per-chat settle/continue/cooldown overrides.
 - Configurable continuation text.
-- Conservative deterministic rules plus optional AI classification.
+- Conservative deterministic rules, followed by one same-conversation self-check for eligible ambiguous AUTO stops.
+- Strict compact-JSON self-check parsing and a contextual default resume message; malformed, stale, or uncertain self-check output fails closed.
+- Recoverable red delivery errors may receive one guarded self-check only when the ordinary composer is safe; Guardian never clicks or retries ChatGPT `Retry` automatically.
 - OpenRouter, NaraRouter, and generic OpenAI-compatible provider profiles with ordered fallback.
 - Provider credentials stored only in trusted extension storage.
 - Bounded classifier context: at most 4 recent turns, 4,000 characters per turn, and 8,000 characters total after secret redaction/minimization.
