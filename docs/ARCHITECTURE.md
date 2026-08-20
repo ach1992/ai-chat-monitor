@@ -1,6 +1,6 @@
 # Architecture
 
-This document defines the initial architecture and safety boundaries for Chat Turn Guardian. It is intentionally implementation-oriented but avoids locking the project to a UI framework or vendor SDK before the first foundation task validates the simplest fit.
+This document defines the current architecture and safety boundaries for Chat Turn Guardian. It is implementation-oriented while keeping provider, notification, and page-adapter boundaries modular.
 
 ## 1. Design goals
 
@@ -23,6 +23,8 @@ ChatGPT Tab C ─ Content Agent C ─┘              │
                                                  ├─ Decision Coordinator
                                                  ├─ Provider Manager
                                                  ├─ Notification Manager
+                                                 │    ├─ Browser notifications
+                                                 │    └─ Telegram Bot API (optional, outbound-only)
                                                  └─ Persistent/Session Storage
                                                         │
                                                  Chromium Side Panel
@@ -40,7 +42,7 @@ Responsibilities:
 - perform the narrow guarded continuation send only after coordinator authorization;
 - verify that the intended user message appeared and generation began.
 
-It must not select providers, make classification policy, or coordinate other tabs.
+It must not select providers, make classification policy, coordinate other tabs, access provider/Telegram credentials, or deliver external notifications.
 
 Keep DOM selectors/heuristics inside a `ChatGPTAdapter` boundary. Core code should consume normalized events/state rather than raw DOM assumptions.
 
@@ -58,25 +60,28 @@ Responsibilities:
 - bind model decisions to an immutable decision envelope;
 - request final page-level revalidation before send;
 - record compact audit/diagnostic events;
-- route notifications.
+- emit normalized notification events to the notification boundary.
+
+The coordinator never treats notification delivery as authority or as evidence that a ChatGPT mutation should occur.
 
 ### 2.3 Side Panel UI
 
-The Side Panel is the main management surface for concurrent chats.
+The Side Panel is the main management surface for concurrent chats and trusted configuration.
 
-It should expose:
+It exposes:
 
 - all currently discovered/managed ChatGPT tabs;
 - explicit per-chat enable/mode controls;
 - runtime state and last decision;
 - global defaults and per-chat overrides;
-- provider/model configuration and health test;
-- notification triggers;
+- provider/model configuration;
+- browser/Telegram notification configuration and health;
 - pause-all/emergency disable;
-- focus/open-chat action;
-- compact recent decision history useful for debugging safety issues.
+- focus/open-chat actions;
+- compact recent decision history useful for debugging safety issues; and
+- prominent privacy/data-transfer disclosures consistent with actual runtime behavior.
 
-A browser-action popup may be added for quick current-tab controls, but it should not become the primary multi-chat management surface.
+The extension toolbar action opens this Side Panel on supported ChatGPT pages through the Chromium Side Panel API. Unsupported tabs remain disabled/fail-closed.
 
 ### 2.4 Rule engine
 
@@ -104,7 +109,7 @@ type HoldReason =
   | "OTHER";
 ```
 
-Tokens such as `APPROVAL_REQUIRED`, `MATERIAL_DECISION_REQUIRED`, `HUMAN OPERATION REQUIRED`, and `PROJECT_COMPLETE` are useful high-confidence signals for GitHub Project Orchestrator workflows, but the implementation should reason from message meaning/context rather than require one exact Skill vocabulary forever.
+Tokens such as `APPROVAL_REQUIRED`, `MATERIAL_DECISION_REQUIRED`, `HUMAN OPERATION REQUIRED`, and `PROJECT_COMPLETE` are useful high-confidence signals for GitHub Project Orchestrator workflows, but the implementation reasons from message meaning/context rather than requiring one exact Skill vocabulary forever.
 
 ### 2.5 AI classifier
 
@@ -127,6 +132,8 @@ interface ClassificationResult {
 
 Malformed/unexpected output is `UNSURE`.
 
+Before provider transport, classification context is minimized/redacted and bounded to at most 4 recent turns, 4,000 characters per turn, and 8,000 total characters.
+
 ### 2.6 Provider manager
 
 Core provider interface:
@@ -140,19 +147,20 @@ interface AIProvider {
 }
 ```
 
-Initial architecture should include:
+Current architecture includes:
 
-- `OpenAICompatibleProvider` as the generic transport where possible;
-- OpenRouter preset/metadata;
-- generic custom OpenAI-compatible endpoint configuration;
-- additional provider presets/adapters only where useful and justified at implementation time;
-- provider priority/fallback managed outside the chat-session code.
+- `OpenAICompatibleProvider` as the generic HTTPS transport;
+- OpenRouter and NaraRouter presets;
+- generic custom OpenAI-compatible HTTPS endpoint configuration;
+- provider priority/fallback managed outside chat-session code.
+
+Provider credentials remain in trusted extension storage. Provider transports reject non-HTTPS endpoints and automatic redirects. Provider output is untrusted advisory data and never gains Chrome/page mutation authority.
 
 A provider failure must never authorize continuation. Exhausted fallback => `UNSURE`.
 
 ### 2.7 Notification manager
 
-Use a channel interface so browser notifications are the initial implementation and Telegram/other channels can be added later without touching session/action logic.
+Notifications use a channel boundary so delivery remains outside session/action authority:
 
 ```ts
 interface NotificationChannel {
@@ -160,7 +168,7 @@ interface NotificationChannel {
 }
 ```
 
-Initial events should include:
+Current normalized events include:
 
 - `RESPONSE_COMPLETE`;
 - `HUMAN_ATTENTION_REQUIRED`;
@@ -169,7 +177,13 @@ Initial events should include:
 - `PROVIDER_ERROR`;
 - `EXTENSION_ERROR`.
 
-Notification policy is per chat, with global defaults.
+Browser notifications remain the local channel and continue to follow the existing per-chat/global Guardian notification policy.
+
+Telegram v1 is an optional second channel. It supports enable/disable, a user-supplied bot token and destination, inherited or Telegram-specific event selection, redacted configuration status, health state, and an explicit Test notification. Its transport runs only in the trusted extension context and sends HTTPS requests directly to the official Telegram Bot API. There is no backend, webhook, inbound command path, or persistent polling loop.
+
+The Telegram bot token is stored only in trusted extension storage and is never returned by ordinary read/status APIs or exposed to content/page contexts. Transport errors are normalized before reaching UI/audit surfaces. Notification payloads are bounded metadata rather than full ChatGPT messages.
+
+Notification delivery is observational. Browser/Telegram success, failure, timeout, API error, rate limiting, permission failure, or disabled configuration cannot change classifier output, `AUTO`/`HOLD`, OWNER/MIRROR state, stale-decision handling, guarded-send authorization, retry behavior, or conversation content.
 
 ## 3. Session identity and duplicate-tab control
 
@@ -285,12 +299,12 @@ Wait the configured `continueDelayMs`. User/page/policy changes cancel the candi
 
 Immediately before mutation the content agent must verify:
 
-- exact conversation/document still current;
-- exact expected response still the last assistant response;
-- no generation active;
-- composer is not user-modified/being edited;
+- exact tab/document/content-agent/pageEpoch/route/conversation identity is still current;
+- exact expected assistant response/response instance is still the last assistant response;
+- no generation is active;
+- composer is empty and not user-modified/being edited;
 - no new user message appeared;
-- no blocking/modal/error/rate-limit state;
+- no blocking/modal/error/rate-limit state exists;
 - chat remains `AUTO`;
 - this tab remains control owner;
 - candidate is not expired/stale.
@@ -318,7 +332,7 @@ The following invalidate pending automatic work for the affected chat:
 - new assistant/user turn not matching the decision envelope;
 - blocking confirmation/error interaction.
 
-The implementation should prefer false negatives (requiring a manual continuation) over false positive automated messages.
+The implementation prefers false negatives requiring a manual continuation over false-positive automated messages.
 
 ## 9. Stagnation protection
 
@@ -339,28 +353,32 @@ Keep a separate hard emergency fuse as defense in depth, configurable but not th
 
 Use separate persistence classes:
 
-- durable user configuration: managed-conversation policy, provider configuration metadata, global defaults, notification preferences;
+- durable user configuration: managed-conversation policy, provider configuration and credentials, Telegram configuration and credential, global defaults, notification preferences;
 - ephemeral/session state: tab/document mappings, control ownership, pending decisions/timers, recent fingerprints, cooldown state;
-- compact audit history: bounded recent events, with secrets/chat content excluded or redacted.
+- compact audit history: bounded recent events, with secrets/full chat content excluded or redacted.
 
-Do not assume Manifest V3 service-worker memory survives. On wake/restart, reconstruct state from storage/page reinspection and invalidate decisions that cannot be proven current.
+Credential-bearing durable storage is restricted to trusted extension contexts. Do not assume Manifest V3 service-worker memory survives. On wake/restart, reconstruct state from storage/page reinspection and invalidate decisions that cannot be proven current.
 
 ## 11. Security and privacy boundaries
 
-- never expose provider credentials to page JavaScript;
-- never log API keys or authorization headers;
-- request only host/browser permissions needed for configured providers and ChatGPT support;
-- model providers receive only classification context, never Chrome action authority;
+- never expose provider or Telegram credentials to page JavaScript/content scripts;
+- never log API keys, bot tokens, token-bearing URLs, or authorization headers;
+- request persistent host access only for supported ChatGPT pages;
+- arbitrary user-selected HTTPS provider hosts remain optional and are requested at exact origin at runtime;
+- Telegram exact host access is requested only for `https://api.telegram.org/*`;
+- model providers receive only bounded/redacted classification context, never Chrome action authority;
+- Telegram receives only bounded notification metadata, never full ChatGPT messages in v1;
 - page content is treated as untrusted input to the classifier, not instructions to the extension core;
 - classifier output is data and must pass local safety/revalidation gates before action;
 - no automated responses to CAPTCHA, account verification, permission confirmations, model/account limit messages, or platform safety gates;
-- sanitize/limit context sent off-device and make provider use visible/configurable.
+- all extension executable logic is packaged locally; remote provider/Telegram responses are data only and are never evaluated as code;
+- privacy policy, Store declarations, and in-product disclosures must stay synchronized with actual runtime behavior.
 
 ## 12. Testing strategy
 
 Prefer deterministic adapters/fixtures for most logic, with a small number of manual/e2e ChatGPT scenarios for DOM integration.
 
-Test layers should cover:
+Test layers cover:
 
 1. pure state-machine/policy tests;
 2. rule-engine classification fixtures;
@@ -368,13 +386,15 @@ Test layers should cover:
 4. multi-tab/session identity and stale-decision concurrency tests;
 5. content-adapter DOM fixtures for generation/composer/error states;
 6. guarded-send verification and ambiguous-write tests;
-7. service-worker restart/recovery tests where practical;
-8. manual integration checklist against the current ChatGPT Web UI.
+7. service-worker restart/recovery tests;
+8. notification routing/Telegram secret storage/transport/error isolation tests;
+9. manifest/store-readiness/package invariant tests;
+10. manual integration checklist against the current ChatGPT Web UI.
 
-The test suite must explicitly include adversarial race cases: delayed provider result, navigation during delay, user typing during delay, duplicate conversation tabs, provider failure, and response change before send.
+The test suite explicitly includes adversarial race cases: delayed provider result, navigation during delay, user typing during delay, duplicate conversation tabs, provider failure, response change before send, ambiguous writes, and stale notification health results.
 
-## 13. Future Telegram boundary
+## 13. Telegram remote-control boundary
 
-Telegram is an extension point, not an MVP dependency. The first implementation should be outbound notification/read-only status only.
+Telegram v1 is strictly outbound notification-only. The extension does not poll for inbound commands, register a webhook, inject Telegram messages into ChatGPT, answer approvals remotely, change `AUTO`/`OFF`/`OBSERVE`, start/stop supervision, or expose arbitrary commands/status controls through Telegram.
 
-Any future remote command capability requires a separate threat model for authentication, chat targeting, replay protection, authorization, and safe interaction with pending local automation before it may send or control a ChatGPT tab.
+Any future inbound/read-only/remote-control Telegram capability is a separate product outcome and requires a separate threat model and authorization design covering authentication, destination/chat binding, replay protection, target selection, authorization, secret handling, and interaction with pending local automation. It cannot inherit authority from the outbound notification channel.

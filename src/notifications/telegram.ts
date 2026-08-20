@@ -30,8 +30,8 @@ function telegramDeliveryErrorMessage(code: TelegramHealthCode): string {
 
 function errorCodeForStatus(status: number): TelegramHealthCode {
   if (status === 429) return "RATE_LIMIT";
-  if (status === 401) return "AUTHENTICATION";
-  if (status === 400 || status === 403 || status === 404) return "DESTINATION";
+  if (status === 401 || status === 404) return "AUTHENTICATION";
+  if (status === 400 || status === 403) return "DESTINATION";
   return "API_ERROR";
 }
 

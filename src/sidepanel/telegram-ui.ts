@@ -118,7 +118,7 @@ function buildSection(): {
   customEvents.append(grid);
 
   const help = e("div", "wide override-note");
-  help.textContent = "Setup: create a bot with @BotFather, start/contact the bot or add it to the destination so it can send there, then enter the token and Chat ID here. The token stays in trusted extension storage. Telegram receives only bounded Guardian notification metadata, not full chat content by default.";
+  help.textContent = "Setup: create a bot with @BotFather, start/contact the bot or add it to the destination so it can send there, then enter the token and Chat ID here. The token stays in trusted extension storage. Telegram v1 receives only bounded Guardian notification metadata (event title/reason and a bounded conversation identifier when available); it never sends full ChatGPT messages and accepts no inbound commands.";
 
   const actions = e("div", "wide form-actions");
   const test = e("button", "secondary", "Test notification");

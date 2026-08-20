@@ -18,7 +18,10 @@ const build = spawnSync(process.execPath, [resolve(repoRoot, "scripts/build.mjs"
 });
 if (build.error !== undefined) throw build.error;
 if (build.status !== 0) process.exit(build.status ?? 1);
-await verifyManifestAssets(distRoot);
+const { manifest } = await verifyManifestAssets(distRoot);
+if (manifest.version !== packageJson.version) {
+  throw new Error(`Release version mismatch: manifest ${manifest.version ?? "missing"} != package ${packageJson.version}.`);
+}
 
 async function filesUnder(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -57,7 +60,7 @@ function localHeader(name, data, crc) {
   header.writeUInt16LE(0x0800, 6);
   header.writeUInt16LE(0, 8);
   header.writeUInt16LE(0, 10);
-  header.writeUInt16LE(0x0021, 12);
+  header.writeUInt16LE(0, 12);
   header.writeUInt32LE(crc, 14);
   header.writeUInt32LE(data.length, 18);
   header.writeUInt32LE(data.length, 22);

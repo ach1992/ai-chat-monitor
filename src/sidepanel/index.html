@@ -20,6 +20,19 @@
         </div>
       </header>
 
+      <section class="panel-section privacy-disclosure" aria-labelledby="privacy-disclosure-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Privacy &amp; data</p>
+            <h2 id="privacy-disclosure-heading">What Guardian processes</h2>
+          </div>
+        </div>
+        <p class="section-note">
+          Guardian reads page state and recent visible chat content on supported ChatGPT pages only to supervise selected conversations. Full chat transcripts are not stored. If you configure an AI provider, Guardian sends a minimized, secret-redacted recent context directly to that provider for classification. If you enable Telegram, Guardian sends only bounded notification metadata to Telegram; Telegram v1 never sends full ChatGPT messages or accepts remote-control commands.
+          <a href="https://github.com/ach1992/chat-turn-guardian/blob/main/PRIVACY.md" target="_blank" rel="noopener noreferrer">Read the privacy policy.</a>
+        </p>
+      </section>
+
       <section class="status-card" aria-live="polite" aria-atomic="true">
         <strong data-status>Loading managed chats…</strong>
         <span data-details>Reading the extension service worker.</span>
@@ -125,7 +138,7 @@
             <h2 id="providers-heading">Providers</h2>
           </div>
         </summary>
-        <p class="section-note">Profiles are editable in place. Stored API keys stay in trusted extension storage and are never rendered back into this panel.</p>
+        <p class="section-note">Profiles are editable in place. Stored API keys stay in trusted extension storage and are never rendered back into this panel. When classification is needed, Guardian sends at most 4 recent turns and 8,000 characters after secret redaction directly to the selected HTTPS provider. Provider output remains advisory only.</p>
 
         <div data-provider-manager-v2 class="provider-manager">
           <div class="section-heading provider-manager-heading">
