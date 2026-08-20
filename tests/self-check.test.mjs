@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseInChatSelfCheckResponse } from "../dist/classification/self-check.js";
+import { DEFAULT_AUTOMATION_POLICY } from "../dist/automation/policy.js";
 
 test("in-chat self-check accepts only the compact strict decision schema", () => {
   const continuation = parseInChatSelfCheckResponse('{"decision":"CONTINUE"}');
@@ -19,4 +20,11 @@ test("in-chat self-check accepts only the compact strict decision schema", () =>
   ]) {
     assert.equal(parseInChatSelfCheckResponse(malformed).decision, "UNSURE");
   }
+});
+
+test("the default resume prompt remains contextual and preserves human-precedence boundaries", () => {
+  const text = DEFAULT_AUTOMATION_POLICY.defaults.continuationText;
+  assert.notEqual(text, "Continue.");
+  assert.match(text, /where you stopped/i);
+  assert.match(text, /approval, a decision, information, or an action from the human/i);
 });
