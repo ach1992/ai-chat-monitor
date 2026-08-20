@@ -1,0 +1,80 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  DEFAULT_TELEGRAM_SETTINGS,
+  TelegramConfigurationError,
+  TelegramSettingsStore,
+  redactTelegramSettings,
+  resolveTelegramSettingsMutation,
+} from "../dist/notifications/settings.js";
+
+const TOKEN_A = "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ_abc123";
+const TOKEN_B = "654321:ZYXWVUTSRQPONMLKJIHGFEDCBA_xyz987";
+
+function mutation(overrides = {}) {
+  return {
+    enabled: true,
+    destination: "123456789",
+    botToken: TOKEN_A,
+    eventMode: "INHERIT",
+    events: [],
+    ...overrides,
+  };
+}
+
+function memoryPersistence(initial) {
+  let value = initial === undefined ? undefined : structuredClone(initial);
+  return {
+    async load() { return value === undefined ? undefined : structuredClone(value); },
+    async save(next) { value = structuredClone(next); },
+  };
+}
+
+test("Telegram redacted settings never disclose the saved bot token", () => {
+  const saved = resolveTelegramSettingsMutation(DEFAULT_TELEGRAM_SETTINGS, mutation());
+  const redacted = redactTelegramSettings(saved);
+  assert.equal(redacted.configured, true);
+  assert.equal(redacted.destination, "123456789");
+  assert.equal(Object.hasOwn(redacted, "botToken"), false);
+  assert.doesNotMatch(JSON.stringify(redacted), /ABCDEFGHIJKLMNOPQRSTUVWXYZ/);
+});
+
+test("blank token retains only the same destination while explicit token replaces the credential", () => {
+  const first = resolveTelegramSettingsMutation(DEFAULT_TELEGRAM_SETTINGS, mutation());
+  const retained = resolveTelegramSettingsMutation(first, mutation({ botToken: "", eventMode: "CUSTOM", events: ["HOLD"].map(() => "HUMAN_ATTENTION_REQUIRED") }));
+  assert.equal(retained.botToken, TOKEN_A);
+  assert.equal(retained.eventMode, "CUSTOM");
+
+  const replaced = resolveTelegramSettingsMutation(retained, mutation({ botToken: TOKEN_B }));
+  assert.equal(replaced.botToken, TOKEN_B);
+  assert.equal(replaced.health.status, "NEVER_TESTED");
+
+  assert.throws(
+    () => resolveTelegramSettingsMutation(first, mutation({ botToken: "", destination: "987654321" })),
+    TelegramConfigurationError,
+  );
+});
+
+test("Telegram settings persist across store instances without exposing the credential", async () => {
+  const persistence = memoryPersistence();
+  const firstStore = new TelegramSettingsStore(persistence);
+  await firstStore.update(mutation({ eventMode: "CUSTOM", events: ["RESPONSE_COMPLETE", "PROVIDER_ERROR"] }));
+
+  const restartedStore = new TelegramSettingsStore(persistence);
+  const loaded = await restartedStore.load();
+  assert.equal(loaded.botToken, TOKEN_A);
+  assert.deepEqual(loaded.events, ["RESPONSE_COMPLETE", "PROVIDER_ERROR"]);
+  assert.equal(redactTelegramSettings(loaded).configured, true);
+});
+
+test("Telegram cannot be enabled without both credential and destination", () => {
+  assert.throws(
+    () => resolveTelegramSettingsMutation(DEFAULT_TELEGRAM_SETTINGS, mutation({ botToken: "" })),
+    /Configure both/,
+  );
+  assert.throws(
+    () => resolveTelegramSettingsMutation(DEFAULT_TELEGRAM_SETTINGS, mutation({ destination: "" })),
+    /Chat ID is required/,
+  );
+});
