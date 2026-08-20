@@ -48,7 +48,7 @@ export class TelegramBotApiTransport implements TelegramTransport {
   readonly #fetch: typeof fetch;
   readonly #timeoutMs: number;
 
-  constructor(fetchImpl: typeof fetch = fetch, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  constructor(fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis), timeoutMs = DEFAULT_TIMEOUT_MS) {
     this.#fetch = fetchImpl;
     this.#timeoutMs = timeoutMs;
   }
