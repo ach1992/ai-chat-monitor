@@ -399,11 +399,11 @@ Telegram v1 is strictly outbound notification-only. The extension does not poll 
 
 Any future inbound/read-only/remote-control Telegram capability is a separate product outcome and requires a separate threat model and authorization design covering authentication, destination/chat binding, replay protection, target selection, authorization, secret handling, and interaction with pending local automation. It cannot inherit authority from the outbound notification channel.
 
-## 14. Accepted next-state architecture — in-chat self-check (Issue #51)
+## 14. In-chat self-check architecture (Issue #51 / v1.1.0)
 
-This section records the accepted next architecture direction. It is **not** a claim about the shipped v1.0 runtime. The current sections above remain authoritative for v1.0 behavior until Issue #51 is implemented and integrated.
+This section records the v1.1.0 in-chat self-check implementation. Earlier sections remain the authoritative v1.0 baseline; this section defines the added classifier and guarded-send path.
 
-The next classifier path should make the current ChatGPT conversation the primary classifier for eligible ambiguous stop episodes:
+The classifier path makes the current ChatGPT conversation the primary classifier for eligible ambiguous stop episodes:
 
 ```text
 STOP / ERROR EPISODE
@@ -426,7 +426,7 @@ STOP / ERROR EPISODE
 
 ### 14.1 Stop/self-check episode identity
 
-The implementation needs an explicit identity for the stop/error episode being classified. It must be at least as strict as the existing action identity and must prevent a self-check response from being confused with the original task response.
+The implementation uses an explicit identity for the stop/error episode being classified. It is at least as strict as the existing action identity and prevents a self-check response from being confused with the original task response.
 
 Conceptually, a self-check envelope should bind:
 
@@ -460,7 +460,7 @@ If probe-write success is ambiguous, freeze automatic retry and HOLD.
 
 ### 14.3 Eligible Retry/red-error episodes
 
-The next design may classify a visible ChatGPT `Retry`, red delivery error, or `Message delivery timed out` episode through one in-chat self-check **without clicking Retry**, provided the ordinary composer remains safely usable and every fresh identity/human-precedence/write guard passes.
+The runtime may classify a visible ChatGPT `Retry`, red delivery error, or `Message delivery timed out` episode through one in-chat self-check **without clicking Retry**, provided the ordinary composer remains safely usable and every fresh identity/human-precedence/write guard passes.
 
 This is a deliberate change from the v1 rule that any Retry/error UI blocked all automatic mutation. The adapter should therefore distinguish:
 
@@ -488,17 +488,17 @@ The self-check prompt must explicitly say not to continue the task yet; it shoul
 
 ### 14.5 Resume message
 
-After a valid `CONTINUE`, Guardian should use a concise contextual resume instruction rather than relying only on bare `Continue.`. The intended default meaning is:
+After a valid `CONTINUE`, Guardian uses a concise contextual resume instruction rather than relying only on bare `Continue.`. The default is:
 
 ```text
-Continue the work from where you stopped. If you need approval, a decision, information, or an action from the human, say so; otherwise continue until the requested work is complete.
+Continue the work from where you stopped. If you need approval, a decision, information, or an action from the human, say so; otherwise keep going until the requested work is complete.
 ```
 
 Do not turn this into a second orchestration prompt. Keep it short and task-neutral.
 
 ### 14.6 Provider role after self-check
 
-The provider subsystem remains modular and supported, but normal classification should not require an external API when in-chat self-check is enabled and reliable.
+The provider subsystem remains modular and supported, but normal classification does not require an external API when in-chat self-check is enabled and reliable.
 
 External providers may remain optional fallback/diagnostic paths. They never override hard local blockers, human precedence, stale-state rejection, or self-check result safety.
 
@@ -508,4 +508,4 @@ The runtime must recognize self-check turns as control traffic and prevent recur
 
 Existing stagnation tracking and the hard fuse must include repeated probe/resume no-progress cycles so the new path cannot create an infinite conversation loop.
 
-See [`IN_CHAT_SELF_CHECK.md`](IN_CHAT_SELF_CHECK.md) and Issue #51 for the accepted next-state details and acceptance scenarios.
+See [`IN_CHAT_SELF_CHECK.md`](IN_CHAT_SELF_CHECK.md) and Issue #51 for the implementation details and acceptance scenarios.
