@@ -55,6 +55,7 @@ namespace GuardianContent {
 
   const MAX_NORMALIZED_RESPONSE_CHARS = 12_000;
   const MAX_PAGE_TITLE_CHARS = 300;
+  const SEND_CONTROL_READY_TIMEOUT_MS = 1_500;
   const SEND_VERIFICATION_TIMEOUT_MS = 5_000;
   const ASSISTANT_SELECTORS = ['[data-message-author-role="assistant"]', 'article[data-turn="assistant"]'] as const;
   const USER_SELECTORS = ['[data-message-author-role="user"]', 'article[data-turn="user"]'] as const;
@@ -253,6 +254,41 @@ namespace GuardianContent {
     }
   }
 
+  function waitForUsableSendControl(
+    document: Document,
+    stateIsSafe: () => boolean,
+    timeoutMs: number,
+  ): Promise<"READY" | "UNSAFE" | "TIMEOUT"> {
+    return new Promise((resolve) => {
+      let settled = false;
+      let timeout: ReturnType<typeof setTimeout>;
+      const observer = new MutationObserver(() => { check(); });
+      const finish = (result: "READY" | "UNSAFE" | "TIMEOUT"): void => {
+        if (settled) return;
+        settled = true;
+        observer.disconnect();
+        clearTimeout(timeout);
+        resolve(result);
+      };
+      const check = (): void => {
+        if (!stateIsSafe()) {
+          finish("UNSAFE");
+          return;
+        }
+        const sendControl = firstMatch<HTMLElement>(document, SEND_SELECTORS);
+        if (sendControl !== undefined && sendControlIsUsable(sendControl)) finish("READY");
+      };
+      observer.observe(document.documentElement, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ["disabled", "aria-disabled", "aria-label", "data-testid"],
+      });
+      timeout = setTimeout(() => finish("TIMEOUT"), timeoutMs);
+      check();
+    });
+  }
+
   export class BrowserChatGPTAdapter {
     readonly #document: Document;
     readonly #location: Pick<Location, "pathname">;
@@ -391,19 +427,44 @@ namespace GuardianContent {
         return ambiguous("Composer mutation started but the intended continuation text could not be confirmed.");
       }
 
-      const postMutationAssistant = assistantMatches(this.#document).at(-1);
+      const intendedComposerText = normalizeAssistantText(expectation.continuationText);
+      const postMutationStateIsSafe = (): boolean => {
+        const liveAssistant = assistantMatches(this.#document).at(-1);
+        const liveComposer = firstMatch<HTMLElement>(this.#document, COMPOSER_SELECTORS);
+        const liveMessageId = liveAssistant === undefined ? undefined : readMessageId(liveAssistant);
+        return (
+          humanStateIsCurrent() &&
+          this.currentConversationId() === expectation.conversationId &&
+          this.currentRouteKey() === expectation.routeKey &&
+          liveAssistant !== undefined &&
+          normalizeAssistantText(elementText(liveAssistant)) === capturedAssistantText &&
+          (expectation.assistantDomMessageId === undefined || liveMessageId === expectation.assistantDomMessageId) &&
+          liveComposer !== undefined &&
+          normalizeAssistantText(elementText(liveComposer)) === intendedComposerText &&
+          firstMatch<HTMLElement>(this.#document, STOP_SELECTORS) === undefined &&
+          !pageHasBlockingUi(this.#document)
+        );
+      };
+
+      const readiness = await waitForUsableSendControl(
+        this.#document,
+        postMutationStateIsSafe,
+        SEND_CONTROL_READY_TIMEOUT_MS,
+      );
+      if (readiness === "UNSAFE") {
+        return ambiguous("Page safety state changed after composer mutation and before send control became ready.");
+      }
+      if (readiness === "TIMEOUT") {
+        return ambiguous("Send control did not become usable after the guarded composer mutation.");
+      }
+
       const postMutationSendControl = firstMatch<HTMLElement>(this.#document, SEND_SELECTORS);
       if (
-        this.currentConversationId() !== expectation.conversationId ||
-        this.currentRouteKey() !== expectation.routeKey ||
-        postMutationAssistant === undefined ||
-        normalizeAssistantText(elementText(postMutationAssistant)) !== capturedAssistantText ||
-        firstMatch<HTMLElement>(this.#document, STOP_SELECTORS) !== undefined ||
-        pageHasBlockingUi(this.#document) ||
+        !postMutationStateIsSafe() ||
         postMutationSendControl === undefined ||
         !sendControlIsUsable(postMutationSendControl)
       ) {
-        return ambiguous("Page safety state changed after composer mutation and before send.");
+        return ambiguous("Final synchronous post-mutation revalidation failed before send.");
       }
 
       try {
