@@ -6,7 +6,7 @@ async function readDist(path) {
   return readFile(new URL(`../dist/${path}`, import.meta.url), "utf8");
 }
 
-test("Side Panel exposes the MVP management, provider, and reliability controls", async () => {
+test("Side Panel exposes the v1 management, provider, and reliability controls", async () => {
   const [html, script, reliabilityScript, currentTabScript, providerScript, contentScript] = await Promise.all([
     readDist("sidepanel/index.html"),
     readDist("sidepanel/index.js"),
