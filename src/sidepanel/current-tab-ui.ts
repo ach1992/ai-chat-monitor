@@ -383,6 +383,9 @@ function refreshCurrentTab(force = false): Promise<void> {
 
 refreshButton.addEventListener("click", () => { void refreshCurrentTab(true); });
 chrome.tabs.onActivated.addListener(() => { void refreshCurrentTab(true); });
+chrome.tabs.onRemoved.addListener(() => {
+  refreshButton.dispatchEvent(new Event("click"));
+});
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (shouldRefreshCurrentTabForUpdate(activeTabId, tabId, changeInfo)) void refreshCurrentTab(true);
 });

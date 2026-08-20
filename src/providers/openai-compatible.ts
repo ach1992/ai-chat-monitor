@@ -16,6 +16,34 @@ import {
 
 const MAX_PROVIDER_RESPONSE_CHARACTERS = 64_000;
 const CLASSIFIER_MAX_TOKENS = 1_024;
+const NARAROUTER_DEFAULT_TIMEOUT_MS = 60_000;
+const CLASSIFIER_RESPONSE_SCHEMA = {
+  type: "object",
+  properties: {
+    decision: { type: "string", enum: ["CONTINUE", "HOLD", "UNSURE"] },
+    reasonCode: {
+      type: "string",
+      enum: [
+        "HUMAN_APPROVAL_REQUIRED",
+        "MATERIAL_DECISION_REQUIRED",
+        "HUMAN_OPERATION_REQUIRED",
+        "PROJECT_COMPLETE",
+        "USER_STOP",
+        "STAGNATION",
+        "PLATFORM_ERROR",
+        "RATE_LIMIT",
+        "SAFETY_BOUNDARY",
+        "NEEDLESS_TURN_BOUNDARY",
+        "AMBIGUOUS",
+        "OTHER",
+      ],
+    },
+    reason: { type: "string", minLength: 1, maxLength: 240 },
+    confidence: { type: "number", minimum: 0, maximum: 1 },
+  },
+  required: ["decision", "reasonCode", "reason", "confidence"],
+  additionalProperties: false,
+} as const;
 const SYSTEM_PROMPT = `You are a conservative classifier for whether a finished assistant turn should receive one generic continuation message without human involvement.
 You do not continue the task yourself. Infer only why the assistant stopped from the bounded conversation context.
 Return exactly one JSON object and no markdown. The only schema is:
@@ -75,6 +103,53 @@ function requestHeaders(profile: ProviderProfile): Record<string, string> {
   return headers;
 }
 
+function classifierRequestBody(profile: ProviderProfile, request: ClassificationRequest): Record<string, unknown> {
+  const base: Record<string, unknown> = {
+    model: profile.model,
+    temperature: 0,
+    max_tokens: CLASSIFIER_MAX_TOKENS,
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: JSON.stringify(request) },
+    ],
+  };
+
+  if (profile.kind === "OPENROUTER") {
+    return {
+      ...base,
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "guardian_stop_classification",
+          strict: true,
+          schema: CLASSIFIER_RESPONSE_SCHEMA,
+        },
+      },
+      provider: { require_parameters: true },
+    };
+  }
+
+  if (profile.kind === "NARAROUTER") {
+    return {
+      ...base,
+      reasoning_effort: "low",
+    };
+  }
+
+  return base;
+}
+
+function requestTimeoutMs(profile: ProviderProfile): number {
+  if (profile.timeoutMs !== undefined) return profile.timeoutMs;
+  return profile.kind === "NARAROUTER" ? NARAROUTER_DEFAULT_TIMEOUT_MS : DEFAULT_PROVIDER_TIMEOUT_MS;
+}
+
+function normalizeClassificationContent(content: string): string {
+  const trimmed = content.trim();
+  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(trimmed);
+  return fenced?.[1]?.trim() ?? trimmed;
+}
+
 function parseJsonBody(raw: string): unknown {
   try {
     return JSON.parse(raw);
@@ -112,16 +187,7 @@ export class OpenAICompatibleProvider implements AIProvider {
   }
 
   async classify(request: ClassificationRequest): Promise<ClassificationResult> {
-    const body = {
-      model: this.#profile.model,
-      temperature: 0,
-      max_tokens: CLASSIFIER_MAX_TOKENS,
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: JSON.stringify(request) },
-      ],
-    };
-
+    const body = classifierRequestBody(this.#profile, request);
     const raw = await this.#requestText(joinEndpoint(this.#baseUrl, "chat/completions"), {
       method: "POST",
       headers: requestHeaders(this.#profile),
@@ -142,7 +208,7 @@ export class OpenAICompatibleProvider implements AIProvider {
 
     try {
       return parseProviderClassification(
-        content,
+        normalizeClassificationContent(content),
         this.#profile.id,
         this.#profile.minConfidence ?? DEFAULT_PROVIDER_MIN_CONFIDENCE,
       );
@@ -167,7 +233,7 @@ export class OpenAICompatibleProvider implements AIProvider {
   }
 
   async #requestText(url: string, init: RequestInit): Promise<string> {
-    const timeoutMs = this.#profile.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS;
+    const timeoutMs = requestTimeoutMs(this.#profile);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -190,7 +256,7 @@ export class OpenAICompatibleProvider implements AIProvider {
   }
 
   async #requestStatus(url: string, init: RequestInit): Promise<void> {
-    const timeoutMs = this.#profile.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS;
+    const timeoutMs = requestTimeoutMs(this.#profile);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -204,6 +270,9 @@ export class OpenAICompatibleProvider implements AIProvider {
   }
 
   #assertResponseStatus(response: Response): void {
+    if (response.status === 408) {
+      throw new ProviderFailure("TIMEOUT", "Provider reported a request timeout.");
+    }
     if (response.status === 429) {
       throw new ProviderFailure("RATE_LIMITED", "Provider rate limit was reached.");
     }
