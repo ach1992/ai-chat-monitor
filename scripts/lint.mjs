@@ -3,8 +3,24 @@ import { extname, resolve } from "node:path";
 
 const textExtensions = new Set([".ts", ".mjs", ".json", ".md", ".html", ".css", ".yml"]);
 const roots = ["src", "scripts", "tests", ".github"];
-const rootFiles = ["package.json", "package-lock.json", "tsconfig.json", "tsconfig.build.json", "tsconfig.content.json", ".gitignore"];
+const rootFiles = [
+  "README.md",
+  "PRIVACY.md",
+  "package.json",
+  "package-lock.json",
+  "tsconfig.json",
+  "tsconfig.build.json",
+  "tsconfig.content.json",
+  ".gitignore",
+];
 const failures = [];
+const remoteCodePatterns = [
+  [/\beval\s*\(/, "eval() is not allowed in extension source"],
+  [/\bnew\s+Function\s*\(/, "new Function() is not allowed in extension source"],
+  [/\bimportScripts\s*\(\s*["']https?:\/\//, "remote importScripts() is not allowed in extension source"],
+  [/\bimport\s*\(\s*["']https?:\/\//, "remote dynamic import is not allowed in extension source"],
+  [/<script\b[^>]*\bsrc\s*=\s*["']https?:\/\//i, "remote script source is not allowed in extension source"],
+];
 
 async function collect(path) {
   const entries = await readdir(path, { withFileTypes: true });
@@ -48,8 +64,10 @@ for (const file of files) {
     }
   }
 
-  if (file.includes("/src/") && /\beval\s*\(/.test(content)) {
-    failures.push(`${file}: eval() is not allowed in extension source`);
+  if (file.includes("/src/")) {
+    for (const [pattern, message] of remoteCodePatterns) {
+      if (pattern.test(content)) failures.push(`${file}: ${message}`);
+    }
   }
 
   if (file.includes("/src/") && /\.innerHTML\s*=/.test(content)) {
