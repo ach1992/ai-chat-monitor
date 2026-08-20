@@ -116,6 +116,11 @@ namespace GuardianContentAgent {
     }
 
     guardedSendInFlight = true;
+    observationGeneration += 1;
+    if (observationTimer !== undefined) {
+      clearTimeout(observationTimer);
+      observationTimer = undefined;
+    }
     try {
       return await adapter.guardedSend({
         decisionId: message.decisionId,
