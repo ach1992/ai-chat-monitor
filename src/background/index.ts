@@ -64,6 +64,27 @@ const registryReady = Promise.all([
   registry = SessionRegistry.fromState(state, { invalidateObservations: true });
 });
 
+async function requestContentAgentReconnect(tabId: number, documentId?: string): Promise<void> {
+  try {
+    await chrome.tabs.sendMessage(
+      tabId,
+      { type: "panel:agent-reconnect", protocolVersion: PROTOCOL_VERSION },
+      ...(documentId === undefined ? [] : [{ documentId }]),
+    );
+  } catch {
+    // Missing/stale tabs and documents are expected during restore/navigation; stay fail-closed.
+  }
+}
+
+async function refreshRestoredContentAgents(): Promise<void> {
+  await registryReady;
+  for (const session of registry.list()) {
+    await requestContentAgentReconnect(session.tabId, session.documentId);
+  }
+}
+
+void refreshRestoredContentAgents();
+
 function protocolError(code: ProtocolErrorResponse["code"], message: string): ProtocolErrorResponse {
   return { type: "background:error", protocolVersion: PROTOCOL_VERSION, code, message };
 }
@@ -465,5 +486,9 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
       mutateTabLifecycle(tabId, "invalidate"),
       automation.invalidateTab(tabId, "Top-level loading invalidated pending automation."),
     ]);
+    return;
+  }
+  if (changeInfo.status === "complete") {
+    void requestContentAgentReconnect(tabId);
   }
 });
