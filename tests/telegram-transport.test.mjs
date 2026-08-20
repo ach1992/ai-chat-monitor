@@ -64,6 +64,25 @@ test("Telegram invalid destination remains a generic sanitized failure", async (
   );
 });
 
+test("Telegram missing bot path is treated as a sanitized credential failure", async () => {
+  const transport = new TelegramBotApiTransport(async () => jsonResponse({
+    ok: false,
+    error_code: 404,
+    description: `Not Found for ${TOKEN}`,
+  }, 404));
+
+  await assert.rejects(
+    () => transport.send(TOKEN, "123456789", "test"),
+    (error) => {
+      assert.ok(error instanceof TelegramDeliveryError);
+      assert.equal(error.code, "AUTHENTICATION");
+      assert.equal(error.message, "Telegram rejected the bot credential.");
+      assert.doesNotMatch(error.message, /Not Found|ABCDEFGHIJKLMNOPQRSTUVWXYZ/);
+      return true;
+    },
+  );
+});
+
 test("Telegram timeout is bounded and does not retry", async () => {
   let attempts = 0;
   const transport = new TelegramBotApiTransport((_url, init) => {
