@@ -1,55 +1,69 @@
 # Chat Turn Guardian
 
-Chat Turn Guardian is a standalone Chromium Manifest V3 extension that supervises explicitly selected ChatGPT Web conversations and can request another turn when a finished response is confidently classified as a needless turn boundary.
+Chat Turn Guardian is a standalone Chromium Manifest V3 extension for safely supervising explicitly selected ChatGPT Web conversations. It can recognize a finished response that appears to be a needless turn boundary and, only after conservative classification plus final exact-state safety checks, send the configured continuation message.
 
-The extension is deliberately narrow. The chat's own agent, Skill, or workflow remains responsible for **what work should happen**. Chat Turn Guardian only decides whether a generic configured continuation message may be requested without genuine human involvement.
+**Current status: v1.0 feature-complete and release-ready.** The engineering/product baseline is complete; the extension has **not** been submitted to or published on the Chrome Web Store. Store publication remains a separate human-authorized release action.
 
-## MVP capabilities
+The chat's own agent, Skill, or workflow remains responsible for **what work should happen**. Guardian only decides whether another ordinary turn may be requested without genuine human involvement.
 
-- Supervises multiple ChatGPT tabs/conversations independently.
-- Primary current-tab ON/OFF control with bounded one-action reconnect and reactive status.
-- Per-chat modes: `OFF`, `OBSERVE`, `AUTO`, and `NOTIFY_ONLY`.
-- Global timing defaults with per-chat settle/continue/cooldown overrides.
+## v1.0 capabilities
+
+- Independent supervision of multiple ChatGPT tabs/conversations.
+- Current-tab ON/OFF control with bounded reconnect/recovery.
+- Per-chat modes: `OFF`, `OBSERVE`, `AUTO`, `NOTIFY_ONLY`.
+- Global timing defaults plus per-chat settle/continue/cooldown overrides.
 - Configurable continuation text.
-- Conservative deterministic stop rules plus an optional AI classifier.
+- Conservative deterministic rules plus optional AI classification.
 - OpenRouter, NaraRouter, and generic OpenAI-compatible provider profiles with ordered fallback.
 - Provider credentials stored only in trusted extension storage.
-- Bounded classification context: at most 4 recent turns, 4,000 characters per turn, and 8,000 characters total after secret redaction/minimization.
-- Exact tab/document/conversation/message binding before any automatic action.
-- Duplicate-conversation owner/mirror isolation so at most one tab can auto-send.
-- Human typing, sending, editing, stopping, navigation, policy changes, and blocking UI cancel or stale pending automation.
-- Guarded page mutation with post-send verification and no blind retry after ambiguous writes.
+- Bounded classifier context: at most 4 recent turns, 4,000 characters per turn, and 8,000 characters total after secret redaction/minimization.
+- Exact tab/document/content-agent/page-epoch/route/conversation/assistant-response/response-instance binding before automatic action.
+- OWNER/MIRROR duplicate-conversation isolation; MIRROR never auto-sends.
+- Human typing/sending/editing/stopping/navigation/policy changes stale pending automation.
+- Empty-composer requirement and final synchronous revalidation immediately before mutation.
+- Post-send verification, ambiguous-write freeze, and no blind retry.
 - Browser notifications for response completion, HOLD/attention, UNSURE, provider/extension errors, and stagnation.
-- Optional Telegram v1 outbound notifications through the user's own bot, with hidden credential storage, inherited/custom event routing, health state, and Test notification.
+- Optional Telegram v1 outbound notifications through the user's own bot with hidden credential storage, inherited/custom event routing, health state, and Test notification.
 - Progress-aware stagnation detection plus a separate configurable hard safety fuse.
 - Bounded, redacted, clearable audit history.
-- Persistent Side Panel for multi-chat management, Pause All, provider/Telegram configuration, runtime state, privacy disclosure, and diagnostics.
-- Toolbar action opens the Side Panel on supported ChatGPT pages while unsupported hosts remain disabled.
-- Service-worker restart recovery that requires fresh observation before automation can act.
+- Persistent Side Panel for multi-chat management, providers, Telegram, Pause All, privacy disclosure, runtime state, and diagnostics.
+- Toolbar action opens the Side Panel on supported ChatGPT pages; unsupported hosts remain disabled.
+- Manifest V3 service-worker restart recovery that requires fresh page evidence before automation can act again.
+- Deterministic release package/provenance and Chrome Web Store engineering readiness.
 
 ## Safety model
 
 Chat Turn Guardian is fail-closed by design:
 
-- `UNSURE`, provider failure, malformed provider output, timeout, rate limit, blocking UI, stale state, or storage failure never becomes an automatic continuation.
-- AI providers return only advisory `CONTINUE` / `HOLD` / `UNSURE` classifications. They cannot access tabs, DOM mutation, approvals, or browser actions.
-- Only the guarded ChatGPT page adapter can perform the narrow configured continuation action, and it revalidates the exact current page/message immediately before mutation.
-- Human interaction always has precedence over pending automation.
-- Ambiguous writes are journaled and never blindly retried.
-- The extension does not bypass platform/account limits, CAPTCHAs, confirmations, approvals, or safety controls.
-- Full conversation text is not persisted in audit history. Classifier input is bounded and secret-redacted before provider transport.
-- Notification delivery is observational. Browser/Telegram success or failure can never authorize or retry a ChatGPT mutation.
+- `UNSURE`, provider failure, malformed output, timeout, rate limit, blocking UI, stale state, or storage uncertainty never becomes an automatic continuation.
+- AI providers return only advisory `CONTINUE` / `HOLD` / `UNSURE` results. They have no DOM/tab/browser mutation authority.
+- Only the guarded ChatGPT content adapter can perform the narrow configured continuation action.
+- Human interaction always has precedence.
+- The composer must still be empty and every mutation-critical identity/safety check is repeated synchronously immediately before mutation.
+- Duplicate conversation copies use OWNER/MIRROR isolation; MIRROR never auto-sends.
+- Ambiguous writes are never blindly retried.
+- Guardian never bypasses platform/account limits, Retry/error blockers, CAPTCHAs, confirmations, approvals, verification, or safety controls.
+- Full conversation text is not persisted in audit history. Provider input is bounded/minimized and secret-redacted.
+- Browser/Telegram notification delivery is observational and can never authorize or retry ChatGPT mutation.
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the component boundaries, [`docs/MVP_VALIDATION.md`](docs/MVP_VALIDATION.md) for the validation/evidence matrix, and [`PRIVACY.md`](PRIVACY.md) for current data handling and third-party transfer disclosures.
+Durable references:
+
+- [Architecture](docs/ARCHITECTURE.md)
+- [v1 validation and security evidence](docs/V1_VALIDATION.md)
+- [Project specification](docs/PROJECT_SPEC.md)
+- [Privacy policy](PRIVACY.md)
+- [Chrome Web Store readiness](docs/STORE_READINESS.md)
 
 ## Requirements
 
-- Chromium-family browser with Manifest V3 Side Panel support. The manifest currently targets Chrome/Chromium 114+.
+- Chromium-family browser with Manifest V3 Side Panel support; current minimum is Chrome/Chromium 114.
 - Node.js 22+ for development/building.
-- A provider API key only if AI classification is desired. Without a configured provider, ambiguous classifier cases fail closed to `UNSURE`.
+- A provider API key only if AI classification is desired. Without a usable provider for an ambiguous case, Guardian fails closed to `UNSURE`.
 - A Telegram bot token and destination only if optional Telegram notifications are desired.
 
-## Fresh-clone validation
+## Install from source / validated ZIP
+
+From a fresh clone:
 
 ```bash
 git clone https://github.com/ach1992/chat-turn-guardian.git
@@ -60,109 +74,112 @@ npm run smoke:extension
 npm run package
 ```
 
-`npm run validate` performs strict TypeScript checks, repository linting, a production-style extension build, and the complete automated test suite.
-
-`npm run smoke:extension` launches Chromium with the generated `dist/` directory as an unpacked extension and fails if Chromium reports extension-load errors or a manifest-referenced icon asset is missing.
-
-`npm run package` rebuilds the extension and creates:
+`npm run package` creates:
 
 - `artifacts/chat-turn-guardian-<version>.zip`
 - `artifacts/SHA256SUMS.txt`
 - `artifacts/build-info.json`
 
-The ZIP contains the extension payload without TypeScript sources, source maps, or `.env` files. Packaging also requires the manifest/package versions to match and verifies referenced icon assets. CI retains the package output as a workflow artifact for the validated commit.
-
-## Install as an unpacked extension
+To load locally:
 
 1. Run `npm ci && npm run build`, or extract a validated release ZIP so `manifest.json` is at the extracted directory root.
 2. Open `chrome://extensions`.
 3. Enable **Developer mode**.
 4. Choose **Load unpacked**.
-5. Select the generated `dist/` directory, or the extracted release-package directory.
-6. Open ChatGPT Web in one or more tabs.
-7. Click the Chat Turn Guardian toolbar icon on a supported ChatGPT tab to open the Side Panel.
+5. Select `dist/` or the extracted release-package directory.
+6. Open a supported ChatGPT conversation.
+7. Click the Chat Turn Guardian toolbar icon to open the Side Panel.
 
-The extension starts fail-closed. Chats are not automatically controlled just because the extension is installed.
+Guardian starts fail-closed; installation alone does not enable automatic control for any conversation.
 
-For later unpacked-extension updates, overwrite the contents of that same existing unpacked-extension folder and use `chrome://extensions` -> **Reload**. Do not Remove/re-add the extension merely to update a build, because preserving extension/storage identity is part of the validated workflow.
+### Updating an existing unpacked installation
 
-The manifest keeps persistent host access limited to the two supported ChatGPT origins so the extension can supervise supported pages. External provider/Telegram origins remain optional and are requested only for the exact runtime origin involved.
+Preserve extension/storage identity:
+
+1. Back up the currently loaded unpacked extension folder if desired.
+2. Overwrite the contents of that **same folder** with the newer validated build.
+3. Open `chrome://extensions` and click **Reload** for Chat Turn Guardian.
+
+Do **not** Remove/re-add the extension merely to update a build unless an unavoidable identity-breaking reason has been proven.
 
 ## First-use configuration
 
-### 1. Turn Guardian ON for the current tab
+### 1. Turn Guardian ON
 
-Open a ChatGPT conversation and use **Turn Guardian ON** in the primary current-tab card. If the supported tab has a stale or missing content agent after an extension update/reload, the same action first attempts a safe re-registration and otherwise reloads that tab once, then waits for a fresh exact conversation identity.
+Open a ChatGPT conversation and use **Turn Guardian ON** in the current-tab card. Turning ON from `OFF` starts in `OBSERVE`; an already selected advanced mode is preserved. **Turn Guardian OFF** resolves the exact current tab/conversation before setting it to `OFF`.
 
-Turning ON from `OFF` starts in `OBSERVE`. If the conversation is already in an advanced mode such as `AUTO` or `NOTIFY_ONLY`, turning it ON preserves that mode. **Turn Guardian OFF** always resolves the current exact tab/conversation identity before setting the conversation to `OFF`.
+Start with `OBSERVE` while validating a workflow. Use `AUTO` only for conversations where guarded continuation is actually wanted.
 
-The current-tab card refreshes automatically during normal use and shows connection state, `OWNER`/`MIRROR` eligibility, runtime phase, and the latest classifier decision when available.
+### 2. Configure an AI provider
 
-### 2. Configure a provider when AI classification is needed
+Provider classification is optional. In the Side Panel choose:
 
-In the Side Panel, add one of:
+- **OpenRouter** — built-in preset;
+- **NaraRouter** — built-in fixed-endpoint preset; or
+- **Generic OpenAI-compatible** — custom HTTPS base URL + API key + model.
 
-- **OpenRouter**: profile ID, model, and API key using Guardian's built-in OpenRouter preset;
-- **NaraRouter**: profile ID, model, and API key using its fixed provider endpoint; or
-- **Generic OpenAI-compatible**: profile ID, HTTPS base URL, model, and API key.
+`Profile ID` is only a local Guardian label. You create it yourself, for example `openai`, `gemini-main`, `deepseek`, or `groq-fast`.
 
-`Profile ID` is a local Guardian label, not a value supplied by the API provider. Use a short unique name such as `openai`, `gemini-main`, or `groq-fast`.
+The current Generic transport expects:
 
-For a generic profile, Guardian currently expects an OpenAI-style HTTPS API that supports Bearer-token authentication, `GET <base-url>/models`, and `POST <base-url>/chat/completions`. `Try loading models` uses the provider's `/models` endpoint. If a compatible provider does not expose a usable model catalog, you can still enter the exact model ID manually. After saving a profile, use **Test classifier** before relying on it for `AUTO`; protocol compatibility alone does not guarantee that every model will reliably follow Guardian's conservative JSON classification contract.
+- Bearer-token authentication;
+- `GET <base-url>/models` for catalog discovery when available;
+- `POST <base-url>/chat/completions` for classification.
 
-#### Known provider configurations
+`Try loading models` queries `/models`. A compatible service may still require manual model entry if its catalog is unavailable or differs. Always run **Test classifier** after saving before relying on the profile for `AUTO`.
 
-The following widely used services match Guardian's current generic transport as of 2026-08-20. Provider APIs, model IDs, quotas, and pricing can change, so re-check the linked vendor documentation when configuring a profile.
+### Known OpenAI-compatible configurations
 
-| Service | Guardian provider type | Base URL | Where to get the API credential / verify compatibility | Notes |
+These services matched Guardian's current transport when this v1.0 documentation was finalized. Provider endpoints/model IDs/quotas/pricing can change, so verify current vendor documentation when configuring them.
+
+| Service | Guardian provider type | Base URL | Credential / docs | Notes |
 | --- | --- | --- | --- | --- |
-| OpenAI API | `Generic OpenAI-compatible` | `https://api.openai.com/v1` | [OpenAI API Platform](https://platform.openai.com/) / [API keys](https://platform.openai.com/api-keys) | ChatGPT web subscriptions and OpenAI API billing are separate. A ChatGPT Business subscription does **not** include API usage. |
-| Google Gemini API | `Generic OpenAI-compatible` | `https://generativelanguage.googleapis.com/v1beta/openai` | [Gemini OpenAI compatibility](https://ai.google.dev/gemini-api/docs/openai) / [Google AI Studio](https://aistudio.google.com/apikey) | Google's OpenAI-compatibility layer is currently documented as beta. Use `Try loading models` or enter a compatible Gemini model ID manually. |
-| DeepSeek API | `Generic OpenAI-compatible` | `https://api.deepseek.com` | [DeepSeek API docs](https://api-docs.deepseek.com/) / [DeepSeek platform](https://platform.deepseek.com/) | DeepSeek exposes OpenAI-format `/models` and `/chat/completions`; model names can change, so prefer the live catalog. |
-| Groq | `Generic OpenAI-compatible` | `https://api.groq.com/openai/v1` | [Groq OpenAI compatibility](https://console.groq.com/docs/openai) / [Groq Console](https://console.groq.com/) | Groq documents its API as mostly OpenAI-compatible and exposes Chat Completions. |
-| xAI | `Generic OpenAI-compatible` | `https://api.x.ai/v1` | [xAI Inference API](https://docs.x.ai/developers/rest-api-reference/inference) / [xAI Console](https://console.x.ai/) | xAI currently exposes `/v1/models` and `/v1/chat/completions`; xAI labels Chat Completions as legacy, so compatibility should be rechecked over time. |
-| Together AI | `Generic OpenAI-compatible` | `https://api.together.ai/v1` | [Together OpenAI compatibility](https://docs.together.ai/docs/inference/openai-compatibility) / [Together quickstart](https://docs.together.ai/docs/quickstart) | Together supports both `models.list` and Chat Completions through its OpenAI-compatible endpoint. |
-| OpenRouter | `OpenRouter` preset | Managed by Guardian | [OpenRouter](https://openrouter.ai/) / [API keys](https://openrouter.ai/keys) | Prefer Guardian's built-in preset rather than recreating OpenRouter as a generic profile. |
+| OpenAI API | `Generic OpenAI-compatible` | `https://api.openai.com/v1` | [API Platform](https://platform.openai.com/) / [API keys](https://platform.openai.com/api-keys) | ChatGPT web subscriptions and API service/billing are separate. ChatGPT Business does not itself include API usage. |
+| Google Gemini API | `Generic OpenAI-compatible` | `https://generativelanguage.googleapis.com/v1beta/openai` | [OpenAI compatibility](https://ai.google.dev/gemini-api/docs/openai) / [AI Studio API keys](https://aistudio.google.com/apikey) | Google's compatibility layer is version-sensitive; verify current docs/model IDs. |
+| DeepSeek API | `Generic OpenAI-compatible` | `https://api.deepseek.com` | [API docs](https://api-docs.deepseek.com/) / [Platform](https://platform.deepseek.com/) | Prefer live catalog/current documentation for model IDs. |
+| Groq | `Generic OpenAI-compatible` | `https://api.groq.com/openai/v1` | [OpenAI compatibility](https://console.groq.com/docs/openai) / [Console](https://console.groq.com/) | Supports OpenAI-style Chat Completions for compatible models. |
+| xAI | `Generic OpenAI-compatible` | `https://api.x.ai/v1` | [API docs](https://docs.x.ai/developers/rest-api-reference/inference) / [Console](https://console.x.ai/) | Re-check Chat Completions compatibility over time. |
+| Together AI | `Generic OpenAI-compatible` | `https://api.together.ai/v1` | [OpenAI compatibility](https://docs.together.ai/docs/inference/openai-compatibility) / [Quickstart](https://docs.together.ai/docs/quickstart) | Supports compatible model listing and Chat Completions. |
+| OpenRouter | `OpenRouter` preset | Managed by Guardian | [OpenRouter](https://openrouter.ai/) / [API keys](https://openrouter.ai/keys) | Prefer the built-in Guardian preset. |
 
-For **OpenAI specifically**, your ChatGPT account and your API account can use the same sign-in identity, but API service/billing is separate from ChatGPT. ChatGPT Free, Plus, Pro, Business, or other chat access does not by itself provide a usable Guardian API key. OpenAI's current Business FAQ explicitly states that ChatGPT Business does not include API usage: [ChatGPT Business FAQ](https://help.openai.com/en/articles/8542115).
+For **OpenAI**, you may sign into ChatGPT and the API Platform with the same OpenAI identity, but ChatGPT Free/Plus/Pro/Business access is not an API key and does not itself provide Guardian API usage. Create an API project/key through the API Platform and use its separate billing/credits as applicable.
 
-For **Claude / Anthropic**, do **not** enter `https://api.anthropic.com` as a Generic OpenAI-compatible provider. Guardian's current generic adapter uses OpenAI-style `/chat/completions` plus Bearer authentication, while the native Claude API uses the Messages API (`/v1/messages`) and Anthropic-specific authentication/version headers. Claude therefore needs a dedicated Guardian provider adapter before it can be treated as a supported native provider. See [Claude Platform getting started](https://platform.claude.com/docs/en/get-started).
+For **Claude / Anthropic**, do not enter `https://api.anthropic.com` as Generic OpenAI-compatible. Guardian v1.0's generic adapter uses OpenAI-style `/chat/completions` + Bearer authentication; Anthropic's native Messages API uses a different protocol/authentication contract. Native Claude support requires a dedicated future Guardian adapter.
 
-A recommended generic-provider setup flow is:
+Recommended setup flow:
 
-1. Create an API credential in the provider's developer/API console. Never use a browser-session cookie or copy a secret from a consumer chat application's web session.
-2. In **Add provider**, choose the provider preset when one exists; otherwise choose **Generic OpenAI-compatible**.
-3. Set a local `Profile ID`.
-4. For Generic, enter the exact HTTPS `Base URL` from the table/vendor documentation.
-5. Paste the API key locally into the extension.
-6. Choose **Try loading models**. Select a suitable text/chat model from the returned catalog, or enter a documented model ID manually if catalog discovery is unavailable.
-7. Optionally select **Make this the primary provider**.
-8. Save the provider, grant the exact requested origin permission, then run **Test classifier**.
-9. Keep the profile only if the readiness test succeeds. Configure additional profiles if you want ordered fallback.
+1. Create an API credential in the provider's developer/API console; never use browser-session cookies.
+2. Choose a built-in preset when available; otherwise choose **Generic OpenAI-compatible**.
+3. Set a unique local `Profile ID`.
+4. For Generic, enter the provider's exact HTTPS Base URL.
+5. Paste the API key locally into Guardian.
+6. Use **Try loading models** or enter the exact documented model ID manually.
+7. Optionally make it the primary provider.
+8. Save, grant the exact requested provider-origin permission, and run **Test classifier**.
+9. Add/reorder additional profiles only if ordered fallback is wanted.
 
-Provider API usage may incur separate charges from the provider. Guardian never treats a provider subscription, consumer chat subscription, or web login as an API credential. The browser asks for host access to the exact provider origin at configuration time. Provider profiles can be reordered for fallback priority. Removing or replacing the last profile that uses an origin revokes that now-unused origin permission on a best-effort basis.
+Provider API keys are never returned in ordinary management/status responses. Provider usage may incur independent vendor charges.
 
-Provider API keys are never returned in ordinary management/status responses. When remote classification is needed, Guardian sends only the bounded, minimized, secret-redacted classification context directly to the selected HTTPS provider. Provider output remains advisory.
+### 3. Configure Telegram notifications
 
-### 3. Configure Telegram only if outbound alerts are wanted
+Telegram v1 is **outbound notification-only**.
 
-Expand **Telegram** in the Side Panel, enter the bot token and Chat ID/destination locally, choose inherited or Telegram-specific events, enable Telegram, save, grant the exact Telegram Bot API host permission, then use **Test notification**.
+1. Create your bot with Telegram's `@BotFather` and start/contact the bot (or add it to the intended destination) so it can deliver there.
+2. In Guardian's **Telegram** section, enter the destination/Chat ID and Bot Token locally.
+3. Enable Telegram.
+4. Choose inherited Guardian events or a Telegram-specific event selection.
+5. Save settings and allow the exact `https://api.telegram.org/*` host permission when requested.
+6. Use **Test notification** and confirm the health state becomes `Healthy` after successful delivery.
 
-The saved bot token is never rendered back into the Side Panel. A blank token preserves the existing secret only when the destination remains the same; an explicit new token replaces it. Telegram v1 sends bounded Guardian notification metadata and never sends full ChatGPT messages or accepts inbound commands. Browser notifications continue to work independently.
+Saved bot tokens are never rendered back. Leaving the token blank can retain the existing saved secret only under the safe same-configuration rule; entering a new token replaces it.
 
-Never paste a real bot token into an issue, chat transcript, screenshot, or support request.
+Telegram receives only bounded Guardian notification metadata. v1.0 does not send full ChatGPT messages by default and accepts no inbound commands. It cannot approve decisions, change `AUTO`, start/stop Guardian, inject ChatGPT messages, or otherwise authorize browser mutation.
 
-### 4. Use advanced per-chat modes deliberately
+Never paste a real bot token into GitHub, chat, logs, screenshots, or support messages.
 
-Expand **Open ChatGPT chats** for `OBSERVE`, `AUTO`, `NOTIFY_ONLY`, timing, notification, and per-conversation override controls.
+### 4. Use `Pause All` when needed
 
-Start with `OBSERVE` when validating a workflow. The extension will settle and classify finished assistant turns but cannot enter the automatic send state.
-
-Set a conversation to `AUTO` only when you want guarded continuation for that exact chat. A `CONTINUE` classification is still only a candidate: the extension rechecks session identity, ownership, policy revision, assistant fingerprint, composer state, user interaction state, blocking UI, stagnation/fuse state, and expiration before the content agent is allowed to mutate the page.
-
-### 5. Use `Pause All` whenever needed
-
-`Pause All` immediately prevents new automatic sends while preserving configuration. Resuming requires fresh page evidence before automation can proceed.
+`Pause All` immediately prevents new automatic sends while preserving configuration. Resuming does not restore stale action authority; fresh page evidence is required.
 
 ## Modes
 
@@ -171,86 +188,62 @@ Set a conversation to `AUTO` only when you want guarded continuation for that ex
 | `OFF` | No supervision | Never | No managed-chat events |
 | `OBSERVE` | Yes | Never | Configurable |
 | `AUTO` | Yes | Only after every safety gate passes | Configurable |
-| `NOTIFY_ONLY` | No auto-send path | Never | Configurable, including response-finished-only |
+| `NOTIFY_ONLY` | No auto-send path | Never | Configurable, including response completion |
 
 ## Timing and loop protection
 
-Global defaults and per-chat overrides exist for:
+Global defaults and per-chat overrides exist for settle delay, continuation delay, post-send cooldown, continuation text, notification triggers, and hard-fuse settings.
 
-- settle delay;
-- continuation delay;
-- post-send cooldown;
-- continuation text;
-- notification triggers;
-- hard-fuse maximum verified auto-continues.
+The hard fuse is a final emergency boundary. Progress-aware stagnation protection first compares privacy-preserving signatures of recent **verified auto-continued** outcomes. Repeated materially similar no-progress outcomes HOLD; useful changing outcomes are not stopped merely by an arbitrary small count.
 
-The hard fuse is a final emergency boundary, not the primary progress detector. Progress-aware protection first compares privacy-preserving signatures of recent **verified auto-continued** assistant outcomes. Repeated materially similar no-progress outcomes are held as stagnation even before the hard fuse is reached. Useful changing outcomes are not stopped merely because an arbitrary small continuation count was reached.
+## Permission, privacy, and credential behavior
 
-Human interaction resets the relevant verified-auto continuation window used by the fuse/stagnation guard.
+- Persistent page host access is limited to `https://chatgpt.com/*` and `https://chat.openai.com/*`.
+- The broad optional `https://*/*` manifest envelope exists because a user may configure an arbitrary HTTPS OpenAI-compatible provider whose origin is not known at install time. Guardian requests only the exact selected origin at runtime.
+- Provider endpoints must be HTTPS; URL credentials/query strings/fragments and sensitive auth-header overrides are rejected.
+- Provider redirects are refused so credentials are not forwarded to unexpected origins.
+- Provider requests have bounded timeouts/responses and bounded secret-redacted context.
+- Telegram requests only `https://api.telegram.org/*` and delivers directly from the trusted service worker with bounded timeout, sanitized health/error state, and no blind retry.
+- `chrome.storage.local` access for durable policy/provider/Telegram state is restricted to trusted extension contexts before restore.
+- Audit history stores bounded structured metadata/fingerprints/diagnostics, not full chat content or credentials.
 
-## Provider, Telegram, and privacy behavior
+See [PRIVACY.md](PRIVACY.md) for the current data-handling and third-party-transfer policy.
 
-- Durable `chrome.storage.local` data is restricted to trusted extension contexts before policy/provider/Telegram state is restored.
-- Persistent page host access is limited to `https://chatgpt.com/*` and `https://chat.openai.com/*`; the broad `tabs` permission is not requested.
-- The manifest's optional `https://*/*` envelope supports arbitrary user-configured HTTPS OpenAI-compatible endpoints; the Side Panel requests only the exact origin selected by the user at runtime.
-- Provider endpoints must use HTTPS. URL credentials, query strings, fragments, and sensitive header overrides are rejected.
-- Automatic redirects are refused for provider requests so credentials are not forwarded to an unexpected origin.
-- Provider requests are timeout-bounded and response-size-bounded.
-- Context sanitization limits recent turns and minimizes large code/log blocks.
-- Common API-key/auth-token forms are redacted before provider transport.
-- Telegram v1 requests only `https://api.telegram.org/*`, uses direct HTTPS Bot API delivery from the trusted service worker, is timeout-bounded with no blind retry, and exposes only sanitized health/error state.
-- Audit history stores bounded structured metadata, hashes/fingerprints, and local diagnostic reasons; it does not store full assistant/user content, provider secrets, or Telegram bot tokens. Free-form classifier reasons are not persisted in audit history.
-- The Side Panel contains a prominent privacy/data disclosure and the public policy is [`PRIVACY.md`](PRIVACY.md).
+## What unsafe states look like
 
-## What to expect when something is unsafe
+The expected safe outcome is usually **no automatic action**:
 
-The correct behavior is usually **no automatic action**. Typical Side Panel states include:
-
-- `HOLD`: a real boundary, human interaction, blocking UI, ownership issue, or stagnation requires attention.
-- `UNSURE`: the classifier/provider could not safely justify continuation.
-- `AMBIGUOUS_WRITE`: a page mutation may have started but cannot be safely reconciled; blind retry is blocked.
-- `PAUSED`: global Pause All is active.
-- `COOLDOWN`: a verified continuation was sent and the per-chat cooldown is active.
+- `HOLD` — a real boundary, human interaction, blocking UI, ownership issue, completion, or stagnation requires stopping.
+- `UNSURE` — the evidence/provider could not safely justify continuation.
+- `AMBIGUOUS_WRITE` — a mutation outcome cannot be safely reconciled; blind retry is blocked.
+- `PAUSED` — Pause All is active.
+- `COOLDOWN` — a verified continuation was sent and the per-chat cooldown is active.
 
 ## Troubleshooting
 
-### Current ChatGPT tab shows `Reconnect needed`
+### Current tab shows `Reconnect needed`
 
-Use **Reconnect** when Guardian is already ON, or **Turn Guardian ON** when it is OFF. Guardian first tries to re-register a reachable content agent; if none is reachable, it reloads that supported ChatGPT tab once and waits for fresh exact identity/state. A repeated manual reload + Side Panel refresh ritual should not be required for the normal stale-extension case.
-
-If recovery still fails, confirm the active tab is `https://chatgpt.com/...` (or the supported legacy ChatGPT host) and inspect the displayed recovery error rather than repeatedly reloading. Recovery is intentionally bounded and does not blind-retry page mutations.
+Use **Reconnect** or **Turn Guardian ON**. Guardian first attempts bounded re-registration; if a supported tab's stale extension context cannot be reached, it may reload that tab once and waits for fresh exact identity/state. Do not use repeated blind reload rituals.
 
 ### `AUTO` never sends
 
-Check the displayed reason/runtime state. Common safe causes are:
+Inspect the displayed reason/runtime state. Safe causes include no usable provider, `HOLD`/`UNSURE`, MIRROR ownership, non-empty/user-focused composer, generation still running, blocking UI, stale response/session/policy, Pause All, stagnation/hard fuse, or an ambiguous-write guard.
 
-- no provider configured for an ambiguous stop;
-- provider failure or low-confidence result;
-- the tab is a duplicate-conversation `MIRROR`, not `OWNER`;
-- the composer is focused or contains user text;
-- ChatGPT is still generating;
-- blocking/error/rate-limit/confirmation UI is present;
-- the response/policy/session changed during a delay;
-- stagnation or the hard fuse held the chat;
-- a prior ambiguous write guard blocks retry.
+Do not weaken the guard simply to increase the AUTO rate.
 
-### Provider requests fail
+### Provider fails
 
-Verify the profile model/base URL/API key, confirm the requested exact-origin host permission is still granted, and use an HTTPS endpoint. For Generic profiles, confirm that the service actually supports OpenAI-compatible Bearer authentication and the `/models` and `/chat/completions` routes described above. Run **Try loading models** and then **Test classifier** to distinguish catalog/auth/network problems from model-output/readiness problems.
+Verify Base URL/model/API key and exact-origin permission. For Generic profiles confirm the service actually supports Bearer auth plus the `/models` and `/chat/completions` contract above. Run **Try loading models** followed by **Test classifier**. Re-check current vendor documentation if an external API/model changed.
 
-Provider/model availability, quotas, pricing, and compatibility are external service facts and are intentionally not hardcoded into the extension. Re-check the provider's official documentation if a previously working endpoint or model changes.
+### Telegram fails
 
-### Notifications do not appear
+Confirm `Configured`, `Enabled`, and health state, then run **Test notification**. Re-enter a token locally only when replacing it. Do not expose the saved secret while troubleshooting.
 
-For browser notifications, confirm browser/OS notifications are permitted and the chat's notification trigger is enabled.
-
-For Telegram, confirm **Configured**, **Enabled**, and health state in the Side Panel, then use **Test notification**. Re-enter the token locally if replacing credentials or changing destination. Do not expose the saved token while troubleshooting.
-
-Notification delivery failure is observational only: it cannot trigger a send, retry, or automation state transition.
+Telegram delivery failure cannot trigger a ChatGPT send/retry/state transition.
 
 ### ChatGPT changes its DOM
 
-The adapter intentionally fails closed on selector/identity drift. If current ChatGPT markup no longer matches the supported adapter, use `OFF`/`OBSERVE`, capture the failing scenario, and update the adapter/tests rather than weakening the final revalidation gates.
+The adapter intentionally fails closed. Capture the failing state and update adapter/tests instead of loosening exact identity, blocker, composer, or final revalidation requirements.
 
 ## Development commands
 
@@ -265,12 +258,22 @@ npm run smoke:extension
 npm run package
 ```
 
-## Chrome Web Store preparation
+## Validation status and rare platform states
 
-Store-readiness constraints and exact permission/privacy justifications are documented in [`docs/STORE_READINESS.md`](docs/STORE_READINESS.md). The authoritative listing/submission copy is [`docs/CHROME_WEB_STORE_LISTING.md`](docs/CHROME_WEB_STORE_LISTING.md).
+High-signal real-browser scenarios for safe AUTO, human interaction, duplicate OWNER/MIRROR tabs, provider failure, restart recovery, notifications, toolbar/Side Panel behavior, and real Telegram delivery have been exercised and are recorded in [docs/V1_VALIDATION.md](docs/V1_VALIDATION.md).
 
-Actual Chrome Web Store upload, submission, or publication is not performed as part of ordinary engineering validation and requires an explicit release authorization.
+Rare platform states such as a naturally occurring silent terminal/no fresh assistant response or a real Retry/error blocker are covered by automated fail-closed regressions but are not claimed as live-passed if they did not naturally occur. Do not manufacture those states merely for evidence; capture them opportunistically if they occur in future use.
 
-## Project boundary
+## Chrome Web Store status
 
-This MVP is not a general browser agent, project manager, GitHub orchestrator, approval authority, or mechanism for bypassing platform safeguards. It does not create chats, move reviewer prompts between chats, require a local daemon/model, or implement Telegram remote control. Telegram v1 is outbound notification-only; inbound commands, remote mode control, approval answering, arbitrary message injection, and Telegram status/control surfaces require a separate future security/authorization design and remain out of scope.
+The v1.0 codebase is engineered to be Chrome Web Store ready: Manifest V3, production icons/assets, deterministic package/provenance, no remotely hosted executable code, permission/privacy justifications, public privacy policy, and listing copy are maintained in the repository.
+
+See [docs/STORE_READINESS.md](docs/STORE_READINESS.md) and [docs/CHROME_WEB_STORE_LISTING.md](docs/CHROME_WEB_STORE_LISTING.md).
+
+**Chat Turn Guardian is not currently claimed to be published or approved in the Chrome Web Store.** Immediately before a future submission, current Store policies/Developer Dashboard disclosures/assets and the exact submission ZIP must be re-verified. Upload/submission/publication/visibility changes require explicit human authorization.
+
+## Project boundary and future development
+
+Chat Turn Guardian v1.0 is a focused supervision product, not a general browser agent, project manager, GitHub orchestrator, approval authority, or safeguard-bypass mechanism. Telegram v1 is outbound-only; inbound commands/remote control require a separate future security/authorization design.
+
+The v1.0 baseline is intentionally modular so future work can add notification channels, native provider adapters, page adapters, or other bounded capabilities through normal Issues/PRs without changing guarded-send authority. Permanent product invariants live in [docs/PROJECT_SPEC.md](docs/PROJECT_SPEC.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
