@@ -15,11 +15,29 @@ const EVENTS: ReadonlyArray<{ value: GuardianNotificationEvent; label: string }>
   { value: "EXTENSION_ERROR", label: "Extension / platform error" },
 ];
 
+type TelegramErrorCode =
+  | "INVALID_SENDER"
+  | "INVALID_CONFIG"
+  | "PERMISSION_REQUIRED"
+  | "DELIVERY_FAILED"
+  | "STORAGE_FAILURE";
+
 interface TelegramResponse {
   type: "background:telegram-settings" | "background:telegram-test-result" | "background:telegram-error";
   protocolVersion: typeof PROTOCOL_VERSION;
   telegram?: RedactedTelegramSettings;
+  code?: TelegramErrorCode;
   message?: string;
+}
+
+class TelegramPanelError extends Error {
+  readonly code?: TelegramErrorCode;
+
+  constructor(message: string, code?: TelegramErrorCode) {
+    super(message);
+    this.name = "TelegramPanelError";
+    this.code = code;
+  }
 }
 
 function e<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -42,6 +60,7 @@ function buildSection(): {
   enabledState: HTMLElement;
   health: HTMLElement;
   test: HTMLButtonElement;
+  save: HTMLButtonElement;
   status: HTMLElement;
 } {
   const root = e("details", "panel-section disclosure");
@@ -63,6 +82,10 @@ function buildSection(): {
   const health = e("span", "badge", "Never tested");
   stateRow.append(configured, enabledState, health);
   root.append(stateRow);
+
+  const status = e("p", "meta telegram-operation-status");
+  status.setAttribute("aria-live", "polite");
+  root.append(status);
 
   const form = e("form", "form-grid");
   const enabledLabel = e("label", "checkbox-row wide");
@@ -120,19 +143,16 @@ function buildSection(): {
   const help = e("div", "wide override-note");
   help.textContent = "Setup: create a bot with @BotFather, start/contact the bot or add it to the destination so it can send there, then enter the token and Chat ID here. The token stays in trusted extension storage. Telegram v1 receives only bounded Guardian notification metadata (event title/reason and a bounded conversation identifier when available); it never sends full ChatGPT messages and accepts no inbound commands.";
 
-  const actions = e("div", "wide form-actions");
+  const actions = e("div", "wide form-actions telegram-actions");
   const test = e("button", "secondary", "Test notification");
   test.type = "button";
   const save = e("button", undefined, "Save Telegram settings");
   save.type = "submit";
   actions.append(test, save);
 
-  const status = e("p", "meta wide");
-  status.setAttribute("aria-live", "polite");
-
-  form.append(enabledLabel, destinationLabel, tokenLabel, modeLabel, customEvents, help, actions, status);
+  form.append(enabledLabel, destinationLabel, tokenLabel, modeLabel, customEvents, help, actions);
   root.append(form);
-  return { root, form, enabled, destination, token, eventMode, customEvents, eventInputs, configured, enabledState, health, test, status };
+  return { root, form, enabled, destination, token, eventMode, customEvents, eventInputs, configured, enabledState, health, test, save, status };
 }
 
 const ui = buildSection();
@@ -142,9 +162,16 @@ if (providersSection !== null && providersSection !== undefined) providersSectio
 else document.querySelector(".footer-note")?.before(ui.root);
 
 let busy = false;
+let dirty = false;
 
 function setStatus(message: string): void {
   ui.status.textContent = message;
+}
+
+function setBusy(value: boolean): void {
+  busy = value;
+  ui.test.disabled = value;
+  ui.save.disabled = value;
 }
 
 function healthText(settings: RedactedTelegramSettings): string {
@@ -154,14 +181,7 @@ function healthText(settings: RedactedTelegramSettings): string {
   return health.code === undefined ? "Delivery error" : `Error: ${health.code.toLowerCase().replaceAll("_", " ")}`;
 }
 
-function render(settings: RedactedTelegramSettings): void {
-  ui.enabled.checked = settings.enabled;
-  ui.destination.value = settings.destination;
-  ui.token.value = "";
-  ui.token.placeholder = settings.configured ? "Saved token hidden - blank keeps it" : "Paste the BotFather token";
-  ui.eventMode.value = settings.eventMode;
-  for (const input of ui.eventInputs) input.checked = settings.events.includes(input.value as GuardianNotificationEvent);
-  ui.customEvents.disabled = settings.eventMode !== "CUSTOM";
+function renderBadges(settings: RedactedTelegramSettings): void {
   ui.configured.textContent = settings.configured ? "Configured" : "Not configured";
   ui.configured.dataset.tone = settings.configured ? "ok" : "warn";
   ui.enabledState.textContent = settings.enabled ? "Enabled" : "Disabled";
@@ -170,16 +190,44 @@ function render(settings: RedactedTelegramSettings): void {
   ui.health.dataset.tone = settings.health.status === "HEALTHY" ? "ok" : settings.health.status === "ERROR" ? "warn" : "";
 }
 
+function renderForm(settings: RedactedTelegramSettings): void {
+  ui.enabled.checked = settings.enabled;
+  ui.destination.value = settings.destination;
+  ui.token.value = "";
+  ui.token.placeholder = settings.configured ? "Saved token hidden - enter a new token to replace it" : "Paste the BotFather token";
+  ui.eventMode.value = settings.eventMode;
+  for (const input of ui.eventInputs) input.checked = settings.events.includes(input.value as GuardianNotificationEvent);
+  ui.customEvents.disabled = settings.eventMode !== "CUSTOM";
+  dirty = false;
+}
+
+function render(settings: RedactedTelegramSettings, hydrateForm: boolean): void {
+  renderBadges(settings);
+  if (hydrateForm) renderForm(settings);
+}
+
 function selectedEvents(): GuardianNotificationEvent[] {
   return ui.eventInputs
     .filter((input) => input.checked)
     .map((input) => input.value as GuardianNotificationEvent);
 }
 
+function collectMutation(): TelegramSettingsMutation {
+  return {
+    enabled: ui.enabled.checked,
+    destination: ui.destination.value,
+    botToken: ui.token.value,
+    eventMode: ui.eventMode.value === "CUSTOM" ? "CUSTOM" : "INHERIT",
+    events: selectedEvents(),
+  };
+}
+
 async function send(request: object): Promise<RedactedTelegramSettings> {
   const response = await chrome.runtime.sendMessage<TelegramResponse>(request);
-  if (response.type === "background:telegram-error") throw new Error(response.message ?? "Telegram operation failed.");
-  if (response.telegram === undefined) throw new Error("Guardian returned an unexpected Telegram response.");
+  if (response.type === "background:telegram-error") {
+    throw new TelegramPanelError(response.message ?? "Telegram operation failed.", response.code);
+  }
+  if (response.telegram === undefined) throw new TelegramPanelError("Guardian returned an unexpected Telegram response.");
   return response.telegram;
 }
 
@@ -190,11 +238,25 @@ async function requestTelegramPermission(): Promise<boolean> {
 async function refresh(allowWhileBusy = false): Promise<void> {
   if (busy && !allowWhileBusy) return;
   try {
-    render(await send({ type: "panel:telegram-settings-request", protocolVersion: PROTOCOL_VERSION }));
+    const settings = await send({ type: "panel:telegram-settings-request", protocolVersion: PROTOCOL_VERSION });
+    render(settings, !dirty);
   } catch (error) {
     setStatus(error instanceof Error ? error.message : "Telegram settings are unavailable.");
   }
 }
+
+function operationError(error: unknown, fallback: string): string {
+  if (error instanceof TelegramPanelError && error.code !== undefined) return `${error.message} (${error.code})`;
+  return error instanceof Error ? error.message : fallback;
+}
+
+ui.form.addEventListener("input", () => {
+  dirty = true;
+});
+
+ui.form.addEventListener("change", () => {
+  dirty = true;
+});
 
 ui.eventMode.addEventListener("change", () => {
   ui.customEvents.disabled = ui.eventMode.value !== "CUSTOM";
@@ -203,48 +265,50 @@ ui.eventMode.addEventListener("change", () => {
 ui.form.addEventListener("submit", (event) => {
   event.preventDefault();
   if (busy) return;
-  const mutation: TelegramSettingsMutation = {
-    enabled: ui.enabled.checked,
-    destination: ui.destination.value,
-    botToken: ui.token.value,
-    eventMode: ui.eventMode.value === "CUSTOM" ? "CUSTOM" : "INHERIT",
-    events: selectedEvents(),
-  };
-  busy = true;
-  ui.test.disabled = true;
+  const mutation = collectMutation();
+  setBusy(true);
   setStatus("Saving Telegram settings...");
   void (async () => {
     try {
       if (mutation.enabled && !await requestTelegramPermission()) {
-        throw new Error("Telegram host access was not granted; settings were not enabled.");
+        throw new TelegramPanelError("Telegram host access was not granted; settings were not enabled.", "PERMISSION_REQUIRED");
       }
-      render(await send({ type: "panel:telegram-settings-update", protocolVersion: PROTOCOL_VERSION, settings: mutation }));
+      const settings = await send({ type: "panel:telegram-settings-update", protocolVersion: PROTOCOL_VERSION, settings: mutation });
+      render(settings, true);
       setStatus("Telegram settings saved. Stored bot token remains hidden.");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Telegram settings could not be saved.");
+      setStatus(operationError(error, "Telegram settings could not be saved."));
     } finally {
-      busy = false;
-      ui.test.disabled = false;
+      setBusy(false);
     }
   })();
 });
 
 ui.test.addEventListener("click", () => {
   if (busy) return;
-  busy = true;
-  ui.test.disabled = true;
-  setStatus("Sending a bounded Telegram test notification...");
+  const mutation = collectMutation();
+  const testingDraft = dirty;
+  setBusy(true);
+  setStatus("Sending a bounded Telegram test notification from the current form...");
   void (async () => {
     try {
-      if (!await requestTelegramPermission()) throw new Error("Telegram host access was not granted.");
-      render(await send({ type: "panel:telegram-test-notification", protocolVersion: PROTOCOL_VERSION }));
-      setStatus("Telegram test notification delivered successfully.");
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Telegram test delivery failed.");
+      if (!await requestTelegramPermission()) {
+        throw new TelegramPanelError("Telegram host access was not granted.", "PERMISSION_REQUIRED");
+      }
+      await send({
+        type: "panel:telegram-test-notification",
+        protocolVersion: PROTOCOL_VERSION,
+        settings: mutation,
+      });
       await refresh(true);
+      setStatus(testingDraft
+        ? "Telegram test notification delivered from the current form. Save settings to keep these values."
+        : "Telegram test notification delivered successfully.");
+    } catch (error) {
+      await refresh(true);
+      setStatus(operationError(error, "Telegram test delivery failed."));
     } finally {
-      busy = false;
-      ui.test.disabled = false;
+      setBusy(false);
     }
   })();
 });
