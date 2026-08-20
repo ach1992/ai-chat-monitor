@@ -2,6 +2,7 @@ import {
   TelegramConfigurationError,
   TelegramSettingsStore,
   redactTelegramSettings,
+  type TelegramConfigurationIdentity,
 } from "./settings.js";
 import {
   TelegramBotApiTransport,
@@ -23,7 +24,10 @@ const MAX_TELEGRAM_MESSAGE_LENGTH = 700;
 export interface TelegramSettingsAccess {
   load(): Promise<TelegramSettingsState>;
   update(mutation: TelegramSettingsMutation): Promise<TelegramSettingsState>;
-  updateHealth(health: TelegramHealth): Promise<TelegramSettingsState>;
+  updateHealth(
+    health: TelegramHealth,
+    expectedConfiguration?: TelegramConfigurationIdentity,
+  ): Promise<TelegramSettingsState>;
 }
 
 export interface NotificationManagerOptions {
@@ -42,6 +46,10 @@ function telegramSelected(settings: TelegramSettingsState, notification: Guardia
   return settings.eventMode === "INHERIT"
     ? notification.browserEnabled
     : settings.events.includes(notification.event);
+}
+
+function configurationIdentity(settings: TelegramSettingsState & { botToken: string }): TelegramConfigurationIdentity {
+  return { destination: settings.destination, botToken: settings.botToken };
 }
 
 export function telegramNotificationText(notification: GuardianNotification): string {
@@ -118,13 +126,14 @@ export class NotificationManager {
     }
 
     if (settings !== undefined && telegramSelected(settings, notification) && configured(settings)) {
+      const identity = configurationIdentity(settings);
       try {
         await this.#telegram.send(settings.botToken, settings.destination, telegramNotificationText(notification));
-        await this.#saveHealth({ status: "HEALTHY", checkedAt: this.#now() });
+        await this.#saveHealth({ status: "HEALTHY", checkedAt: this.#now() }, identity);
       } catch (error) {
         failed = true;
         const code = error instanceof TelegramDeliveryError ? error.code : "API_ERROR";
-        await this.#saveHealth({ status: "ERROR", checkedAt: this.#now(), code });
+        await this.#saveHealth({ status: "ERROR", checkedAt: this.#now(), code }, identity);
       }
     }
 
@@ -136,6 +145,7 @@ export class NotificationManager {
     if (!configured(settings)) {
       throw new TelegramConfigurationError("Configure a Telegram bot token and Chat ID before sending a test notification.");
     }
+    const identity = configurationIdentity(settings);
     try {
       await this.#telegram.send(
         settings.botToken,
@@ -143,20 +153,24 @@ export class NotificationManager {
         "Chat Turn Guardian\nTest notification\nTelegram delivery is configured. No chat content was included.",
       );
       const health: TelegramHealth = { status: "HEALTHY", checkedAt: this.#now() };
-      await this.#saveHealth(health);
-      return redactTelegramSettings({ ...settings, health });
+      const persisted = await this.#saveHealth(health, identity);
+      return redactTelegramSettings(persisted ?? { ...settings, health });
     } catch (error) {
       const code = error instanceof TelegramDeliveryError ? error.code : "API_ERROR";
-      await this.#saveHealth({ status: "ERROR", checkedAt: this.#now(), code });
+      await this.#saveHealth({ status: "ERROR", checkedAt: this.#now(), code }, identity);
       throw error instanceof TelegramDeliveryError ? error : new TelegramDeliveryError("API_ERROR");
     }
   }
 
-  async #saveHealth(health: TelegramHealth): Promise<void> {
+  async #saveHealth(
+    health: TelegramHealth,
+    expectedConfiguration: TelegramConfigurationIdentity,
+  ): Promise<TelegramSettingsState | undefined> {
     try {
-      await this.#settings.updateHealth(health);
+      return await this.#settings.updateHealth(health, expectedConfiguration);
     } catch {
       // Health persistence is observational and must not change delivery or chat automation authority.
+      return undefined;
     }
   }
 }
