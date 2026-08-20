@@ -12,7 +12,7 @@ The extension is deliberately narrow. The chat's own agent, Skill, or workflow r
 - Global timing defaults with per-chat settle/continue/cooldown overrides.
 - Configurable continuation text.
 - Conservative deterministic stop rules plus an optional AI classifier.
-- OpenRouter and generic OpenAI-compatible provider profiles with ordered fallback.
+- OpenRouter, NaraRouter, and generic OpenAI-compatible provider profiles with ordered fallback.
 - Provider credentials stored only in trusted extension storage.
 - Bounded classification context: the immediately relevant user turn plus latest assistant turn, not the full conversation.
 - Exact tab/document/conversation/message binding before any automatic action.
@@ -94,9 +94,10 @@ The current-tab card refreshes automatically during normal use and shows connect
 
 ### 2. Configure a provider when AI classification is needed
 
-In the Side Panel, add either:
+In the Side Panel, add one of:
 
-- **OpenRouter**: profile ID, model, and API key; or
+- **OpenRouter**: profile ID, model, and API key;
+- **NaraRouter**: profile ID, model, and API key using its fixed provider endpoint; or
 - **OpenAI-compatible**: profile ID, HTTPS base URL, model, and API key.
 
 The browser asks for host access to the exact provider origin at configuration time. Provider profiles can be reordered for fallback priority. Removing or replacing the last profile that uses an origin revokes that now-unused origin permission on a best-effort basis.
@@ -209,4 +210,4 @@ npm run package
 
 ## Project boundary
 
-This MVP is not a general browser agent, project manager, GitHub orchestrator, approval authority, or mechanism for bypassing platform safeguards. It does not create chats, move reviewer prompts between chats, require a local daemon/model, or implement Telegram remote control. The planned post-MVP Telegram direction is notification/read-only status first, not arbitrary message injection.
+This MVP is not a general browser agent, project manager, GitHub orchestrator, approval authority, or mechanism for bypassing platform safeguards. It does not create chats, move reviewer prompts between chats, require a local daemon/model, or implement Telegram remote control. Post-MVP Telegram work is notification-only first, with any read-only status surface requiring a bounded design; arbitrary message injection remains out of scope.
