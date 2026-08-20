@@ -31,7 +31,7 @@ interface TelegramResponse {
 }
 
 class TelegramPanelError extends Error {
-  readonly code?: TelegramErrorCode;
+  readonly code: TelegramErrorCode | undefined;
 
   constructor(message: string, code?: TelegramErrorCode) {
     super(message);
