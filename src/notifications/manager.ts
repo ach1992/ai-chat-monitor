@@ -117,7 +117,7 @@ export class NotificationManager {
       failed = true;
     }
 
-    if (settings !== undefined && telegramSelected(settings, notification)) {
+    if (settings !== undefined && telegramSelected(settings, notification) && configured(settings)) {
       try {
         await this.#telegram.send(settings.botToken, settings.destination, telegramNotificationText(notification));
         await this.#saveHealth({ status: "HEALTHY", checkedAt: this.#now() });
@@ -142,7 +142,9 @@ export class NotificationManager {
         settings.destination,
         "Chat Turn Guardian\nTest notification\nTelegram delivery is configured. No chat content was included.",
       );
-      return redactTelegramSettings(await this.#settings.updateHealth({ status: "HEALTHY", checkedAt: this.#now() }));
+      const health: TelegramHealth = { status: "HEALTHY", checkedAt: this.#now() };
+      await this.#saveHealth(health);
+      return redactTelegramSettings({ ...settings, health });
     } catch (error) {
       const code = error instanceof TelegramDeliveryError ? error.code : "API_ERROR";
       await this.#saveHealth({ status: "ERROR", checkedAt: this.#now(), code });
