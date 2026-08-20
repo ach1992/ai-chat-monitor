@@ -47,6 +47,35 @@ function e<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, te
   return element;
 }
 
+function relocatePrivacyDisclosure(): void {
+  const existing = document.querySelector<HTMLElement>(".privacy-disclosure");
+  const footer = document.querySelector<HTMLElement>(".footer-note");
+  if (existing === null || footer === null) return;
+
+  let details: HTMLDetailsElement;
+  if (existing instanceof HTMLDetailsElement) {
+    details = existing;
+  } else {
+    details = e("details", "panel-section disclosure privacy-disclosure");
+    details.setAttribute("aria-labelledby", "privacy-disclosure-heading");
+    const heading = existing.querySelector<HTMLElement>(".section-heading");
+    const summary = e("summary", "section-heading");
+    if (heading !== null) {
+      while (heading.firstChild !== null) summary.append(heading.firstChild);
+    } else {
+      summary.append(e("h2", undefined, "Privacy & data"));
+    }
+    details.append(summary);
+    for (const child of Array.from(existing.children)) {
+      if (child !== heading) details.append(child);
+    }
+    existing.replaceWith(details);
+  }
+
+  details.open = false;
+  footer.before(details);
+}
+
 function buildSection(): {
   root: HTMLDetailsElement;
   form: HTMLFormElement;
@@ -144,10 +173,14 @@ function buildSection(): {
   help.textContent = "Setup: create a bot with @BotFather, start/contact the bot or add it to the destination so it can send there, then enter the token and Chat ID here. The token stays in trusted extension storage. Telegram v1 receives only bounded Guardian notification metadata (event title/reason and a bounded conversation identifier when available); it never sends full ChatGPT messages and accepts no inbound commands.";
 
   const actions = e("div", "wide form-actions telegram-actions");
+  actions.style.gap = "0.5rem";
+  actions.style.flexWrap = "wrap";
   const test = e("button", "secondary", "Test notification");
   test.type = "button";
+  test.style.flex = "1 1 8rem";
   const save = e("button", undefined, "Save Telegram settings");
   save.type = "submit";
+  save.style.flex = "1 1 10rem";
   actions.append(test, save);
 
   form.append(enabledLabel, destinationLabel, tokenLabel, modeLabel, customEvents, help, actions);
@@ -160,6 +193,7 @@ const providersHeading = document.querySelector("#providers-heading");
 const providersSection = providersHeading?.closest("details");
 if (providersSection !== null && providersSection !== undefined) providersSection.before(ui.root);
 else document.querySelector(".footer-note")?.before(ui.root);
+relocatePrivacyDisclosure();
 
 let busy = false;
 let dirty = false;
