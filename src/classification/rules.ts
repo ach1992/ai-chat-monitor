@@ -28,6 +28,11 @@ const ASSISTANT_HOLD_RULES: readonly HoldRule[] = [
     pattern: /\bPROJECT_COMPLETE\b|\b(?:the )?(?:task|project|requested work) is (?:now )?(?:complete|completed|finished)\b/i,
   },
   {
+    code: "SAFETY_BOUNDARY",
+    reason: "The assistant explicitly identifies a safety or policy boundary.",
+    pattern: /\bSAFETY_BOUNDARY\b|\b(?:cannot|can't) proceed (?:safely|without (?:authorization|verification|confirmation))\b/i,
+  },
+  {
     code: "RATE_LIMIT",
     reason: "The assistant reports a provider or platform rate/usage limit.",
     pattern: /\bRATE_LIMIT\b|\brate limit(?:ed)?\b|\btoo many requests\b|\busage limit\b/i,
@@ -36,11 +41,6 @@ const ASSISTANT_HOLD_RULES: readonly HoldRule[] = [
     code: "PLATFORM_ERROR",
     reason: "The assistant reports a platform or network error that requires a hold.",
     pattern: /\bPLATFORM_ERROR\b|\bnetwork error\b|\bsession expired\b|\bsomething went wrong\b/i,
-  },
-  {
-    code: "SAFETY_BOUNDARY",
-    reason: "The assistant explicitly identifies a safety or policy boundary.",
-    pattern: /\bSAFETY_BOUNDARY\b|\b(?:cannot|can't) proceed (?:safely|without (?:authorization|verification|confirmation))\b/i,
   },
 ];
 

@@ -446,6 +446,31 @@ test("a terminal CONTINUE cannot send through a visible recoverable error surfac
   assert.equal(harness.coordinator.status(7).phase, "HOLD");
 });
 
+test("a hard safety boundary outranks a matching recoverable terminal status", async () => {
+  const classifier = new ConservativeStopClassifier();
+  const scenarios = [
+    ["I hit a rate limit and cannot proceed safely without authorization.", "RATE_LIMIT"],
+    ["A network error occurred and I cannot proceed without authorization.", "PLATFORM_ERROR"],
+  ];
+
+  for (const [prose, decision] of scenarios) {
+    const harness = makeHarness({
+      deterministic: (input) => classifier.classifyDeterministic(input),
+    });
+    harness.setSession(makeSession({
+      assistant: `${prose}\n${guardianStatus(decision)}`,
+    }));
+
+    await reachPostClassification(harness);
+    harness.clock.advance(20);
+    await flushAsync();
+
+    assert.equal(harness.sendCalls.length, 0, decision);
+    assert.equal(harness.coordinator.status(7).phase, "HOLD", decision);
+    assert.equal(harness.coordinator.status(7).lastDecision.reasonCode, "SAFETY_BOUNDARY", decision);
+  }
+});
+
 test("a recovery or unsure response is sent only once until human interaction changes", async () => {
   for (const decision of ["PLATFORM_ERROR", "RATE_LIMIT", "UNSURE"]) {
     const harness = makeHarness({ deterministic: () => undefined });
