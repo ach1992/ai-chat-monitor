@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.4 — 2026-08-22
+
+- Fixed the remaining background/inactive-tab guarded-send false positive caused by Chromium timer throttling hiding the transient generation/Stop state.
+- Post-send verification now accepts either the observed generation state or a genuinely fresh assistant turn that follows the exact intended Guardian user turn in the same conversation/route.
+- Kept trusted human-state checks active during verification so human interaction still invalidates pending automation.
+- Preserved fail-closed and no-blind-retry behavior when neither positive send signal can be proven.
+- Added a focused regression that completes the assistant response immediately without ever exposing a Stop control, matching the live background-tab failure mode.
+
+Tracking: [PR #66](https://github.com/ach1992/chat-turn-guardian/pull/66).
+
 ## 1.2.3 — 2026-08-22
 
 - Fixed a live false-positive guarded-send error that could occur when ChatGPT completed a Guardian-triggered response too quickly for the generation/Stop state to be sampled.
