@@ -32,7 +32,7 @@
   "content_scripts": [
     {
       "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
-      "js": ["content/adapter.js", "content/index.js"],
+      "js": ["content/adapter.js", "content/send-verification.js", "content/index.js"],
       "run_at": "document_idle"
     }
   ]
