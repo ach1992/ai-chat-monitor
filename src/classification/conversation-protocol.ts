@@ -26,27 +26,39 @@ const ALLOWED_DECISIONS = new Set<ConversationProtocolDecision>([
 export const CONVERSATION_PROTOCOL_VERSION = 1;
 export const GUARDIAN_STATUS_PREFIX = "CHAT_TURN_GUARDIAN_STATUS_V1=";
 
+export const CONVERSATION_PROTOCOL_CONTINUE_RESPONSE =
+  "All right. Continue and complete the project. Do not stop unless you genuinely need human approval, a material decision, missing information or credentials, or a human-only action.";
+export const CONVERSATION_PROTOCOL_RECOVERY_RESPONSE =
+  "Check again to see whether the blocker has been resolved. If it has, continue and complete the project. Do not stop unless you genuinely need human approval, a material decision, missing information or credentials, or a human-only action.";
+export const CONVERSATION_PROTOCOL_UNSURE_RESPONSE =
+  "Check the work state again and return the status record once more.";
+
 export const DEFAULT_CONVERSATION_PROTOCOL_PROMPT = [
-  "[Chat Turn Guardian — one-time conversation protocol]",
+  "[Chat Turn Guardian — Conversation Status Protocol]",
   "",
-  "ACTIVATION",
-  "For this reply only, do not continue. Classify the work state before this message, remember this protocol for this conversation, and return only the status record.",
+  "Purpose",
+  "This protocol must not change, restart, reframe, summarize, reprioritize, or continue the current task or project.",
   "",
-  "FUTURE REPLIES",
-  "Answer normally, then end with exactly one status record: one line, no code fence, no text after it.",
-  "",
-  "STATUS RECORD",
+  "This reply",
+  "- Remember the protocol for this conversation.",
+  "- Classify the work state immediately before this message.",
+  "- Reply with exactly one line and nothing else:",
   'CHAT_TURN_GUARDIAN_STATUS_V1={"decision":"<VALUE>"}',
   "",
-  "VALUES",
-  "CONTINUE — work remains and no human approval, decision, information, credentials, or human-only action is needed.",
-  "HOLD_APPROVAL — approval is needed.",
-  "HOLD_DECISION — a material decision is needed.",
-  "HOLD_HUMAN_OPERATION — information, credentials, or a human-only action is needed.",
-  "COMPLETE — requested work is complete.",
-  "PLATFORM_ERROR — the platform blocks progress.",
-  "RATE_LIMIT — a usage or rate limit blocks progress.",
-  "UNSURE — the state cannot be classified safely.",
+  "Future replies",
+  "- Answer normally without changing the project's direction, scope, priority, or plan.",
+  "- End with exactly one status record in the same format.",
+  "- Add nothing after it.",
+  "",
+  "Values",
+  "- CONTINUE — Work remains and can proceed autonomously.",
+  "- HOLD_APPROVAL — Human approval is required.",
+  "- HOLD_DECISION — A material human decision is required.",
+  "- HOLD_HUMAN_OPERATION — Human input, credentials, or action is required.",
+  "- COMPLETE — No work remains.",
+  "- PLATFORM_ERROR — The platform blocks progress.",
+  "- RATE_LIMIT — A rate limit blocks progress.",
+  "- UNSURE — The state is unclear.",
 ].join("\n");
 
 function parseStatusJson(raw: string): ConversationProtocolStatus | undefined {
@@ -66,6 +78,26 @@ function trailingStatus(raw: string): ConversationProtocolStatus | undefined {
   if (fenceCount % 2 !== 0) return undefined;
   const json = normalized.slice(markerIndex + GUARDIAN_STATUS_PREFIX.length).trim();
   return parseStatusJson(json);
+}
+
+export function conversationProtocolDecision(raw: string): ConversationProtocolDecision | undefined {
+  return trailingStatus(raw)?.decision;
+}
+
+export function conversationProtocolResponseText(
+  decision: ConversationProtocolDecision,
+): string | undefined {
+  switch (decision) {
+    case "CONTINUE":
+      return CONVERSATION_PROTOCOL_CONTINUE_RESPONSE;
+    case "PLATFORM_ERROR":
+    case "RATE_LIMIT":
+      return CONVERSATION_PROTOCOL_RECOVERY_RESPONSE;
+    case "UNSURE":
+      return CONVERSATION_PROTOCOL_UNSURE_RESPONSE;
+    default:
+      return undefined;
+  }
 }
 
 export function hasValidConversationProtocolStatus(raw: string): boolean {

@@ -2,6 +2,8 @@ import type { ClassificationResult } from "../classification/types.js";
 import {
   CONVERSATION_PROTOCOL_VERSION,
   DEFAULT_CONVERSATION_PROTOCOL_PROMPT,
+  conversationProtocolDecision,
+  conversationProtocolResponseText,
   hasValidConversationProtocolStatus,
   parseConversationProtocolStatus,
   stripConversationProtocolStatus,
@@ -78,6 +80,23 @@ function optionalEqual<T>(left: T | undefined, right: T | undefined): boolean {
 
 function cloneStatus(status: AutomationRuntimeStatus): AutomationRuntimeStatus {
   return structuredClone(status);
+}
+
+function statusResponseTextForClassification(classification: ClassificationResult): string | undefined {
+  if (classification.source !== "CONVERSATION_PROTOCOL") return undefined;
+  if (classification.decision === "CONTINUE" && classification.reasonCode === "NEEDLESS_TURN_BOUNDARY") {
+    return conversationProtocolResponseText("CONTINUE");
+  }
+  if (classification.decision === "HOLD" && classification.reasonCode === "PLATFORM_ERROR") {
+    return conversationProtocolResponseText("PLATFORM_ERROR");
+  }
+  if (classification.decision === "HOLD" && classification.reasonCode === "RATE_LIMIT") {
+    return conversationProtocolResponseText("RATE_LIMIT");
+  }
+  if (classification.decision === "UNSURE" && classification.reasonCode === "AMBIGUOUS") {
+    return conversationProtocolResponseText("UNSURE");
+  }
+  return undefined;
 }
 
 function suppressedAssistantMatches(
@@ -373,11 +392,17 @@ export class AutomationCoordinator {
     turns.push({ role: "assistant", content: stripConversationProtocolStatus(assistantText) });
 
     let classification: ClassificationResult;
+    let protocolDecision = conversationProtocolDecision(assistantText);
+    let statusResponseText: string | undefined;
     const deterministic = this.#classifier.classifyDeterministic?.({ turns });
     if (deterministic?.decision === "HOLD") {
       classification = deterministic;
+      protocolDecision = undefined;
     } else if (hasValidConversationProtocolStatus(assistantText)) {
       classification = parseConversationProtocolStatus(assistantText);
+      if (protocolDecision !== undefined) {
+        statusResponseText = conversationProtocolResponseText(protocolDecision);
+      }
     } else if (deterministic?.decision === "CONTINUE") {
       classification = deterministic;
     } else if (
@@ -410,6 +435,29 @@ export class AutomationCoordinator {
     const postClassification = this.#revalidateEvidence(evidence, true);
     if (postClassification === undefined) {
       this.#staleRuntime(currentRuntime, evidence, "Classification result arrived after the bound evidence changed.");
+      return;
+    }
+
+    if (
+      statusResponseText !== undefined &&
+      protocolDecision !== "CONTINUE" &&
+      this.#journal.hasVerifiedStatusResponseSince(
+        postClassification.conversationId,
+        statusResponseText,
+        postClassification.session.lastUserInteractionAt,
+      )
+    ) {
+      statusResponseText = undefined;
+    }
+
+    if (statusResponseText !== undefined && postClassification.policy.mode === "AUTO") {
+      this.#startConversationStatusResponse(
+        postClassification,
+        currentRuntime,
+        token,
+        classification,
+        statusResponseText,
+      );
       return;
     }
 
@@ -486,6 +534,50 @@ export class AutomationCoordinator {
       currentRuntime.timer = undefined;
       void this.#attemptGuardedSend(envelope, token);
     }, postClassification.policy.timing.continueDelayMs);
+  }
+
+  #startConversationStatusResponse(
+    evidence: CandidateEvidence,
+    runtime: RuntimeEntry,
+    token: number,
+    classification: ClassificationResult,
+    responseText: string,
+  ): void {
+    const createdAt = this.#clock.now();
+    const envelope: AutomationDecisionEnvelope = {
+      action: "STATUS_RESPONSE",
+      decisionId: this.#createDecisionId(),
+      tabId: evidence.session.tabId,
+      documentId: evidence.session.documentId,
+      agentInstanceId: evidence.session.agentInstanceId,
+      pageEpoch: evidence.session.pageEpoch,
+      conversationId: evidence.conversationId,
+      routeKey: evidence.session.routeKey,
+      assistantFingerprint: evidence.fingerprint,
+      ...(evidence.domMessageId === undefined ? {} : { assistantDomMessageId: evidence.domMessageId }),
+      ...(evidence.session.lastUserInteractionAt === undefined ? {} : { lastUserInteractionAt: evidence.session.lastUserInteractionAt }),
+      policyRevision: evidence.policy.revision,
+      evidenceKey: evidence.evidenceKey,
+      classification,
+      continuationText: responseText,
+      createdAt,
+      expiresAt: createdAt + Math.max(DEFAULT_DECISION_TTL_MS, evidence.policy.timing.continueDelayMs + 15_000),
+    };
+
+    this.#setStatus(runtime, {
+      mode: "AUTO",
+      phase: "WAITING_TO_CONTINUE",
+      conversationId: envelope.conversationId,
+      policyRevision: envelope.policyRevision,
+      assistantFingerprint: envelope.assistantFingerprint,
+      lastDecision: classification,
+      decisionId: envelope.decisionId,
+      reason: "Waiting before the guarded conversation-status response.",
+    });
+    runtime.timer = this.#clock.setTimeout(() => {
+      runtime.timer = undefined;
+      void this.#attemptGuardedSend(envelope, token);
+    }, evidence.policy.timing.continueDelayMs);
   }
 
   #startConversationProtocolBootstrap(evidence: CandidateEvidence, runtime: RuntimeEntry, token: number): void {
@@ -752,7 +844,9 @@ export class AutomationCoordinator {
       lastDecision: envelope.classification,
       decisionId: envelope.decisionId,
       cooldownUntil,
-      reason: "Continuation send was verified; cooldown is active.",
+      reason: envelope.action === "STATUS_RESPONSE"
+        ? "Conversation-status response was verified; cooldown is active."
+        : "Continuation send was verified; cooldown is active.",
     });
     runtime.timer = this.#clock.setTimeout(() => {
       runtime.timer = undefined;
@@ -833,11 +927,15 @@ export class AutomationCoordinator {
   #revalidateEnvelope(envelope: AutomationDecisionEnvelope): CandidateEvidence | undefined {
     if (this.#clock.now() > envelope.expiresAt) return undefined;
     if (envelope.action === "CONTINUATION" && envelope.classification.decision !== "CONTINUE") return undefined;
+    if (
+      envelope.action === "STATUS_RESPONSE" &&
+      statusResponseTextForClassification(envelope.classification) !== envelope.continuationText
+    ) return undefined;
     const fresh = this.#sessions.getTab(envelope.tabId);
     if (
       fresh === undefined ||
       fresh.conversationId !== envelope.conversationId ||
-      !this.#candidateUiIsSafe(fresh, envelope.action === "PROTOCOL_BOOTSTRAP")
+      !this.#candidateUiIsSafe(fresh, envelope.action !== "CONTINUATION")
     ) return undefined;
     if (
       fresh.documentId !== envelope.documentId ||

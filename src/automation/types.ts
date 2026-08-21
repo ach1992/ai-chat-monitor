@@ -43,7 +43,7 @@ export type AutomationRuntimePhase =
   | "PAUSED";
 
 export interface AutomationDecisionEnvelope {
-  action: "CONTINUATION" | "PROTOCOL_BOOTSTRAP";
+  action: "CONTINUATION" | "PROTOCOL_BOOTSTRAP" | "STATUS_RESPONSE";
   conversationProtocolVersion?: number;
   decisionId: string;
   tabId: number;

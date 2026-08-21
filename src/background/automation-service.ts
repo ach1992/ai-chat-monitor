@@ -377,7 +377,7 @@ export class AutomationService {
       freshPolicy.revision !== envelope.policyRevision ||
       freshPolicy.mode !== "AUTO" ||
       freshPolicy.emergencyPaused ||
-      freshPolicy.continuationText !== envelope.continuationText
+      (envelope.action === "CONTINUATION" && freshPolicy.continuationText !== envelope.continuationText)
     ) {
       return {
         decisionId: envelope.decisionId,

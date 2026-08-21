@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { AutomationCoordinator } from "../dist/automation/coordinator.js";
+import {
+  CONVERSATION_PROTOCOL_CONTINUE_RESPONSE,
+  CONVERSATION_PROTOCOL_RECOVERY_RESPONSE,
+  CONVERSATION_PROTOCOL_UNSURE_RESPONSE,
+} from "../dist/classification/conversation-protocol.js";
 
 const CONTINUE = {
   decision: "CONTINUE",
@@ -128,6 +133,15 @@ function makeHarness({ mode = "AUTO", classifier, deterministic, sender } = {}) 
         decision.envelope.conversationProtocolVersion === version &&
         decision.envelope.continuationText === latestUserText &&
         (lastUserInteractionAt === undefined || decision.envelope.createdAt > lastUserInteractionAt),
+      );
+    },
+    hasVerifiedStatusResponseSince(conversationId, continuationText, since) {
+      return [...decisions.values()].some((decision) =>
+        decision.state === "VERIFIED" &&
+        decision.envelope.conversationId === conversationId &&
+        decision.envelope.action === "STATUS_RESPONSE" &&
+        decision.envelope.continuationText === continuationText &&
+        (since === undefined || decision.envelope.createdAt > since),
       );
     },
     async releaseNotStarted(decisionId) {
@@ -333,7 +347,8 @@ test("an ambiguous AUTO stop installs the protocol and uses its activation statu
   await flushAsync();
 
   assert.equal(harness.sendCalls.length, 2);
-  assert.equal(harness.sendCalls[1].action, "CONTINUATION");
+  assert.equal(harness.sendCalls[1].action, "STATUS_RESPONSE");
+  assert.equal(harness.sendCalls[1].continuationText, CONVERSATION_PROTOCOL_CONTINUE_RESPONSE);
   assert.equal(harness.sendCalls[1].assistantFingerprint, "b".repeat(64));
 });
 
@@ -352,7 +367,64 @@ test("a valid terminal status is classified directly without a self-check", asyn
   harness.clock.advance(20);
   await flushAsync();
   assert.equal(harness.sendCalls.length, 1);
-  assert.equal(harness.sendCalls[0].action, "CONTINUATION");
+  assert.equal(harness.sendCalls[0].action, "STATUS_RESPONSE");
+  assert.equal(harness.sendCalls[0].continuationText, CONVERSATION_PROTOCOL_CONTINUE_RESPONSE);
+});
+
+test("each terminal protocol status sends only its configured response", async () => {
+  const scenarios = [
+    ["CONTINUE", CONVERSATION_PROTOCOL_CONTINUE_RESPONSE, "COOLDOWN"],
+    ["HOLD_APPROVAL", undefined, "HOLD"],
+    ["HOLD_DECISION", undefined, "HOLD"],
+    ["HOLD_HUMAN_OPERATION", undefined, "HOLD"],
+    ["COMPLETE", undefined, "HOLD"],
+    ["PLATFORM_ERROR", CONVERSATION_PROTOCOL_RECOVERY_RESPONSE, "COOLDOWN"],
+    ["RATE_LIMIT", CONVERSATION_PROTOCOL_RECOVERY_RESPONSE, "COOLDOWN"],
+    ["UNSURE", CONVERSATION_PROTOCOL_UNSURE_RESPONSE, "COOLDOWN"],
+  ];
+
+  for (const [decision, expectedText, expectedPhase] of scenarios) {
+    const harness = makeHarness({ deterministic: () => undefined });
+    harness.setSession(makeSession({ assistant: guardianStatus(decision) }));
+    await reachPostClassification(harness);
+    harness.clock.advance(20);
+    await flushAsync();
+
+    assert.equal(harness.sendCalls.length, expectedText === undefined ? 0 : 1, decision);
+    if (expectedText !== undefined) {
+      assert.equal(harness.sendCalls[0].action, "STATUS_RESPONSE", decision);
+      assert.equal(harness.sendCalls[0].continuationText, expectedText, decision);
+    }
+    assert.equal(harness.coordinator.status(7).phase, expectedPhase, decision);
+  }
+});
+
+test("a recovery or unsure response is sent only once until human interaction changes", async () => {
+  for (const decision of ["PLATFORM_ERROR", "RATE_LIMIT", "UNSURE"]) {
+    const harness = makeHarness({ deterministic: () => undefined });
+    harness.setSession(makeSession({ assistant: guardianStatus(decision) }));
+    await reachPostClassification(harness);
+    harness.clock.advance(20);
+    await flushAsync();
+    assert.equal(harness.sendCalls.length, 1, decision);
+
+    harness.setSession(makeSession({
+      user: harness.sendCalls[0].continuationText,
+      userMessageId: `status-response-user-${decision}`,
+      assistant: guardianStatus(decision),
+      assistantMessageId: `status-response-assistant-${decision}`,
+      fingerprint: "b".repeat(64),
+    }));
+    harness.clock.advance(30);
+    await flushAsync();
+    harness.clock.advance(10);
+    await flushAsync();
+    harness.clock.advance(20);
+    await flushAsync();
+
+    assert.equal(harness.sendCalls.length, 1, decision);
+    assert.equal(harness.coordinator.status(7).phase, decision === "UNSURE" ? "UNSURE" : "HOLD", decision);
+  }
 });
 
 test("a valid terminal status does not call an optional provider when local rules are unavailable", async () => {
@@ -447,7 +519,7 @@ test("a terminal status on a continued response avoids another protocol bootstra
   await flushAsync();
 
   assert.equal(harness.sendCalls.length, 3);
-  assert.equal(harness.sendCalls[2].action, "CONTINUATION");
+  assert.equal(harness.sendCalls[2].action, "STATUS_RESPONSE");
   assert.equal(harness.coordinator.status(7).phase, "COOLDOWN");
 });
 
@@ -457,7 +529,7 @@ test("a later ordinary response that forgets the marker receives one fallback se
   await reachPostClassification(harness);
   harness.clock.advance(20);
   await flushAsync();
-  assert.equal(harness.sendCalls[0].action, "CONTINUATION");
+  assert.equal(harness.sendCalls[0].action, "STATUS_RESPONSE");
 
   harness.setSession(makeSession({
     user: harness.sendCalls[0].continuationText,
@@ -495,7 +567,7 @@ test("a human interaction cancels old authority but its new marked response rema
   await flushAsync();
 
   assert.equal(harness.sendCalls.length, 1);
-  assert.equal(harness.sendCalls[0].action, "CONTINUATION");
+  assert.equal(harness.sendCalls[0].action, "STATUS_RESPONSE");
   assert.equal(harness.coordinator.status(7).phase, "COOLDOWN");
 });
 

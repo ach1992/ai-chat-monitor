@@ -38,7 +38,7 @@ namespace GuardianContent {
   }
 
   export interface GuardedContinuationExpectation {
-    purpose?: "CONTINUATION" | "PROTOCOL_BOOTSTRAP";
+    purpose?: "CONTINUATION" | "PROTOCOL_BOOTSTRAP" | "STATUS_RESPONSE";
     decisionId: string;
     conversationId: string;
     routeKey: string;
@@ -245,7 +245,7 @@ namespace GuardianContent {
     purpose: GuardedContinuationExpectation["purpose"],
   ): boolean {
     if (reasons.length === 0) return true;
-    return purpose === "PROTOCOL_BOOTSTRAP" && reasons.every((reason) =>
+    return (purpose === "PROTOCOL_BOOTSTRAP" || purpose === "STATUS_RESPONSE") && reasons.every((reason) =>
       reason === "ERROR" || reason === "NETWORK" || reason === "RATE_LIMIT",
     );
   }
@@ -275,7 +275,13 @@ namespace GuardianContent {
         const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
         if (setter !== undefined) setter.call(composer, text); else composer.value = text;
       } else if (composer.isContentEditable) {
-        composer.textContent = text;
+        const lines = text.replace(/\r\n?/g, "\n").split("\n");
+        const fragment = composer.ownerDocument.createDocumentFragment();
+        for (const [index, line] of lines.entries()) {
+          if (index > 0) fragment.append(composer.ownerDocument.createElement("br"));
+          fragment.append(composer.ownerDocument.createTextNode(line));
+        }
+        composer.replaceChildren(fragment);
       } else {
         return false;
       }

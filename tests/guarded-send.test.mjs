@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 import { webcrypto } from "node:crypto";
+import { DEFAULT_CONVERSATION_PROTOCOL_PROMPT } from "../dist/classification/conversation-protocol.js";
 
 class FakeNode {
   static DOCUMENT_POSITION_FOLLOWING = 4;
@@ -16,14 +17,28 @@ class FakeNode {
 }
 
 class FakeElement extends FakeNode {
-  constructor({ textContent = "", attrs = {}, value = "", order = 0, onClick } = {}) {
+  constructor({ textContent = "", attrs = {}, value = "", order = 0, onClick, tagName = "DIV" } = {}) {
     super();
     this.textContent = textContent;
+    this.childNodes = [];
     this.attrs = new Map(Object.entries(attrs));
     this.value = value;
     this.order = order;
     this.onClick = onClick;
+    this.tagName = tagName;
     this.isContentEditable = false;
+  }
+
+  get innerText() {
+    if (this.childNodes.length === 0) return this.textContent;
+    return this.childNodes.map((node) => node.tagName === "BR" ? "\n" : node.textContent).join("");
+  }
+
+  replaceChildren(...nodes) {
+    this.childNodes = nodes.length === 1 && Array.isArray(nodes[0]?.childNodes)
+      ? [...nodes[0].childNodes]
+      : [...nodes];
+    this.textContent = this.childNodes.map((node) => node.textContent ?? "").join("");
   }
 
   getAttribute(name) { return this.attrs.get(name) ?? null; }
@@ -76,9 +91,21 @@ class FakeDocument {
     this.documentElement = new FakeElement();
   }
 
-  set(selector, elements) { this.entries.set(selector, elements); }
+  set(selector, elements) {
+    for (const element of elements) element.ownerDocument = this;
+    this.entries.set(selector, elements);
+  }
   querySelector(selector) { return this.entries.get(selector)?.[0] ?? null; }
   querySelectorAll(selector) { return this.entries.get(selector) ?? []; }
+  createDocumentFragment() {
+    return { childNodes: [], append(node) { this.childNodes.push(node); } };
+  }
+  createElement(tagName) {
+    const element = new FakeElement({ tagName: tagName.toUpperCase() });
+    element.ownerDocument = this;
+    return element;
+  }
+  createTextNode(textContent) { return { textContent, ownerDocument: this }; }
 }
 
 async function sha256(value) {
@@ -111,7 +138,7 @@ async function loadAdapter(crypto = webcrypto) {
   return context.GuardianContent;
 }
 
-function createSafePage({ onSend, sendInitiallyDisabled = false } = {}) {
+function createSafePage({ onSend, sendInitiallyDisabled = false, contentEditable = false } = {}) {
   const document = new FakeDocument();
   const userTurn = new FakeElement({ attrs: { "data-testid": "conversation-turn-user-1" } });
   const assistantTurn = new FakeElement({ attrs: { "data-testid": "conversation-turn-assistant-1" } });
@@ -123,7 +150,10 @@ function createSafePage({ onSend, sendInitiallyDisabled = false } = {}) {
   });
   user.parent = userTurn;
   assistant.parent = assistantTurn;
-  const composer = new FakeTextAreaElement({ value: "", order: 3 });
+  const composer = contentEditable
+    ? new FakeElement({ textContent: "", order: 3 })
+    : new FakeTextAreaElement({ value: "", order: 3 });
+  composer.isContentEditable = contentEditable;
   const send = new FakeButtonElement({
     attrs: { "data-testid": "send-button" },
     order: 4,
@@ -221,6 +251,45 @@ test("guarded send can activate a send control that is disabled while the compos
   assert.equal(result.status, "VERIFIED");
   assert.equal(result.observedConversationId, "chat-1");
   assert.equal(result.observedAssistantFingerprint, assistantFingerprint);
+});
+
+test("guarded send preserves the exact multiline protocol layout in a contenteditable composer", async () => {
+  const GuardianContent = await loadAdapter();
+  let sentText;
+  const page = createSafePage({
+    contentEditable: true,
+    onSend: ({ document, composer }) => {
+      sentText = composer.innerText;
+      const sentTurn = new FakeElement({ attrs: { "data-testid": "conversation-turn-user-2" } });
+      const sentUser = new FakeElement({ textContent: sentText, order: 5 });
+      sentUser.parent = sentTurn;
+      document.set('[data-message-author-role="user"]', [
+        ...document.querySelectorAll('[data-message-author-role="user"]'),
+        sentUser,
+      ]);
+      document.set('button[data-testid="stop-button"]', [
+        new FakeButtonElement({ attrs: { "data-testid": "stop-button" }, order: 6 }),
+      ]);
+    },
+  });
+  const assistantFingerprint = await sha256(page.assistant.textContent);
+  const adapter = new GuardianContent.BrowserChatGPTAdapter(page.document, { pathname: "/c/chat-1" });
+
+  const result = await adapter.guardedSend({
+    purpose: "PROTOCOL_BOOTSTRAP",
+    decisionId: "decision-multiline-protocol",
+    conversationId: "chat-1",
+    routeKey: "/c/chat-1",
+    assistantFingerprint,
+    assistantDomMessageId: "assistant-1",
+    continuationText: DEFAULT_CONVERSATION_PROTOCOL_PROMPT,
+  });
+
+  assert.equal(result.status, "VERIFIED");
+  assert.equal(sentText, DEFAULT_CONVERSATION_PROTOCOL_PROMPT);
+  assert.match(sentText, /\n\nPurpose\n/);
+  assert.match(sentText, /\n\nFuture replies\n/);
+  assert.match(sentText, /\n\nValues\n/);
 });
 
 test("protocol bootstrap may use a safe composer during a recoverable delivery error without clicking Retry", async () => {

@@ -536,3 +536,16 @@ CHAT_TURN_GUARDIAN_STATUS_V1={"decision":"<VALUE>"}
 The parser rejects duplicate/non-terminal markers, duplicate JSON members, detected code-block wrappers, extra JSON keys, unknown values, and trailing text. The adapter preserves rendered `innerText` boundaries while the parser tolerates a unique flattened DOM suffix. The marker is removed before deterministic body classification and progress-signature computation. Deterministic HOLD remains authoritative over a contradictory `CONTINUE` marker. The durable write journal is negative authority only: it prevents replay and does not grant a future send. It compacts records invalidated by a fresh human-interaction epoch and fails closed at a 4,096-record ceiling.
 
 See [`CONVERSATION_STATUS_PROTOCOL.md`](CONVERSATION_STATUS_PROTOCOL.md) for the complete contract, fallback semantics, and acceptance coverage.
+
+## 16. Status-specific guarded responses (Issue #57 / v1.2.1)
+
+v1.2.1 keeps the status-first classification order from Section 15 and separates protocol responses from the configurable legacy continuation path:
+
+- `CONTINUE` selects the fixed autonomous continuation response;
+- `PLATFORM_ERROR` and `RATE_LIMIT` select the fixed blocker recheck/recovery response;
+- `UNSURE` selects the fixed reclassification response;
+- `HOLD_APPROVAL`, `HOLD_DECISION`, `HOLD_HUMAN_OPERATION`, and `COMPLETE` select no automatic mutation.
+
+These writes use the explicit `STATUS_RESPONSE` action. The coordinator validates the exact response text against the parsed protocol classification, and the background/content layers preserve all existing identity, policy, ownership, human-precedence, composer, write-verification, stagnation, and hard-fuse gates. Recovery and uncertainty responses are journaled and suppressed after one verified send until a new human-interaction epoch.
+
+The protocol bootstrap remains a separate `PROTOCOL_BOOTSTRAP` action. For contenteditable composers, the adapter inserts each logical line as text separated by explicit `br` nodes, preserving readable section boundaries without using HTML string interpolation.

@@ -2,11 +2,11 @@
 
 Chat Turn Guardian is a standalone Chromium Manifest V3 extension for safely supervising explicitly selected ChatGPT Web conversations. It reads a strict machine-readable status from the end of the latest assistant response when available, uses conservative local rules for obvious cases, and sends a bounded same-conversation self-check only when the status is missing and the stop remains ambiguous.
 
-**Current release: v1.2.0.** This release delivers the status-first conversation protocol from Issue #56. The extension has **not** been submitted to or published on the Chrome Web Store.
+**Current release: v1.2.1.** This patch keeps the status-first protocol from Issue #56 and adds the formatted bootstrap and status-specific response behavior from Issue #57. The extension has **not** been submitted to or published on the Chrome Web Store.
 
 The chat's own agent, Skill, or workflow remains responsible for **what work should happen**. Guardian only decides whether another ordinary turn may be requested without genuine human involvement.
 
-## v1.2.0 capabilities
+## v1.2.1 capabilities
 
 - Independent supervision of multiple ChatGPT tabs/conversations.
 - Current-tab ON/OFF control with bounded reconnect/recovery.
@@ -16,6 +16,8 @@ The chat's own agent, Skill, or workflow remains responsible for **what work sho
 - Strict terminal status protocol: normal assistant replies may end with `CHAT_TURN_GUARDIAN_STATUS_V1={"decision":"..."}` so Guardian can decide without another chat turn.
 - Conservative local rules handle obvious HOLD or explicitly pre-authorized continuation boundaries without unnecessary self-check traffic.
 - When an ambiguous response has no valid terminal status, one structured same-conversation self-check also asks the chat to remember the terminal-status contract for later replies.
+- The bootstrap is inserted with stable section and line boundaries and explicitly cannot redirect, restart, reframe, reprioritize, summarize, or continue the current task.
+- Terminal `CONTINUE`, recoverable platform/rate-limit, and `UNSURE` states receive distinct bounded responses; HOLD and `COMPLETE` states send nothing.
 - A missing or malformed status in the self-check response fails closed instead of recursively generating another self-check.
 - Recoverable red delivery errors may receive one guarded self-check only when the ordinary composer is safe; Guardian never clicks or retries ChatGPT `Retry` automatically.
 - OpenRouter, NaraRouter, and generic OpenAI-compatible provider profiles with ordered fallback.
@@ -39,7 +41,7 @@ The chat's own agent, Skill, or workflow remains responsible for **what work sho
 
 Chat Turn Guardian is fail-closed by design:
 
-- `UNSURE`, malformed/missing protocol output after a self-check, provider failure, timeout, rate limit, blocking UI, stale state, or storage uncertainty never becomes an automatic continuation.
+- `UNSURE`, malformed/missing protocol output after a self-check, provider failure, timeout, rate limit, blocking UI, stale state, or storage uncertainty never becomes continuation authority. The protocol's bounded `UNSURE` or recoverable-blocker response may still be sent only through the guarded path defined below.
 - AI providers return only advisory `CONTINUE` / `HOLD` / `UNSURE` results. They have no DOM/tab/browser mutation authority.
 - Only the guarded ChatGPT content adapter can perform the narrow configured continuation action.
 - Human interaction always has precedence.
@@ -69,9 +71,9 @@ Durable references:
 
 ## Install from source / validated ZIP
 
-For v1.2.0, download these files from the GitHub Release **Assets** section:
+For v1.2.1, download these files from the GitHub Release **Assets** section:
 
-- `chat-turn-guardian-1.2.0.zip` — the built extension to install;
+- `chat-turn-guardian-1.2.1.zip` — the built extension to install;
 - `SHA256SUMS.txt` — the checksum to verify the ZIP; and
 - `build-info.json` — the exact source-commit provenance.
 

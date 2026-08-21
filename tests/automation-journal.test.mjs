@@ -188,6 +188,27 @@ test("verified protocol bootstrap turns remain identifiable after durable restor
   assert.deepEqual(restored.verifiedSince("chat-1", 50).map((record) => record.decisionId), ["resume"]);
 });
 
+test("verified status responses prevent repeated recovery prompts until human interaction changes", async () => {
+  const store = persistence();
+  const journal = new AutomationWriteJournal(store);
+  await journal.restore();
+  const recoveryText = "Check again to see whether the blocker has been resolved.";
+  const response = {
+    ...envelope({ decisionId: "status-response", createdAt: 200 }),
+    action: "STATUS_RESPONSE",
+    continuationText: recoveryText,
+  };
+
+  assert.equal(await journal.reserve(response), true);
+  await journal.mark("status-response", "VERIFIED");
+
+  const restored = new AutomationWriteJournal(store);
+  await restored.restore();
+  assert.equal(restored.hasVerifiedStatusResponseSince("chat-1", recoveryText, undefined), true);
+  assert.equal(restored.hasVerifiedStatusResponseSince("chat-1", recoveryText, 199), true);
+  assert.equal(restored.hasVerifiedStatusResponseSince("chat-1", recoveryText, 200), false);
+});
+
 test("a fresh human interaction compacts obsolete guards for that conversation epoch", async () => {
   const store = persistence();
   const journal = new AutomationWriteJournal(store);
