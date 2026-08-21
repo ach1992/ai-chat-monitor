@@ -12,7 +12,7 @@ function jsonResponse(body, status = 200) {
   });
 }
 
-test("Telegram transport uses HTTPS sendMessage POST with JSON chat_id and text", async () => {
+test("Telegram transport uses HTTPS sendMessage POST with JSON chat_id, text, and HTML parse mode", async () => {
   const calls = [];
   const transport = new TelegramBotApiTransport(async (url, init) => {
     calls.push({ url: String(url), init });
@@ -23,7 +23,11 @@ test("Telegram transport uses HTTPS sendMessage POST with JSON chat_id and text"
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, `https://api.telegram.org/bot${TOKEN}/sendMessage`);
   assert.equal(calls[0].init.method, "POST");
-  assert.deepEqual(JSON.parse(calls[0].init.body), { chat_id: "123456789", text: "bounded message" });
+  assert.deepEqual(JSON.parse(calls[0].init.body), {
+    chat_id: "123456789",
+    text: "bounded message",
+    parse_mode: "HTML",
+  });
   assert.equal(calls[0].init.redirect, "error");
 });
 
