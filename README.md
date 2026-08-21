@@ -189,7 +189,7 @@ Telegram v1 is **outbound notification-only**.
 5. Save settings and allow the exact `https://api.telegram.org/*` host permission when requested.
 6. Use **Test notification** and confirm the health state becomes `Healthy` after successful delivery.
 
-Saved bot tokens are never rendered back. Leaving the token blank can retain the existing saved secret only under the safe same-configuration rule; entering a new token replaces the credential.
+Saved bot tokens are never rendered back. Leaving the token blank can retain the existing saved secret only under the safe same-configuration rule; entering a new token replaces it.
 
 Telegram receives only bounded Guardian notification metadata. v1.0 does not send full ChatGPT messages by default and accepts no inbound commands. It cannot approve decisions, change `AUTO`, start/stop Guardian, inject ChatGPT messages, or otherwise authorize browser mutation.
 
