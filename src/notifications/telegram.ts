@@ -60,7 +60,7 @@ export class TelegramBotApiTransport implements TelegramTransport {
       const response = await this.#fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: destination, text }),
+        body: JSON.stringify({ chat_id: destination, text, parse_mode: "HTML" }),
         signal: controller.signal,
         redirect: "error",
         referrerPolicy: "no-referrer",
