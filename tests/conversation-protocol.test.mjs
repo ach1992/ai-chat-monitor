@@ -32,15 +32,16 @@ test("the conversation protocol maps every strict terminal decision", () => {
   }
 });
 
-test("the terminal marker is exact, unique, strict, and must be the final line", () => {
+test("the terminal marker is exact, unique, strict, and must be the final suffix", () => {
   for (const malformed of [
     "CONTINUE",
     '{"decision":"CONTINUE"}',
-    `prefix ${status("CONTINUE")}`,
     `${status("CONTINUE")}\ntrailing text`,
     `\`\`\`text\n${status("CONTINUE")}\n\`\`\``,
+    `\`\`\`text\n${status("CONTINUE")}`,
     `${status("CONTINUE")}\n${status("CONTINUE")}`,
     `${GUARDIAN_STATUS_PREFIX}{"decision":"CONTINUE","extra":true}`,
+    `${GUARDIAN_STATUS_PREFIX}{"decision":"HOLD_APPROVAL","decision":"CONTINUE"}`,
     `${GUARDIAN_STATUS_PREFIX}{"decision":"continue"}`,
     `${GUARDIAN_STATUS_PREFIX}{"decision":"UNKNOWN"}`,
     `${GUARDIAN_STATUS_PREFIX}{bad json}`,
@@ -50,11 +51,13 @@ test("the terminal marker is exact, unique, strict, and must be the final line",
   }
 
   assert.equal(hasValidConversationProtocolStatus(`${status("CONTINUE")}  \n`), true);
+  assert.equal(hasValidConversationProtocolStatus(`Rendered prose.${status("CONTINUE")}`), true);
 });
 
 test("the machine marker can be stripped without changing normal assistant text", () => {
   const response = `Implemented the requested change.\n\n${status("COMPLETE")}`;
   assert.equal(stripConversationProtocolStatus(response), "Implemented the requested change.");
+  assert.equal(stripConversationProtocolStatus(`Flattened DOM.${status("COMPLETE")}`), "Flattened DOM.");
   assert.equal(stripConversationProtocolStatus("Unmarked response."), "Unmarked response.");
   assert.equal(stripConversationProtocolStatus(status("COMPLETE")), "");
 });

@@ -6,7 +6,13 @@ function fingerprint(index) {
   return index.toString(16).padStart(64, "0").slice(-64);
 }
 
-function envelope({ decisionId, assistantFingerprint = fingerprint(1), assistantDomMessageId }) {
+function envelope({
+  decisionId,
+  assistantFingerprint = fingerprint(1),
+  assistantDomMessageId,
+  createdAt = 100,
+  lastUserInteractionAt,
+}) {
   return {
     decisionId,
     tabId: 1,
@@ -17,6 +23,7 @@ function envelope({ decisionId, assistantFingerprint = fingerprint(1), assistant
     routeKey: "/c/chat-1",
     assistantFingerprint,
     ...(assistantDomMessageId === undefined ? {} : { assistantDomMessageId }),
+    ...(lastUserInteractionAt === undefined ? {} : { lastUserInteractionAt }),
     policyRevision: 1,
     classification: {
       decision: "CONTINUE",
@@ -25,7 +32,7 @@ function envelope({ decisionId, assistantFingerprint = fingerprint(1), assistant
       source: "PROVIDER",
     },
     continuationText: "Continue.",
-    createdAt: 100,
+    createdAt,
     expiresAt: 1_000,
   };
 }
@@ -179,4 +186,40 @@ test("verified protocol bootstrap turns remain identifiable after durable restor
   assert.equal(restored.hasVerifiedProtocolBootstrapForUserTurn("chat-1", bootstrap.continuationText, 50), true);
   assert.equal(restored.hasVerifiedProtocolBootstrapForUserTurn("chat-1", bootstrap.continuationText, 101), false);
   assert.deepEqual(restored.verifiedSince("chat-1", 50).map((record) => record.decisionId), ["resume"]);
+});
+
+test("a fresh human interaction compacts obsolete guards for that conversation epoch", async () => {
+  const store = persistence();
+  const journal = new AutomationWriteJournal(store);
+  await journal.restore();
+
+  assert.equal(await journal.reserve(envelope({ decisionId: "old", createdAt: 100 })), true);
+  await journal.mark("old", "VERIFIED");
+  assert.equal(await journal.reserve(envelope({
+    decisionId: "fresh",
+    assistantFingerprint: fingerprint(2),
+    createdAt: 300,
+    lastUserInteractionAt: 200,
+  })), true);
+
+  assert.deepEqual(journal.snapshot().records.map((record) => record.decisionId), ["fresh"]);
+});
+
+test("the durable write journal fails closed at its bounded capacity", async () => {
+  const records = Array.from({ length: 4_096 }, (_, index) => ({
+    conversationId: `chat-${index}`,
+    assistantFingerprint: fingerprint(index + 1),
+    decisionId: `decision-${index}`,
+    documentId: `doc-${index}`,
+    attemptedAt: index,
+    disposition: "VERIFIED",
+  }));
+  const journal = new AutomationWriteJournal(persistence({ version: 1, records }));
+  await journal.restore();
+
+  await assert.rejects(
+    journal.reserve({ ...envelope({ decisionId: "overflow" }), conversationId: "chat-overflow" }),
+    /capacity is exhausted/i,
+  );
+  assert.equal(journal.snapshot().records.length, 4_096);
 });

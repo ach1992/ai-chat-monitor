@@ -56,6 +56,7 @@ namespace GuardianContent {
   }
 
   const MAX_NORMALIZED_RESPONSE_CHARS = 12_000;
+  const GUARDIAN_STATUS_PREFIX = "CHAT_TURN_GUARDIAN_STATUS_V1=";
   const MAX_PAGE_TITLE_CHARS = 300;
   const SEND_CONTROL_READY_TIMEOUT_MS = 1_500;
   const SEND_VERIFICATION_TIMEOUT_MS = 5_000;
@@ -175,7 +176,21 @@ namespace GuardianContent {
 
   function elementText(element: Element): string {
     if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) return element.value;
-    return element.textContent ?? "";
+    const renderedText = element instanceof HTMLElement && typeof element.innerText === "string"
+      ? element.innerText
+      : element.textContent ?? "";
+    const querySelectorAll = (element as ParentNode).querySelectorAll;
+    if (renderedText.includes(GUARDIAN_STATUS_PREFIX) && typeof querySelectorAll === "function") {
+      try {
+        const markerIsInCode = [...querySelectorAll.call(element, "pre, code")].some((code) =>
+          (code.textContent ?? "").includes(GUARDIAN_STATUS_PREFIX),
+        );
+        if (markerIsInCode) return `${renderedText}\n[Guardian status rendered inside a code block]`;
+      } catch {
+        // DOM drift falls back to the visible rendered text.
+      }
+    }
+    return renderedText;
   }
 
   function readMessageId(element: Element): string | undefined {

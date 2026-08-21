@@ -27,7 +27,9 @@ The only accepted decisions are:
 - `RATE_LIMIT`
 - `UNSURE`
 
-Parsing is strict. The marker must occur exactly once, start the final line, contain one JSON object with only `decision`, use the exact case-sensitive vocabulary, and have no text after the JSON other than whitespace. Bare JSON, code fences, duplicate markers, extra keys, unknown decisions, trailing prose, or malformed JSON are not valid terminal records.
+Parsing is strict. The marker must occur exactly once as the terminal suffix, contain one JSON object with exactly one `decision` member, use the exact case-sensitive vocabulary, and have no text after the JSON other than whitespace. Bare JSON, duplicate JSON members, Markdown fence wrappers, duplicate markers, extra keys, unknown decisions, trailing prose, or malformed JSON are not valid terminal records.
+
+ChatGPT's rendered DOM may flatten adjacent block elements in `textContent`. The content adapter therefore prefers rendered `innerText` boundaries, and the parser also accepts the unique marker as a flattened terminal suffix. A marker rendered inside a detected `pre`/`code` block is annotated as non-terminal and rejected.
 
 ## Decision order
 
@@ -63,7 +65,7 @@ The prompt is bounded to the existing 1,000-character guarded-send limit.
 - A verified self-check turn is recorded with its exact conversation, response, prompt text, protocol version, and decision identity.
 - If the response to that self-check omits or corrupts the marker, the episode becomes `UNSURE`; it cannot recursively create another self-check.
 - A later ordinary response without a marker is a new episode and may receive one fallback self-check.
-- The guarded-write journal is durable negative authority. Service-worker/browser restart cannot blindly replay a reserved, ambiguous, or verified write against the same assistant response.
+- The guarded-write journal is durable negative authority. It compacts records made obsolete by a fresh human-interaction epoch and has a hard 4,096-record capacity that fails closed before storage quota exhaustion. Service-worker/browser restart cannot blindly replay a retained reserved, ambiguous, or verified write against the same assistant response.
 - Protocol bootstrap records do not count as verified auto-continuations for the hard fuse.
 - Progress signatures exclude the terminal marker so status syntax cannot create fake progress.
 - Human interaction cancels pending authority for the currently observed response. A later stable response to a new human turn can be evaluated from its own terminal marker.

@@ -533,6 +533,6 @@ The exact record is versioned and occupies the final line:
 CHAT_TURN_GUARDIAN_STATUS_V1={"decision":"<VALUE>"}
 ```
 
-The parser rejects duplicate/non-terminal markers, wrappers, extra JSON keys, unknown values, and trailing text. The marker is removed before deterministic body classification and progress-signature computation. Deterministic HOLD remains authoritative over a contradictory `CONTINUE` marker. The durable write journal is negative authority only: it prevents replay and does not grant a future send.
+The parser rejects duplicate/non-terminal markers, duplicate JSON members, detected code-block wrappers, extra JSON keys, unknown values, and trailing text. The adapter preserves rendered `innerText` boundaries while the parser tolerates a unique flattened DOM suffix. The marker is removed before deterministic body classification and progress-signature computation. Deterministic HOLD remains authoritative over a contradictory `CONTINUE` marker. The durable write journal is negative authority only: it prevents replay and does not grant a future send. It compacts records invalidated by a fresh human-interaction epoch and fails closed at a 4,096-record ceiling.
 
 See [`CONVERSATION_STATUS_PROTOCOL.md`](CONVERSATION_STATUS_PROTOCOL.md) for the complete contract, fallback semantics, and acceptance coverage.

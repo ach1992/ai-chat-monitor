@@ -19,9 +19,10 @@ class FakeNode {
 }
 
 class FakeElement extends FakeNode {
-  constructor({ textContent = "", attrs = {}, value = "", order = 0 } = {}) {
+  constructor({ textContent = "", innerText, attrs = {}, value = "", order = 0 } = {}) {
     super();
     this.textContent = textContent;
+    if (innerText !== undefined) this.innerText = innerText;
     this.attrs = new Map(Object.entries(attrs));
     this.value = value;
     this.order = order;
@@ -119,6 +120,42 @@ test("adapter normalizes and fingerprints assistant text without DOM payloads", 
   assert.equal(result.latestAssistant.textLength, "Hello world\n\nDone".length);
   assert.match(result.latestAssistant.fingerprint, /^[a-f0-9]{64}$/);
   assert.equal(Object.hasOwn(result.latestAssistant, "outerHTML"), false);
+});
+
+test("adapter preserves rendered block boundaries for a terminal Guardian status", async () => {
+  const GuardianContent = await loadAdapter();
+  const marker = 'CHAT_TURN_GUARDIAN_STATUS_V1={"decision":"CONTINUE"}';
+  const assistant = new FakeElement({
+    textContent: `Human-readable result.${marker}`,
+    innerText: `Human-readable result.\n${marker}`,
+  });
+  const composer = new FakeTextAreaElement();
+  const document = new FakeDocument([
+    ['[data-message-author-role="assistant"]', [assistant]],
+    ["#prompt-textarea", [composer]],
+  ]);
+  const adapter = new GuardianContent.BrowserChatGPTAdapter(document, { pathname: "/c/abc-1234" });
+
+  const result = await adapter.observe(1234);
+
+  assert.equal(result.latestAssistant.normalizedText, `Human-readable result.\n${marker}`);
+});
+
+test("adapter makes a Guardian marker rendered in a code block non-terminal", async () => {
+  const GuardianContent = await loadAdapter();
+  const marker = 'CHAT_TURN_GUARDIAN_STATUS_V1={"decision":"CONTINUE"}';
+  const assistant = new FakeElement({ textContent: marker, innerText: marker });
+  const code = new FakeElement({ textContent: marker, innerText: marker });
+  assistant.querySelectorAll = (selector) => selector === "pre, code" ? [code] : [];
+  const document = new FakeDocument([
+    ['[data-message-author-role="assistant"]', [assistant]],
+    ["#prompt-textarea", [new FakeTextAreaElement()]],
+  ]);
+  const adapter = new GuardianContent.BrowserChatGPTAdapter(document, { pathname: "/c/abc-1234" });
+
+  const result = await adapter.observe(1234);
+
+  assert.match(result.latestAssistant.normalizedText, /rendered inside a code block\]$/);
 });
 
 test("adapter exposes the latest user turn preceding the current assistant", async () => {

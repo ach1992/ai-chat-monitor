@@ -54,7 +54,7 @@ Chat Turn Guardian uses Chromium extension storage for the minimum state needed 
 - bounded audit/reliability metadata and fingerprints; and
 - short-lived runtime state and a durable guarded-write journal used to prevent blind replay across service-worker/browser restarts.
 
-The guarded-write journal contains bounded control metadata such as conversation/message fingerprints, DOM response identifiers when available, action type, protocol version, decision identifier, timestamps, and disposition. It does not store full assistant responses or full chat transcripts. For exact control-turn reconciliation it may store the bounded Guardian-generated bootstrap or continuation text, not arbitrary chat content.
+The guarded-write journal contains bounded control metadata such as conversation/message fingerprints, DOM response identifiers when available, action type, protocol version, decision identifier, timestamps, and disposition. It is capped at 4,096 records and compacts a conversation's obsolete records after a fresh human-interaction epoch. It does not store full assistant responses or full chat transcripts. For exact control-turn reconciliation it may store the bounded Guardian-generated bootstrap text, not arbitrary chat content.
 
 Durable credential-bearing storage is restricted to trusted extension contexts. Provider API keys and Telegram bot tokens are not exposed to ChatGPT page scripts or content scripts.
 

@@ -2,11 +2,11 @@
 
 Chat Turn Guardian is a standalone Chromium Manifest V3 extension for safely supervising explicitly selected ChatGPT Web conversations. It reads a strict machine-readable status from the end of the latest assistant response when available, uses conservative local rules for obvious cases, and sends a bounded same-conversation self-check only when the status is missing and the stop remains ambiguous.
 
-**Current status: v1.1.0 release-ready.** The extension has **not** been submitted to or published on the Chrome Web Store. Store publication remains a separate human-authorized release action.
+**Release status: v1.1.0 is the current release; Issue #56 is a next-version draft change.** Package/manifest version remains `1.1.0` until a separate release-preparation change is approved. The extension has **not** been submitted to or published on the Chrome Web Store.
 
 The chat's own agent, Skill, or workflow remains responsible for **what work should happen**. Guardian only decides whether another ordinary turn may be requested without genuine human involvement.
 
-## Current capabilities
+## Next-version capabilities in this draft
 
 - Independent supervision of multiple ChatGPT tabs/conversations.
 - Current-tab ON/OFF control with bounded reconnect/recovery.
