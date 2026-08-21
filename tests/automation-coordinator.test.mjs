@@ -11,6 +11,8 @@ const CONTINUE = {
   providerId: "test-provider",
 };
 
+const guardianStatus = (decision) => `CHAT_TURN_GUARDIAN_STATUS_V1={"decision":"${decision}"}`;
+
 class FakeClock {
   #now = 1_000;
   #nextId = 1;
@@ -55,6 +57,7 @@ function makeSession(overrides = {}) {
     conversationId,
     registeredAt: 100,
     lastSeenAt: 200,
+    ...(overrides.lastUserInteractionAt === undefined ? {} : { lastUserInteractionAt: overrides.lastUserInteractionAt }),
     controlEligibility: overrides.controlEligibility ?? "OWNER",
     observation: {
       conversationId,
@@ -114,8 +117,18 @@ function makeHarness({ mode = "AUTO", classifier, deterministic, sender } = {}) 
       const key = `${envelope.conversationId}:${envelope.assistantFingerprint}:${envelope.assistantDomMessageId ?? "none"}`;
       if (guards.has(key)) return false;
       guards.set(key, envelope.decisionId);
-      decisions.set(envelope.decisionId, { key, state: "ATTEMPTED" });
+      decisions.set(envelope.decisionId, { key, state: "ATTEMPTED", envelope: structuredClone(envelope) });
       return true;
+    },
+    hasVerifiedProtocolBootstrapForUserTurn(conversationId, latestUserText, lastUserInteractionAt, version = 1) {
+      return [...decisions.values()].some((decision) =>
+        decision.state === "VERIFIED" &&
+        decision.envelope.conversationId === conversationId &&
+        decision.envelope.action === "PROTOCOL_BOOTSTRAP" &&
+        decision.envelope.conversationProtocolVersion === version &&
+        decision.envelope.continuationText === latestUserText &&
+        (lastUserInteractionAt === undefined || decision.envelope.createdAt > lastUserInteractionAt),
+      );
     },
     async releaseNotStarted(decisionId) {
       const decision = decisions.get(decisionId);
@@ -293,24 +306,27 @@ test("AUTO sends only after settle and continue delays with the exact bound iden
   assert.equal(harness.coordinator.status(7).phase, "COOLDOWN");
 });
 
-test("an ambiguous AUTO stop uses one bound self-check response before contextual continuation", async () => {
+test("an ambiguous AUTO stop installs the protocol and uses its activation status", async () => {
   const harness = makeHarness({ deterministic: () => undefined });
   harness.coordinator.handleSession(harness.getSession());
   harness.clock.advance(10);
   await flushAsync();
 
   assert.equal(harness.sendCalls.length, 1);
-  assert.equal(harness.sendCalls[0].action, "SELF_CHECK_PROBE");
-  assert.equal(harness.coordinator.status(7).phase, "WAITING_FOR_SELF_CHECK_RESPONSE");
+  assert.equal(harness.sendCalls[0].action, "PROTOCOL_BOOTSTRAP");
+  assert.equal(harness.sendCalls[0].conversationProtocolVersion, 1);
+  assert.equal(harness.coordinator.status(7).phase, "WAITING_FOR_PROTOCOL_STATUS");
 
   harness.setSession(makeSession({
     user: harness.sendCalls[0].continuationText,
-    userMessageId: "self-check-user-1",
-    assistant: '{"decision":"CONTINUE"}',
-    assistantMessageId: "self-check-assistant-1",
+    userMessageId: "protocol-user-1",
+    assistant: guardianStatus("CONTINUE"),
+    assistantMessageId: "protocol-assistant-1",
     fingerprint: "b".repeat(64),
   }));
   harness.coordinator.handleSession(harness.getSession());
+  harness.clock.advance(10);
+  await flushAsync();
   assert.equal(harness.coordinator.status(7).phase, "WAITING_TO_CONTINUE");
 
   harness.clock.advance(20);
@@ -321,14 +337,176 @@ test("an ambiguous AUTO stop uses one bound self-check response before contextua
   assert.equal(harness.sendCalls[1].assistantFingerprint, "b".repeat(64));
 });
 
-test("a recoverable delivery error may send one self-check probe but a hard blocker cannot", async () => {
+test("a valid terminal status is classified directly without a self-check", async () => {
+  const harness = makeHarness({ deterministic: () => undefined });
+  harness.setSession(makeSession({
+    assistant: `More safe work remains.\n${guardianStatus("CONTINUE")}`,
+  }));
+
+  harness.coordinator.handleSession(harness.getSession());
+  harness.clock.advance(10);
+  await flushAsync();
+
+  assert.equal(harness.sendCalls.length, 0);
+  assert.equal(harness.coordinator.status(7).phase, "WAITING_TO_CONTINUE");
+  harness.clock.advance(20);
+  await flushAsync();
+  assert.equal(harness.sendCalls.length, 1);
+  assert.equal(harness.sendCalls[0].action, "CONTINUATION");
+});
+
+test("a valid terminal status does not call an optional provider when local rules are unavailable", async () => {
+  const harness = makeHarness();
+  harness.setSession(makeSession({ assistant: guardianStatus("COMPLETE") }));
+  await reachPostClassification(harness);
+
+  assert.equal(harness.classifyCalls.length, 0);
+  assert.equal(harness.sendCalls.length, 0);
+  assert.equal(harness.coordinator.status(7).phase, "HOLD");
+  assert.equal(harness.coordinator.status(7).lastDecision.reasonCode, "PROJECT_COMPLETE");
+});
+
+test("a missing status falls back to one self-check and a malformed reply cannot recurse", async () => {
+  const harness = makeHarness({ deterministic: () => undefined });
+  harness.coordinator.handleSession(harness.getSession());
+  harness.clock.advance(10);
+  await flushAsync();
+  assert.equal(harness.sendCalls[0].action, "PROTOCOL_BOOTSTRAP");
+
+  harness.setSession(makeSession({
+    user: harness.sendCalls[0].continuationText,
+    userMessageId: "protocol-user-1",
+    assistant: "I could not produce the requested status.",
+    assistantMessageId: "protocol-assistant-1",
+    fingerprint: "b".repeat(64),
+  }));
+  harness.coordinator.handleSession(harness.getSession());
+  harness.clock.advance(60_000);
+  await flushAsync();
+
+  assert.equal(harness.sendCalls.length, 1);
+  assert.equal(harness.coordinator.status(7).phase, "UNSURE");
+});
+
+test("a deterministic HOLD overrides a contradictory CONTINUE marker", async () => {
+  const hold = {
+    decision: "HOLD",
+    reasonCode: "HUMAN_APPROVAL_REQUIRED",
+    reason: "Human approval is explicitly required.",
+    source: "RULE",
+  };
+  const harness = makeHarness({ deterministic: () => hold });
+  harness.setSession(makeSession({ assistant: guardianStatus("CONTINUE") }));
+  await reachPostClassification(harness);
+
+  assert.equal(harness.sendCalls.length, 0);
+  assert.equal(harness.coordinator.status(7).phase, "HOLD");
+  assert.equal(harness.coordinator.status(7).lastDecision.source, "RULE");
+});
+
+test("an obvious deterministic CONTINUE avoids an unnecessary self-check when status is absent", async () => {
+  const harness = makeHarness({ deterministic: () => CONTINUE });
+  await reachPostClassification(harness);
+
+  assert.equal(harness.sendCalls.length, 0);
+  assert.equal(harness.coordinator.status(7).phase, "WAITING_TO_CONTINUE");
+});
+
+test("a terminal status on a continued response avoids another protocol bootstrap", async () => {
+  const harness = makeHarness({ deterministic: () => undefined });
+  harness.coordinator.handleSession(harness.getSession());
+  harness.clock.advance(10);
+  await flushAsync();
+
+  harness.setSession(makeSession({
+    user: harness.sendCalls[0].continuationText,
+    userMessageId: "protocol-user-1",
+    assistant: guardianStatus("CONTINUE"),
+    assistantMessageId: "protocol-assistant-1",
+    fingerprint: "b".repeat(64),
+  }));
+  harness.coordinator.handleSession(harness.getSession());
+  harness.clock.advance(10);
+  await flushAsync();
+  harness.clock.advance(20);
+  await flushAsync();
+  assert.equal(harness.sendCalls.length, 2);
+
+  harness.setSession(makeSession({
+    user: harness.sendCalls[1].continuationText,
+    userMessageId: "guardian-resume-user-1",
+    assistant: `Implementation is still running.\n${guardianStatus("CONTINUE")}`,
+    assistantMessageId: "assistant-after-resume-1",
+    fingerprint: "c".repeat(64),
+  }));
+  harness.clock.advance(30);
+  await flushAsync();
+  harness.clock.advance(10);
+  await flushAsync();
+  harness.clock.advance(20);
+  await flushAsync();
+
+  assert.equal(harness.sendCalls.length, 3);
+  assert.equal(harness.sendCalls[2].action, "CONTINUATION");
+  assert.equal(harness.coordinator.status(7).phase, "COOLDOWN");
+});
+
+test("a later ordinary response that forgets the marker receives one fallback self-check", async () => {
+  const harness = makeHarness({ deterministic: () => undefined });
+  harness.setSession(makeSession({ assistant: guardianStatus("CONTINUE") }));
+  await reachPostClassification(harness);
+  harness.clock.advance(20);
+  await flushAsync();
+  assert.equal(harness.sendCalls[0].action, "CONTINUATION");
+
+  harness.setSession(makeSession({
+    user: harness.sendCalls[0].continuationText,
+    userMessageId: "guardian-resume-user-1",
+    assistant: "I forgot the status marker but safe work may remain.",
+    assistantMessageId: "assistant-after-resume-1",
+    fingerprint: "b".repeat(64),
+  }));
+  harness.clock.advance(30);
+  await flushAsync();
+  harness.clock.advance(10);
+  await flushAsync();
+
+  assert.equal(harness.sendCalls.length, 2);
+  assert.equal(harness.sendCalls[1].action, "PROTOCOL_BOOTSTRAP");
+  assert.equal(harness.coordinator.status(7).phase, "WAITING_FOR_PROTOCOL_STATUS");
+});
+
+test("a human interaction cancels old authority but its new marked response remains eligible", async () => {
+  const harness = makeHarness({ deterministic: () => undefined });
+  harness.coordinator.handleHumanInteraction(harness.getSession());
+
+  harness.setSession(makeSession({
+    user: "Please stop automation and answer this directly.",
+    userMessageId: "human-user-2",
+    assistant: `I handled the new request and safe work remains.\n${guardianStatus("CONTINUE")}`,
+    assistantMessageId: "assistant-after-human-2",
+    fingerprint: "d".repeat(64),
+    lastUserInteractionAt: 1_100,
+  }));
+  harness.coordinator.handleSession(harness.getSession());
+  harness.clock.advance(10);
+  await flushAsync();
+  harness.clock.advance(20);
+  await flushAsync();
+
+  assert.equal(harness.sendCalls.length, 1);
+  assert.equal(harness.sendCalls[0].action, "CONTINUATION");
+  assert.equal(harness.coordinator.status(7).phase, "COOLDOWN");
+});
+
+test("a recoverable delivery error may send one protocol bootstrap but a hard blocker cannot", async () => {
   const recoverable = makeHarness({ deterministic: () => undefined });
   recoverable.setSession(makeSession({ blocked: true, blockingReasons: ["ERROR"] }));
   recoverable.coordinator.handleSession(recoverable.getSession());
   recoverable.clock.advance(10);
   await flushAsync();
   assert.equal(recoverable.sendCalls.length, 1);
-  assert.equal(recoverable.sendCalls[0].action, "SELF_CHECK_PROBE");
+  assert.equal(recoverable.sendCalls[0].action, "PROTOCOL_BOOTSTRAP");
 
   const hardBlocked = makeHarness({ deterministic: () => undefined });
   hardBlocked.setSession(makeSession({ blocked: true, blockingReasons: ["CONVERSATION_FULL"] }));
@@ -339,7 +517,31 @@ test("a recoverable delivery error may send one self-check probe but a hard bloc
   assert.equal(hardBlocked.coordinator.status(7).phase, "HOLD");
 });
 
-test("a self-check HOLD response stays terminal and cannot become another probe episode", async () => {
+test("an ambiguous protocol bootstrap write freezes without retry", async () => {
+  const harness = makeHarness({
+    deterministic: () => undefined,
+    sender: async (envelope) => ({
+      decisionId: envelope.decisionId,
+      status: "AMBIGUOUS",
+      reason: "The protocol message may have been sent.",
+    }),
+  });
+  harness.coordinator.handleSession(harness.getSession());
+  harness.clock.advance(10);
+  await flushAsync();
+
+  assert.equal(harness.sendCalls.length, 1);
+  assert.equal(harness.sendCalls[0].action, "PROTOCOL_BOOTSTRAP");
+  assert.equal(harness.coordinator.status(7).phase, "AMBIGUOUS_WRITE");
+
+  harness.coordinator.handleSession(harness.getSession());
+  harness.clock.advance(60_000);
+  await flushAsync();
+  assert.equal(harness.sendCalls.length, 1);
+  assert.equal(harness.coordinator.status(7).phase, "AMBIGUOUS_WRITE");
+});
+
+test("a protocol HOLD status stays terminal", async () => {
   const harness = makeHarness({ deterministic: () => undefined });
   harness.coordinator.handleSession(harness.getSession());
   harness.clock.advance(10);
@@ -347,12 +549,14 @@ test("a self-check HOLD response stays terminal and cannot become another probe 
 
   harness.setSession(makeSession({
     user: harness.sendCalls[0].continuationText,
-    userMessageId: "self-check-user-1",
-    assistant: '{"decision":"HOLD_APPROVAL"}',
-    assistantMessageId: "self-check-assistant-1",
+    userMessageId: "protocol-user-1",
+    assistant: guardianStatus("HOLD_APPROVAL"),
+    assistantMessageId: "protocol-assistant-1",
     fingerprint: "b".repeat(64),
   }));
   harness.coordinator.handleSession(harness.getSession());
+  harness.clock.advance(10);
+  await flushAsync();
   assert.equal(harness.coordinator.status(7).phase, "HOLD");
 
   harness.coordinator.handleSession(harness.getSession());

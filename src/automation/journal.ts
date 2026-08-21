@@ -11,6 +11,9 @@ export interface WriteGuardRecord {
   documentId: string;
   attemptedAt: number;
   disposition: WriteGuardDisposition;
+  action?: AutomationDecisionEnvelope["action"];
+  conversationProtocolVersion?: number;
+  continuationText?: string;
 }
 
 export interface AutomationWriteJournalState {
@@ -23,8 +26,16 @@ export interface AutomationWriteJournalPersistence {
   save(state: AutomationWriteJournalState): Promise<void>;
 }
 
+const MAX_WRITE_GUARD_RECORDS = 4_096;
+
 function boundedDomMessageId(value: string | undefined): string | undefined {
   return value !== undefined && value.length > 0 && value.length <= 200 ? value : undefined;
+}
+
+function boundedControlText(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const normalized = value.replace(/\r\n?/g, "\n").trim();
+  return normalized.length > 0 && normalized.length <= 1_000 ? normalized : undefined;
 }
 
 function validRecord(record: WriteGuardRecord): boolean {
@@ -40,7 +51,12 @@ function validRecord(record: WriteGuardRecord): boolean {
     typeof record.documentId === "string" &&
     record.documentId.length > 0 &&
     Number.isFinite(record.attemptedAt) &&
-    (record.disposition === "ATTEMPTED" || record.disposition === "AMBIGUOUS" || record.disposition === "VERIFIED")
+    (record.disposition === "ATTEMPTED" || record.disposition === "AMBIGUOUS" || record.disposition === "VERIFIED") &&
+    (record.action === undefined || record.action === "CONTINUATION" || record.action === "PROTOCOL_BOOTSTRAP") &&
+    (record.conversationProtocolVersion === undefined || (
+      Number.isInteger(record.conversationProtocolVersion) && record.conversationProtocolVersion >= 1
+    )) &&
+    (record.continuationText === undefined || boundedControlText(record.continuationText) !== undefined)
   );
 }
 
@@ -86,15 +102,53 @@ export class AutomationWriteJournal {
         (record) =>
           record.conversationId === conversationId &&
           record.disposition === "VERIFIED" &&
+          record.action !== "PROTOCOL_BOOTSTRAP" &&
           record.attemptedAt > since,
       )
       .map((record) => ({ ...record }));
   }
 
+  hasVerifiedProtocolBootstrapForUserTurn(
+    conversationId: string,
+    latestUserText: string | undefined,
+    lastUserInteractionAt: number | undefined,
+    version = 1,
+  ): boolean {
+    const controlText = boundedControlText(latestUserText);
+    if (controlText === undefined) return false;
+    return this.#state.records.some((record) =>
+      record.conversationId === conversationId &&
+      record.disposition === "VERIFIED" &&
+      record.action === "PROTOCOL_BOOTSTRAP" &&
+      record.conversationProtocolVersion === version &&
+      record.continuationText === controlText &&
+      (lastUserInteractionAt === undefined || record.attemptedAt > lastUserInteractionAt),
+    );
+  }
+
   reserve(envelope: AutomationDecisionEnvelope): Promise<boolean> {
     return this.#enqueue(async () => {
       const assistantDomMessageId = boundedDomMessageId(envelope.assistantDomMessageId);
-      if (this.hasGuard(envelope.conversationId, envelope.assistantFingerprint, assistantDomMessageId)) return false;
+      const continuationText = envelope.action === "PROTOCOL_BOOTSTRAP"
+        ? boundedControlText(envelope.continuationText)
+        : undefined;
+      const retained = envelope.lastUserInteractionAt === undefined
+        ? this.#state.records
+        : this.#state.records.filter((record) =>
+          record.conversationId !== envelope.conversationId ||
+          record.attemptedAt > (envelope.lastUserInteractionAt ?? Number.NEGATIVE_INFINITY),
+        );
+      if (retained.some((record) =>
+        guardedResponseMatches(
+          record,
+          envelope.conversationId,
+          envelope.assistantFingerprint,
+          assistantDomMessageId,
+        ),
+      )) return false;
+      if (retained.length >= MAX_WRITE_GUARD_RECORDS) {
+        throw new Error("Write guard journal capacity is exhausted; automatic mutation is blocked.");
+      }
       const record: WriteGuardRecord = {
         conversationId: envelope.conversationId,
         assistantFingerprint: envelope.assistantFingerprint,
@@ -103,8 +157,13 @@ export class AutomationWriteJournal {
         documentId: envelope.documentId,
         attemptedAt: envelope.createdAt,
         disposition: "ATTEMPTED",
+        action: envelope.action,
+        ...(envelope.conversationProtocolVersion === undefined
+          ? {}
+          : { conversationProtocolVersion: envelope.conversationProtocolVersion }),
+        ...(continuationText === undefined ? {} : { continuationText }),
       };
-      const next: AutomationWriteJournalState = { version: 1, records: [...this.#state.records, record] };
+      const next: AutomationWriteJournalState = { version: 1, records: [...retained, record] };
       await this.#persistence.save(next);
       this.#state = next;
       return true;
@@ -158,4 +217,5 @@ export class AutomationWriteJournal {
     this.#mutationQueue = run.then(() => undefined, () => undefined);
     return run;
   }
+
 }

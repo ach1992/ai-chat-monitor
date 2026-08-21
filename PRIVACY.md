@@ -12,6 +12,8 @@ Chat Turn Guardian runs content scripts only on the supported ChatGPT Web origin
 
 Full conversation text is not persisted in the extension's audit history. Recent turn text may be held transiently in extension memory while the current page state is being evaluated. The extension derives bounded fingerprints and structured state needed for stale-state detection, ownership isolation, guarded-send revalidation, reliability checks, and audit diagnostics.
 
+When an ambiguous assistant response does not already contain the versioned machine-readable Guardian status, the extension may inject one bounded in-chat self-check. That message asks the current conversation to classify the preceding work state and remember a terminal-status format for later replies. A valid terminal status is processed locally and avoids that extra self-check. The extension does not claim or create account-level model memory.
+
 ## AI classifier providers
 
 AI classification is optional. If the user configures OpenRouter, NaraRouter, or a generic OpenAI-compatible HTTPS provider, Chat Turn Guardian may send a minimized recent conversation context to that selected provider when an ambiguous finished response needs classification.
@@ -50,7 +52,9 @@ Chat Turn Guardian uses Chromium extension storage for the minimum state needed 
 - provider profiles, including provider API keys;
 - Telegram configuration, including the bot token and destination;
 - bounded audit/reliability metadata and fingerprints; and
-- short-lived runtime/journal state used to reconcile guarded sends safely.
+- short-lived runtime state and a durable guarded-write journal used to prevent blind replay across service-worker/browser restarts.
+
+The guarded-write journal contains bounded control metadata such as conversation/message fingerprints, DOM response identifiers when available, action type, protocol version, decision identifier, timestamps, and disposition. It is capped at 4,096 records and compacts a conversation's obsolete records after a fresh human-interaction epoch. It does not store full assistant responses or full chat transcripts. For exact control-turn reconciliation it may store the bounded Guardian-generated bootstrap text, not arbitrary chat content.
 
 Durable credential-bearing storage is restricted to trusted extension contexts. Provider API keys and Telegram bot tokens are not exposed to ChatGPT page scripts or content scripts.
 

@@ -14,6 +14,7 @@ import {
   type ResolvedAutomationPolicy,
 } from "../automation/types.js";
 import { ConservativeStopClassifier } from "../classification/classifier.js";
+import { stripConversationProtocolStatus } from "../classification/conversation-protocol.js";
 import type { SessionView } from "../core/session-registry.js";
 import { fetchProviderModelCatalog } from "../providers/catalog.js";
 import { createProviderManager } from "../providers/manager.js";
@@ -61,7 +62,7 @@ export class AutomationService {
   ) {
     this.#getSession = getSession;
     const policyStorage = createDurableStorage<AutomationPolicyState>("automation-policy");
-    const journalStorage = createEphemeralStorage<AutomationWriteJournalState>("automation-write-journal");
+    const journalStorage = createDurableStorage<AutomationWriteJournalState>("automation-write-journal");
     const auditStorage = createDurableStorage<AuditHistoryState>("audit-history");
     const reliabilityStorage = createEphemeralStorage<ReliabilityRuntimeState>("reliability-runtime");
 
@@ -334,9 +335,9 @@ export class AutomationService {
       };
     }
 
-    if (envelope.action === "SELF_CHECK_PROBE") return undefined;
+    if (envelope.action === "PROTOCOL_BOOTSTRAP") return undefined;
 
-    const signature = outcomeSignature(assistant.normalizedText);
+    const signature = outcomeSignature(stripConversationProtocolStatus(assistant.normalizedText));
     const verified = this.#journal.verifiedSince(envelope.conversationId, session.lastUserInteractionAt ?? 0);
     const progress = evaluateProgressSafety(
       signature,

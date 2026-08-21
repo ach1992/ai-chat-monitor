@@ -51,7 +51,7 @@ Use the single-purpose statement above verbatim unless runtime scope changes.
 
 **`storage`**
 
-Stores user-selected automation policy, provider profiles and credentials, Telegram configuration and credential, bounded reliability/audit metadata, and guarded-send recovery state. Credential-bearing durable storage is restricted to trusted extension contexts. This state is required to preserve explicit user configuration and fail-closed safety across service-worker restarts.
+Stores user-selected automation policy, provider profiles and credentials, Telegram configuration and credential, bounded reliability/audit metadata, and a guarded-write journal. The journal stores mutation/control identity metadata rather than full transcripts and prevents blind replay across service-worker/browser restarts. Credential-bearing durable storage is restricted to trusted extension contexts. This state is required to preserve explicit user configuration and fail-closed safety across restarts.
 
 **`sidePanel`**
 

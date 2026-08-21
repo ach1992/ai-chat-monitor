@@ -223,7 +223,7 @@ test("guarded send can activate a send control that is disabled while the compos
   assert.equal(result.observedAssistantFingerprint, assistantFingerprint);
 });
 
-test("self-check probe may use a safe composer during a recoverable delivery error without clicking Retry", async () => {
+test("protocol bootstrap may use a safe composer during a recoverable delivery error without clicking Retry", async () => {
   const GuardianContent = await loadAdapter();
   let clicks = 0;
   const page = createSafePage({
@@ -248,8 +248,8 @@ test("self-check probe may use a safe composer during a recoverable delivery err
   const adapter = new GuardianContent.BrowserChatGPTAdapter(page.document, { pathname: "/c/chat-1" });
 
   const result = await adapter.guardedSend({
-    purpose: "SELF_CHECK_PROBE",
-    decisionId: "self-check-recovery",
+    purpose: "PROTOCOL_BOOTSTRAP",
+    decisionId: "protocol-recovery",
     conversationId: "chat-1",
     routeKey: "/c/chat-1",
     assistantFingerprint,

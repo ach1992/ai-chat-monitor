@@ -1,20 +1,22 @@
 # Chat Turn Guardian
 
-Chat Turn Guardian is a standalone Chromium Manifest V3 extension for safely supervising explicitly selected ChatGPT Web conversations. It uses local deterministic rules first, then an identity-bound in-chat self-check for eligible ambiguous stops; only final exact-state safety checks may allow the configured continuation message.
+Chat Turn Guardian is a standalone Chromium Manifest V3 extension for safely supervising explicitly selected ChatGPT Web conversations. It reads a strict machine-readable status from the end of the latest assistant response when available, uses conservative local rules for obvious cases, and sends a bounded same-conversation self-check only when the status is missing and the stop remains ambiguous.
 
-**Current status: v1.1.0 release-ready.** The extension has **not** been submitted to or published on the Chrome Web Store. Store publication remains a separate human-authorized release action.
+**Current release: v1.2.0.** This release delivers the status-first conversation protocol from Issue #56. The extension has **not** been submitted to or published on the Chrome Web Store.
 
 The chat's own agent, Skill, or workflow remains responsible for **what work should happen**. Guardian only decides whether another ordinary turn may be requested without genuine human involvement.
 
-## v1.1.0 capabilities
+## v1.2.0 capabilities
 
 - Independent supervision of multiple ChatGPT tabs/conversations.
 - Current-tab ON/OFF control with bounded reconnect/recovery.
 - Per-chat modes: `OFF`, `OBSERVE`, `AUTO`, `NOTIFY_ONLY`.
 - Global timing defaults plus per-chat settle/continue/cooldown overrides.
 - Configurable continuation text.
-- Conservative deterministic rules, followed by one same-conversation self-check for eligible ambiguous AUTO stops.
-- Strict compact-JSON self-check parsing and a contextual default resume message; malformed, stale, or uncertain self-check output fails closed.
+- Strict terminal status protocol: normal assistant replies may end with `CHAT_TURN_GUARDIAN_STATUS_V1={"decision":"..."}` so Guardian can decide without another chat turn.
+- Conservative local rules handle obvious HOLD or explicitly pre-authorized continuation boundaries without unnecessary self-check traffic.
+- When an ambiguous response has no valid terminal status, one structured same-conversation self-check also asks the chat to remember the terminal-status contract for later replies.
+- A missing or malformed status in the self-check response fails closed instead of recursively generating another self-check.
 - Recoverable red delivery errors may receive one guarded self-check only when the ordinary composer is safe; Guardian never clicks or retries ChatGPT `Retry` automatically.
 - OpenRouter, NaraRouter, and generic OpenAI-compatible provider profiles with ordered fallback.
 - Provider credentials stored only in trusted extension storage.
@@ -37,7 +39,7 @@ The chat's own agent, Skill, or workflow remains responsible for **what work sho
 
 Chat Turn Guardian is fail-closed by design:
 
-- `UNSURE`, provider failure, malformed output, timeout, rate limit, blocking UI, stale state, or storage uncertainty never becomes an automatic continuation.
+- `UNSURE`, malformed/missing protocol output after a self-check, provider failure, timeout, rate limit, blocking UI, stale state, or storage uncertainty never becomes an automatic continuation.
 - AI providers return only advisory `CONTINUE` / `HOLD` / `UNSURE` results. They have no DOM/tab/browser mutation authority.
 - Only the guarded ChatGPT content adapter can perform the narrow configured continuation action.
 - Human interaction always has precedence.
@@ -51,6 +53,8 @@ Chat Turn Guardian is fail-closed by design:
 Durable references:
 
 - [Architecture](docs/ARCHITECTURE.md)
+- [Changelog](CHANGELOG.md)
+- [Conversation status protocol](docs/CONVERSATION_STATUS_PROTOCOL.md)
 - [v1 validation and security evidence](docs/V1_VALIDATION.md)
 - [Project specification](docs/PROJECT_SPEC.md)
 - [Privacy policy](PRIVACY.md)
@@ -60,10 +64,18 @@ Durable references:
 
 - Chromium-family browser with Manifest V3 Side Panel support; current minimum is Chrome/Chromium 114.
 - Node.js 22+ for development/building.
-- A provider API key only if AI classification is desired. Without a usable provider for an ambiguous case, Guardian fails closed to `UNSURE`.
+- A provider API key only if optional external AI classification is desired. Normal AUTO operation can use the in-chat terminal status/self-check path without one.
 - A Telegram bot token and destination only if optional Telegram notifications are desired.
 
 ## Install from source / validated ZIP
+
+For v1.2.0, download these files from the GitHub Release **Assets** section:
+
+- `chat-turn-guardian-1.2.0.zip` — the built extension to install;
+- `SHA256SUMS.txt` — the checksum to verify the ZIP; and
+- `build-info.json` — the exact source-commit provenance.
+
+Do not download GitHub's automatic **Source code (zip)** or **Source code (tar.gz)** archives; those are repository sources, not the built extension. Verify the ZIP against `SHA256SUMS.txt`, extract it, and select the extracted directory whose root directly contains `manifest.json`.
 
 From a fresh clone:
 
@@ -98,9 +110,11 @@ Guardian starts fail-closed; installation alone does not enable automatic contro
 
 Preserve extension/storage identity:
 
-1. Back up the currently loaded unpacked extension folder if desired.
-2. Overwrite the contents of that **same folder** with the newer validated build.
-3. Open `chrome://extensions` and click **Reload** for Chat Turn Guardian.
+1. Use **Pause All** before replacing the files.
+2. Back up the currently loaded unpacked extension folder if desired.
+3. Overwrite the contents of that **same folder** with the newer validated build.
+4. Open `chrome://extensions` and click **Reload** for Chat Turn Guardian.
+5. Resume only after Guardian has reconnected and obtained fresh page evidence.
 
 Do **not** Remove/re-add the extension merely to update a build unless an unavoidable identity-breaking reason has been proven.
 
@@ -146,7 +160,7 @@ These services matched Guardian's current transport when this v1.0 documentation
 
 For **OpenAI**, you may sign into ChatGPT and the API Platform with the same OpenAI identity, but ChatGPT Free/Plus/Pro/Business access is not an API key and does not itself provide Guardian API usage. Create an API project/key through the API Platform and use its separate billing/credits as applicable.
 
-For **Claude / Anthropic**, do not enter `https://api.anthropic.com` as Generic OpenAI-compatible. Guardian v1.0's generic adapter uses OpenAI-style `/chat/completions` + Bearer authentication; Anthropic's native Messages API uses a different protocol/authentication contract. Native Claude support requires a dedicated future Guardian adapter.
+For **Claude / Anthropic**, do not enter `https://api.anthropic.com` as Generic OpenAI-compatible. Guardian's current generic adapter uses OpenAI-style `/chat/completions` + Bearer authentication; Anthropic's native Messages API uses a different protocol/authentication contract. Native Claude support requires a dedicated future Guardian adapter.
 
 Recommended setup flow:
 
@@ -206,7 +220,7 @@ The hard fuse is a final emergency boundary. Progress-aware stagnation protectio
 - Provider redirects are refused so credentials are not forwarded to unexpected origins.
 - Provider requests have bounded timeouts/responses and bounded secret-redacted context.
 - Telegram requests only `https://api.telegram.org/*` and delivers directly from the trusted service worker with bounded timeout, sanitized health/error state, and no blind retry.
-- `chrome.storage.local` access for durable policy/provider/Telegram state is restricted to trusted extension contexts before restore.
+- `chrome.storage.local` access for durable policy/provider/Telegram and guarded-write journal state is restricted to trusted extension contexts before restore.
 - Audit history stores bounded structured metadata/fingerprints/diagnostics, not full chat content or credentials.
 
 See [PRIVACY.md](PRIVACY.md) for the current data-handling and third-party-transfer policy.
@@ -229,7 +243,7 @@ Use **Reconnect** or **Turn Guardian ON**. Guardian first attempts bounded re-re
 
 ### `AUTO` never sends
 
-Inspect the displayed reason/runtime state. Safe causes include no usable provider, `HOLD`/`UNSURE`, MIRROR ownership, non-empty/user-focused composer, generation still running, blocking UI, stale response/session/policy, Pause All, stagnation/hard fuse, or an ambiguous-write guard.
+Inspect the displayed reason/runtime state. Safe causes include a missing/malformed terminal status after the bounded self-check, `HOLD`/`UNSURE`, MIRROR ownership, non-empty composer, generation still running, blocking UI, stale response/session/policy, Pause All, stagnation/hard fuse, or an ambiguous-write guard.
 
 Do not weaken the guard simply to increase the AUTO rate.
 
@@ -268,7 +282,7 @@ Rare platform states such as a naturally occurring silent terminal/no fresh assi
 
 ## Chrome Web Store status
 
-The v1.0 codebase is engineered to be Chrome Web Store ready: Manifest V3, production icons/assets, deterministic package/provenance, no remotely hosted executable code, permission/privacy justifications, public privacy policy, and listing copy are maintained in the repository.
+The current codebase is engineered to be Chrome Web Store ready: Manifest V3, production icons/assets, deterministic package/provenance, no remotely hosted executable code, permission/privacy justifications, public privacy policy, and listing copy are maintained in the repository.
 
 See [docs/STORE_READINESS.md](docs/STORE_READINESS.md) and [docs/CHROME_WEB_STORE_LISTING.md](docs/CHROME_WEB_STORE_LISTING.md).
 
@@ -276,6 +290,6 @@ See [docs/STORE_READINESS.md](docs/STORE_READINESS.md) and [docs/CHROME_WEB_STOR
 
 ## Project boundary and future development
 
-Chat Turn Guardian v1.0 is a focused supervision product, not a general browser agent, project manager, GitHub orchestrator, approval authority, or safeguard-bypass mechanism. Telegram v1 is outbound-only; inbound commands/remote control require a separate future security/authorization design.
+Chat Turn Guardian is a focused supervision product, not a general browser agent, project manager, GitHub orchestrator, approval authority, or safeguard-bypass mechanism. Telegram v1 is outbound-only; inbound commands/remote control require a separate future security/authorization design.
 
 The v1.0 baseline is intentionally modular so future work can add notification channels, native provider adapters, page adapters, or other bounded capabilities through normal Issues/PRs without changing guarded-send authority. Permanent product invariants live in [docs/PROJECT_SPEC.md](docs/PROJECT_SPEC.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

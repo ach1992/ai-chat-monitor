@@ -75,7 +75,7 @@ test("automation restore waits until durable storage has been restricted to trus
   releaseStorageRestriction();
   await service.ready();
   assert.equal(reads.some((entry) => entry.startsWith("local:get:guardian:automation-policy:")), true);
-  assert.equal(reads.some((entry) => entry.startsWith("session:get:guardian:automation-write-journal:")), true);
+  assert.equal(reads.some((entry) => entry.startsWith("local:get:guardian:automation-write-journal:")), true);
 });
 
 test("failed durable storage restriction fails closed without reading automation state", async () => {

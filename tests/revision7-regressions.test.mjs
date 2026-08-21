@@ -158,7 +158,7 @@ function coordinatorSession({ latestAssistant = true, blocked = false } = {}) {
   };
 }
 
-function coordinatorHarness(session, { inChatSelfCheck = false } = {}) {
+function coordinatorHarness(session, { conversationProtocol = false } = {}) {
   let classifyCalls = 0;
   let sendCalls = 0;
   const reserved = new Set();
@@ -177,6 +177,7 @@ function coordinatorHarness(session, { inChatSelfCheck = false } = {}) {
     },
     journal: {
       hasGuard() { return false; },
+      hasVerifiedProtocolBootstrapForUserTurn() { return false; },
       async reserve(envelope) {
         if (reserved.has(envelope.decisionId)) return false;
         reserved.add(envelope.decisionId);
@@ -187,7 +188,7 @@ function coordinatorHarness(session, { inChatSelfCheck = false } = {}) {
     },
     sessions: { getTab: () => session },
     classifier: {
-      ...(inChatSelfCheck ? { classifyDeterministic() { return undefined; } } : {}),
+      ...(conversationProtocol ? { classifyDeterministic() { return undefined; } } : {}),
       async classify() {
         classifyCalls += 1;
         return {
@@ -266,7 +267,7 @@ test("I1 silent terminal does not expose an older assistant after a newer user t
   assert.equal(harness.coordinator.status(71).phase, "IDLE");
 });
 
-test("I2 red Retry never clicks Retry and allows only one guarded self-check probe", async () => {
+test("I2 red Retry never clicks Retry and allows only one guarded protocol bootstrap", async () => {
   const GuardianContent = await loadAdapter();
   const user = attachToTurn(new FakeElement({ textContent: "Do the next step", order: 1 }), "user-1");
   const assistant = attachToTurn(new FakeElement({ textContent: "Partial result", order: 2 }), "assistant-1");
@@ -295,7 +296,7 @@ test("I2 red Retry never clicks Retry and allows only one guarded self-check pro
   const blockedHarness = coordinatorHarness({
     ...coordinatorSession({ blocked: true }),
     observation,
-  }, { inChatSelfCheck: true });
+  }, { conversationProtocol: true });
   blockedHarness.coordinator.handleSession({
     ...coordinatorSession({ blocked: true }),
     observation,
@@ -313,7 +314,7 @@ test("I2 red Retry never clicks Retry and allows only one guarded self-check pro
   await new Promise((resolve) => setTimeout(resolve, 5));
   assert.equal(blockedHarness.classifyCalls(), 0);
   assert.equal(blockedHarness.sendCalls(), 1);
-  assert.equal(blockedHarness.coordinator.status(71).phase, "WAITING_FOR_SELF_CHECK_RESPONSE");
+  assert.equal(blockedHarness.coordinator.status(71).phase, "WAITING_FOR_PROTOCOL_STATUS");
 
   const fingerprint = await GuardianContent.fingerprintText("Partial result");
   const result = await adapter.guardedSend({
