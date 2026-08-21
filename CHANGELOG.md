@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.5 — 2026-08-22
+
+- Fixed hidden/background-tab status reading when Chromium leaves layout-derived `innerText` stale while the conversation DOM already contains the completed assistant response.
+- In hidden tabs, Guardian now recovers a terminal `CHAT_TURN_GUARDIAN_STATUS_V1` marker from structural DOM text only on the latest assistant turn and never from `pre`/`code`.
+- Guarded-send reconciliation can match the exact Guardian-owned user turn from background-safe DOM evidence while retaining conversation/route identity, DOM ordering, trusted-human-state checks, fail-closed ambiguity handling, and no blind retry.
+- Foreground/visible-tab rendered-text behavior remains unchanged.
+- Added focused regression coverage for hidden-tab `HOLD_HUMAN_OPERATION`, exact user-turn verification, code-block rejection, and visible-tab behavior.
+
+Tracking: [PR #68](https://github.com/ach1992/chat-turn-guardian/pull/68).
+
 ## 1.2.4 — 2026-08-22
 
 - Fixed the remaining background/inactive-tab guarded-send false positive caused by Chromium timer throttling hiding the transient generation/Stop state.
