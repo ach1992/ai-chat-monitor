@@ -21,6 +21,16 @@ import type {
 
 const NOTIFICATION_ICON = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAACmklEQVR4nO3byVEjQQAF0c94ACfGAvDfmvGA27jAHAgCNGqhXqpry0wH1NH/aYno0sPj88t7DNuv1hdgbRMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBVOrv25/Wl7CYACr0OX6PCARwcv+P3hsCAZzYrbF7QiCAk7o3ci8IBHBCa8ftAYEACrd11NYIBFCwvWO2RCCAQh0dsRUCARSoxHhPv18LXMn2BHCwkcdPBHCo0cdPBLC7GcZPBLCrWcZPBLC5mcZPBLCp2cZPBLC6GcdPBLCqWcdPBHC3mcdPBPBjs4+fCOBmhPETASxGGT8RwFWk8RMBXEQbP+kYQO3n48Txk04B1D5HTx0/6RBA7XP05PGTzgDUPkdPHz/pCEDtc/SO/1EXAGqfo3f8r5oDqH2O3vEvawqg9jl6x7+uGYDa72THX64ZgBI3s+ZvhxnHTxp/BdRA4Pg/1/xH4JkIHP9+zQEk5yBw/HV1ASApi8Dx1/fw+Pzy3voivtf6//IJZ/yko0+Az1rf/NavX7vuACTtRqCNn3QKIKk/BnH8pGMASb1RqOMnnQNIzh+HPH4yAIDkvJHo4yeDAEjKj+X4Hw0DICk3muN/NRSA5Ph4jn/ZcACS/SM6/nVDAki2j+n4yw0LIFk/quPfrruHQXtbeojk8PebBoDta+ivADueAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOD9A59V1Pv7P/C7AAAAAElFTkSuQmCC";
 const MAX_TELEGRAM_MESSAGE_LENGTH = 700;
+const TELEGRAM_DIVIDER = "━━━━━━━━━━━━";
+
+const TELEGRAM_EVENT_ICON: Record<GuardianNotification["event"], string> = {
+  RESPONSE_COMPLETE: "✅",
+  HUMAN_ATTENTION_REQUIRED: "👤",
+  UNSURE: "❓",
+  STAGNATION: "🔁",
+  PROVIDER_ERROR: "⚠️",
+  EXTENSION_ERROR: "🚨",
+};
 
 export interface TelegramSettingsAccess {
   load(): Promise<TelegramSettingsState>;
@@ -63,13 +73,28 @@ function sameConfiguration(
 export function telegramNotificationText(notification: GuardianNotification): string {
   const title = notification.title.replace(/\s+/g, " ").trim().slice(0, 120);
   const message = notification.message.replace(/\s+/g, " ").trim().slice(0, 360);
-  const conversation = notification.conversationId === undefined
-    ? undefined
-    : `Conversation: ${notification.conversationId.slice(0, 80)}`;
-  return ["Chat Turn Guardian", title, message, conversation]
-    .filter((value): value is string => value !== undefined && value.length > 0)
-    .join("\n")
-    .slice(0, MAX_TELEGRAM_MESSAGE_LENGTH);
+  const conversation = notification.conversationId?.replace(/\s+/g, " ").trim().slice(0, 80);
+  const sections = [
+    "🛡️ Chat Turn Guardian",
+    TELEGRAM_DIVIDER,
+    `${TELEGRAM_EVENT_ICON[notification.event]} ${title}`,
+    ...(message.length === 0 ? [] : ["", message]),
+    ...(conversation === undefined || conversation.length === 0
+      ? []
+      : ["", "💬 Conversation", conversation]),
+  ];
+  return sections.join("\n").slice(0, MAX_TELEGRAM_MESSAGE_LENGTH);
+}
+
+function telegramTestNotificationText(): string {
+  return [
+    "🛡️ Chat Turn Guardian",
+    TELEGRAM_DIVIDER,
+    "🧪 Telegram test successful",
+    "",
+    "Delivery is configured correctly.",
+    "No chat content was included.",
+  ].join("\n");
 }
 
 export async function browserNotification(notification: GuardianNotification): Promise<void> {
@@ -163,7 +188,7 @@ export class NotificationManager {
       await this.#telegram.send(
         settings.botToken,
         settings.destination,
-        "Chat Turn Guardian\nTest notification\nTelegram delivery is configured. No chat content was included.",
+        telegramTestNotificationText(),
       );
       const health: TelegramHealth = { status: "HEALTHY", checkedAt: this.#now() };
       if (shouldPersistHealth) {
