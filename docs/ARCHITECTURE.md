@@ -355,6 +355,7 @@ Use separate persistence classes:
 
 - durable user configuration: managed-conversation policy, provider configuration and credentials, Telegram configuration and credential, global defaults, notification preferences;
 - ephemeral/session state: tab/document mappings, control ownership, pending decisions/timers, recent fingerprints, cooldown state;
+- durable negative-authority guarded-write journal: bounded mutation identity/control metadata used only to prevent blind replay across worker/browser restarts;
 - compact audit history: bounded recent events, with secrets/full chat content excluded or redacted.
 
 Credential-bearing durable storage is restricted to trusted extension contexts. Do not assume Manifest V3 service-worker memory survives. On wake/restart, reconstruct state from storage/page reinspection and invalidate decisions that cannot be proven current.
@@ -509,3 +510,29 @@ The runtime must recognize self-check turns as control traffic and prevent recur
 Existing stagnation tracking and the hard fuse must include repeated probe/resume no-progress cycles so the new path cannot create an infinite conversation loop.
 
 See [`IN_CHAT_SELF_CHECK.md`](IN_CHAT_SELF_CHECK.md) and Issue #51 for the implementation details and acceptance scenarios.
+
+## 15. Conversation terminal-status override (Issue #56 / next version)
+
+The next-version runtime replaces the normal repeated probe-first path in Section 14 with a status-first path. The historical v1.1.0 section above remains evidence for Issue #51; where the two sections differ, this section governs the current implementation.
+
+```text
+STABLE RESPONSE
+  -> local hard safety / identity / OWNER / human gates
+  -> deterministic hard HOLD on marker-free body
+  -> valid exact terminal status? -> map locally; no self-check
+  -> otherwise deterministic obvious CONTINUE? -> continue candidate; no self-check
+  -> otherwise eligible AUTO ambiguity? -> one guarded protocol self-check
+       -> valid activation status -> map locally
+       -> missing/malformed activation status -> UNSURE; no recursive self-check
+  -> CONTINUE candidate -> final synchronous guards -> guarded contextual resume
+```
+
+The exact record is versioned and occupies the final line:
+
+```text
+CHAT_TURN_GUARDIAN_STATUS_V1={"decision":"<VALUE>"}
+```
+
+The parser rejects duplicate/non-terminal markers, wrappers, extra JSON keys, unknown values, and trailing text. The marker is removed before deterministic body classification and progress-signature computation. Deterministic HOLD remains authoritative over a contradictory `CONTINUE` marker. The durable write journal is negative authority only: it prevents replay and does not grant a future send.
+
+See [`CONVERSATION_STATUS_PROTOCOL.md`](CONVERSATION_STATUS_PROTOCOL.md) for the complete contract, fallback semantics, and acceptance coverage.

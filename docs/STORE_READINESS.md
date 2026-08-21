@@ -27,6 +27,7 @@ Store distribution must preserve the v1.0 product boundary:
 - OWNER/MIRROR isolation; MIRROR never auto-sends;
 - empty-composer and final synchronous revalidation immediately before mutation;
 - stale-decision cancellation, no blind retry, and ambiguous-write freeze;
+- consume a valid exact terminal conversation status without an unnecessary self-check, and fail closed when fallback output remains uncertain;
 - fail closed on uncertainty/provider failure/platform blockers;
 - provider output remains advisory only;
 - provider/Telegram credentials remain in trusted extension contexts and secret-free status/log/audit surfaces;
@@ -62,7 +63,9 @@ The public policy is [`PRIVACY.md`](../PRIVACY.md) and must remain synchronized 
 Current behavior/disclosure includes:
 
 - Guardian processes supported ChatGPT page state and bounded recent visible conversation context for supervision;
+- Guardian may inject a bounded in-chat protocol/self-check when an ambiguous response has no valid terminal status; valid status records are processed locally;
 - full chat transcripts are not stored by Guardian;
+- the durable guarded-write journal stores bounded mutation/control metadata, not full chat transcripts;
 - optional AI classification sends only minimized, secret-redacted bounded recent context directly to the selected provider;
 - optional Telegram sends bounded notification metadata and does not send full ChatGPT messages by default;
 - provider API keys and Telegram bot tokens are not rendered back after storage and do not enter page/content/log/audit/status surfaces;

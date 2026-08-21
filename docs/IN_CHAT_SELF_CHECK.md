@@ -1,6 +1,6 @@
 # In-chat self-check classifier — v1.1.0 implementation
 
-Status: Implemented for Issue #51 and validated by exact-head CI. Live ChatGPT smoke evidence remains pending because the release environment has no Chrome/Chromium runtime.
+Status: Historical v1.1.0 contract for Issue #51. The next-version terminal-status protocol in [`CONVERSATION_STATUS_PROTOCOL.md`](CONVERSATION_STATUS_PROTOCOL.md) supersedes the repeated stop-response shape: a valid status on the latest assistant response is consumed directly, and this self-check is now only a bounded fallback when that status is absent.
 
 This document records the v1.1.0 design added to the already validated v1.0 baseline. Issue #51 owns implementation and acceptance.
 
@@ -141,7 +141,7 @@ and:
 resume -> no progress -> self-check -> resume -> no progress -> ...
 ```
 
-At most one self-check probe should be allowed for one exact stop/error episode. A response to a self-check-approved contextual resume is held rather than treated as a fresh probe episode until a new human turn exists. This durable control-turn boundary also prevents a service-worker restart from replaying a completed self-check episode. Existing stagnation protection and the hard fuse remain defense in depth.
+At most one self-check probe should be allowed for one exact stop/error episode. Existing stagnation protection and the hard fuse remain defense in depth and should account for self-check/resume cycles.
 
 ## 9. External provider role
 

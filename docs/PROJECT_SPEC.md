@@ -273,3 +273,21 @@ The default resume message remains simple and is:
 The self-check probe is itself a new automatic mutation before the resume decision. It therefore requires explicit stop/self-check episode identity, final synchronous revalidation before each mutation, OWNER/MIRROR isolation, service-worker restart safety, no-blind-retry/ambiguous-write semantics, and loop/stagnation protection. Self-check output remains advisory data and cannot bypass local safety gates.
 
 Issue #51 is integrated and exact-head CI validated. This section describes the shipped v1.1.0 runtime behavior; live ChatGPT smoke evidence remains pending. See [`IN_CHAT_SELF_CHECK.md`](IN_CHAT_SELF_CHECK.md) for the bounded design and validation boundary.
+
+## 13. Next-version outcome — status-first conversation protocol (Issue #56)
+
+The next-version outcome refines Issue #51 to avoid unnecessary control traffic:
+
+- a valid `CHAT_TURN_GUARDIAN_STATUS_V1={"decision":"..."}` record at the exact end of the latest assistant response is parsed directly;
+- deterministic hard HOLD remains authoritative, while an obvious deterministic continuation may avoid an unnecessary self-check when no marker exists;
+- only an eligible ambiguous response with no valid marker receives the guarded same-conversation self-check;
+- that structured self-check asks the chat to remember the terminal-status contract for future replies and classifies the immediately preceding work state in its activation response;
+- a missing or malformed activation status fails closed and cannot recursively trigger another self-check;
+- if the chat later omits the remembered marker on an ordinary response, one new bounded self-check may be sent for that exact missing-status episode;
+- valid marked continuation responses can continue across multiple turns without a self-check between them, subject to progress/stagnation and the hard fuse;
+- the write journal is durable negative authority so restart cannot blindly replay a prior mutation; it stores guarded-send metadata, not transcript text;
+- terminal marker syntax is removed before deterministic body classification and progress-signature calculation.
+
+This protocol does not claim account-level or cross-conversation model memory. It relies on the current conversation context, checks every response independently, and falls back safely when the contract is absent. All permanent identity, OWNER/MIRROR, human-precedence, empty-composer, final revalidation, no-blind-retry, platform-boundary, and advisory-output invariants remain unchanged.
+
+[`CONVERSATION_STATUS_PROTOCOL.md`](CONVERSATION_STATUS_PROTOCOL.md) is authoritative for the exact encoding, state order, fallback rule, and acceptance coverage. Section 12 remains the historical v1.1.0 outcome.

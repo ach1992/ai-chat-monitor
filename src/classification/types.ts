@@ -15,7 +15,7 @@ export type ClassificationReasonCode =
   | "PROVIDER_FAILURE"
   | "OTHER";
 
-export type ClassificationSource = "RULE" | "PROVIDER" | "SELF_CHECK" | "SYSTEM";
+export type ClassificationSource = "RULE" | "PROVIDER" | "CONVERSATION_PROTOCOL" | "SYSTEM";
 
 export interface ConversationTurn {
   role: "user" | "assistant";
