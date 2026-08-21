@@ -14,7 +14,7 @@ namespace GuardianContentAgent {
   interface GuardedSendMessage {
     type: "background:guarded-send";
     protocolVersion: 2;
-    action: "CONTINUATION" | "PROTOCOL_BOOTSTRAP" | "STATUS_RESPONSE";
+    action: "CONTINUATION" | "PROTOCOL_BOOTSTRAP" | "STATUS_RESPONSE" | "STATUS_RECOVERY";
     decisionId: string;
     agentInstanceId: string;
     pageEpoch: number;
@@ -74,7 +74,8 @@ namespace GuardianContentAgent {
       (
         value.action === "CONTINUATION" ||
         value.action === "PROTOCOL_BOOTSTRAP" ||
-        value.action === "STATUS_RESPONSE"
+        value.action === "STATUS_RESPONSE" ||
+        value.action === "STATUS_RECOVERY"
       ) &&
       typeof value.decisionId === "string" && value.decisionId.length > 0 && value.decisionId.length <= 128 &&
       typeof value.agentInstanceId === "string" && value.agentInstanceId.length > 0 && value.agentInstanceId.length <= 128 &&

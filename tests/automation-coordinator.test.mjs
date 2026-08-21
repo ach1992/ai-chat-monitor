@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { AutomationCoordinator } from "../dist/automation/coordinator.js";
+import { ConservativeStopClassifier } from "../dist/classification/classifier.js";
 import {
   CONVERSATION_PROTOCOL_CONTINUE_RESPONSE,
   CONVERSATION_PROTOCOL_RECOVERY_RESPONSE,
@@ -397,6 +398,52 @@ test("each terminal protocol status sends only its configured response", async (
     }
     assert.equal(harness.coordinator.status(7).phase, expectedPhase, decision);
   }
+});
+
+test("matching recoverable prose and status sends the recovery response through the error surface", async () => {
+  const classifier = new ConservativeStopClassifier();
+  const scenarios = [
+    ["A network error blocks progress.", "PLATFORM_ERROR", "ERROR"],
+    ["I hit a rate limit.", "RATE_LIMIT", "RATE_LIMIT"],
+  ];
+
+  for (const [prose, decision, blocker] of scenarios) {
+    const harness = makeHarness({
+      deterministic: (input) => classifier.classifyDeterministic(input),
+    });
+    harness.setSession(makeSession({
+      assistant: `${prose}\n${guardianStatus(decision)}`,
+      blocked: true,
+      blockingReasons: [blocker],
+    }));
+
+    await reachPostClassification(harness);
+    assert.equal(harness.coordinator.status(7).phase, "WAITING_TO_CONTINUE", decision);
+    harness.clock.advance(20);
+    await flushAsync();
+
+    assert.equal(harness.sendCalls.length, 1, decision);
+    assert.equal(harness.sendCalls[0].action, "STATUS_RESPONSE", decision);
+    assert.equal(harness.sendCalls[0].continuationText, CONVERSATION_PROTOCOL_RECOVERY_RESPONSE, decision);
+    assert.equal(harness.coordinator.status(7).phase, "COOLDOWN", decision);
+  }
+});
+
+test("a terminal CONTINUE cannot send through a visible recoverable error surface", async () => {
+  const harness = makeHarness({ deterministic: () => undefined });
+  harness.setSession(makeSession({
+    assistant: guardianStatus("CONTINUE"),
+    blocked: true,
+    blockingReasons: ["ERROR"],
+  }));
+
+  await reachPostClassification(harness);
+  assert.equal(harness.coordinator.status(7).phase, "WAITING_TO_CONTINUE");
+  harness.clock.advance(20);
+  await flushAsync();
+
+  assert.equal(harness.sendCalls.length, 0);
+  assert.equal(harness.coordinator.status(7).phase, "HOLD");
 });
 
 test("a recovery or unsure response is sent only once until human interaction changes", async () => {

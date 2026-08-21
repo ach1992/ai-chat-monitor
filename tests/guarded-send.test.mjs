@@ -329,3 +329,61 @@ test("protocol bootstrap may use a safe composer during a recoverable delivery e
   assert.equal(clicks, 1);
   assert.equal(result.status, "VERIFIED");
 });
+
+test("only a status recovery response may pass a recoverable delivery-error surface", async () => {
+  const GuardianContent = await loadAdapter();
+
+  const continuePage = createSafePage({ onSend: () => assert.fail("CONTINUE must not send through an error surface.") });
+  continuePage.document.set('[role="alert"]', [
+    new FakeElement({ textContent: "Something went wrong", attrs: { role: "alert" }, order: 5 }),
+  ]);
+  const continueAdapter = new GuardianContent.BrowserChatGPTAdapter(
+    continuePage.document,
+    { pathname: "/c/chat-1" },
+  );
+  const continueResult = await continueAdapter.guardedSend({
+    purpose: "STATUS_RESPONSE",
+    decisionId: "status-continue-blocked",
+    conversationId: "chat-1",
+    routeKey: "/c/chat-1",
+    assistantFingerprint: await sha256(continuePage.assistant.textContent),
+    assistantDomMessageId: "assistant-1",
+    continuationText: "All right. Continue and complete the project.",
+  });
+  assert.equal(continueResult.status, "NOT_STARTED");
+
+  let recoveryClicks = 0;
+  const recoveryPage = createSafePage({
+    onSend: ({ document, composer }) => {
+      recoveryClicks += 1;
+      const sentTurn = new FakeElement({ attrs: { "data-testid": "conversation-turn-user-2" } });
+      const sentUser = new FakeElement({ textContent: composer.value, order: 6 });
+      sentUser.parent = sentTurn;
+      document.set('[data-message-author-role="user"]', [
+        ...document.querySelectorAll('[data-message-author-role="user"]'),
+        sentUser,
+      ]);
+      document.set('button[data-testid="stop-button"]', [
+        new FakeButtonElement({ attrs: { "data-testid": "stop-button" }, order: 7 }),
+      ]);
+    },
+  });
+  recoveryPage.document.set('[role="alert"]', [
+    new FakeElement({ textContent: "Message delivery timed out", attrs: { role: "alert" }, order: 5 }),
+  ]);
+  const recoveryAdapter = new GuardianContent.BrowserChatGPTAdapter(
+    recoveryPage.document,
+    { pathname: "/c/chat-1" },
+  );
+  const recoveryResult = await recoveryAdapter.guardedSend({
+    purpose: "STATUS_RECOVERY",
+    decisionId: "status-recovery-allowed",
+    conversationId: "chat-1",
+    routeKey: "/c/chat-1",
+    assistantFingerprint: await sha256(recoveryPage.assistant.textContent),
+    assistantDomMessageId: "assistant-1",
+    continuationText: "Check again to see whether the blocker has been resolved.",
+  });
+  assert.equal(recoveryResult.status, "VERIFIED");
+  assert.equal(recoveryClicks, 1);
+});

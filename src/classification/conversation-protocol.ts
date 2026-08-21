@@ -100,6 +100,16 @@ export function conversationProtocolResponseText(
   }
 }
 
+export function isRecoverableConversationProtocolClassification(
+  classification: ClassificationResult,
+): boolean {
+  return (
+    classification.source === "CONVERSATION_PROTOCOL" &&
+    classification.decision === "HOLD" &&
+    (classification.reasonCode === "PLATFORM_ERROR" || classification.reasonCode === "RATE_LIMIT")
+  );
+}
+
 export function hasValidConversationProtocolStatus(raw: string): boolean {
   return trailingStatus(raw) !== undefined;
 }

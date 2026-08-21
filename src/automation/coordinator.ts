@@ -5,6 +5,7 @@ import {
   conversationProtocolDecision,
   conversationProtocolResponseText,
   hasValidConversationProtocolStatus,
+  isRecoverableConversationProtocolClassification,
   parseConversationProtocolStatus,
   stripConversationProtocolStatus,
 } from "../classification/conversation-protocol.js";
@@ -97,6 +98,19 @@ function statusResponseTextForClassification(classification: ClassificationResul
     return conversationProtocolResponseText("UNSURE");
   }
   return undefined;
+}
+
+function protocolRecoveryMatchesDeterministicHold(
+  protocolDecision: ReturnType<typeof conversationProtocolDecision>,
+  deterministic: ClassificationResult | undefined,
+): boolean {
+  return (
+    deterministic?.decision === "HOLD" &&
+    (
+      (protocolDecision === "PLATFORM_ERROR" && deterministic.reasonCode === "PLATFORM_ERROR") ||
+      (protocolDecision === "RATE_LIMIT" && deterministic.reasonCode === "RATE_LIMIT")
+    )
+  );
 }
 
 function suppressedAssistantMatches(
@@ -395,7 +409,10 @@ export class AutomationCoordinator {
     let protocolDecision = conversationProtocolDecision(assistantText);
     let statusResponseText: string | undefined;
     const deterministic = this.#classifier.classifyDeterministic?.({ turns });
-    if (deterministic?.decision === "HOLD") {
+    if (
+      deterministic?.decision === "HOLD" &&
+      !protocolRecoveryMatchesDeterministicHold(protocolDecision, deterministic)
+    ) {
       classification = deterministic;
       protocolDecision = undefined;
     } else if (hasValidConversationProtocolStatus(assistantText)) {
@@ -935,7 +952,12 @@ export class AutomationCoordinator {
     if (
       fresh === undefined ||
       fresh.conversationId !== envelope.conversationId ||
-      !this.#candidateUiIsSafe(fresh, envelope.action !== "CONTINUATION")
+      !this.#candidateUiIsSafe(
+        fresh,
+        envelope.action === "PROTOCOL_BOOTSTRAP" ||
+          (envelope.action === "STATUS_RESPONSE" &&
+            isRecoverableConversationProtocolClassification(envelope.classification)),
+      )
     ) return undefined;
     if (
       fresh.documentId !== envelope.documentId ||

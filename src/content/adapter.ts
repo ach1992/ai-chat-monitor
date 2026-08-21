@@ -38,7 +38,7 @@ namespace GuardianContent {
   }
 
   export interface GuardedContinuationExpectation {
-    purpose?: "CONTINUATION" | "PROTOCOL_BOOTSTRAP" | "STATUS_RESPONSE";
+    purpose?: "CONTINUATION" | "PROTOCOL_BOOTSTRAP" | "STATUS_RESPONSE" | "STATUS_RECOVERY";
     decisionId: string;
     conversationId: string;
     routeKey: string;
@@ -245,7 +245,7 @@ namespace GuardianContent {
     purpose: GuardedContinuationExpectation["purpose"],
   ): boolean {
     if (reasons.length === 0) return true;
-    return (purpose === "PROTOCOL_BOOTSTRAP" || purpose === "STATUS_RESPONSE") && reasons.every((reason) =>
+    return (purpose === "PROTOCOL_BOOTSTRAP" || purpose === "STATUS_RECOVERY") && reasons.every((reason) =>
       reason === "ERROR" || reason === "NETWORK" || reason === "RATE_LIMIT",
     );
   }
