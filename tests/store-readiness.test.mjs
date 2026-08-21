@@ -31,18 +31,22 @@ async function executableFiles(directory) {
 }
 
 test("manifest and public release metadata stay aligned with the implemented permission model", async () => {
-  const [packageJsonText, manifestText, listing, privacy] = await Promise.all([
+  const [packageJsonText, packageLockText, manifestText, listing, privacy] = await Promise.all([
     readText("package.json"),
+    readText("package-lock.json"),
     readText("dist/manifest.json"),
     readText("docs/CHROME_WEB_STORE_LISTING.md"),
     readText("PRIVACY.md"),
   ]);
   const packageJson = JSON.parse(packageJsonText);
+  const packageLock = JSON.parse(packageLockText);
   const manifest = JSON.parse(manifestText);
 
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.name, "Chat Turn Guardian");
   assert.equal(manifest.version, packageJson.version);
+  assert.equal(packageLock.version, packageJson.version);
+  assert.equal(packageLock.packages[""].version, packageJson.version);
   assert.equal(typeof manifest.description, "string");
   assert.ok(manifest.description.length > 0);
   assert.deepEqual(manifest.permissions, ["storage", "sidePanel", "notifications"]);

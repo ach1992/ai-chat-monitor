@@ -1,6 +1,6 @@
 # Chat Turn Guardian — Project Specification
 
-Status: Accepted living specification; v1.0 baseline complete; Issue #51 implemented for v1.1.0
+Status: Accepted living specification; v1.0 baseline complete; Issue #51 shipped in v1.1.0; Issue #56 shipped in v1.2.0
 Repository: `ach1992/chat-turn-guardian`  
 Primary target: ChatGPT Web on Chromium-based browsers
 
@@ -274,9 +274,9 @@ The self-check probe is itself a new automatic mutation before the resume decisi
 
 Issue #51 is integrated and exact-head CI validated. This section describes the shipped v1.1.0 runtime behavior; live ChatGPT smoke evidence remains pending. See [`IN_CHAT_SELF_CHECK.md`](IN_CHAT_SELF_CHECK.md) for the bounded design and validation boundary.
 
-## 13. Next-version outcome — status-first conversation protocol (Issue #56)
+## 13. v1.2.0 outcome — status-first conversation protocol (Issue #56)
 
-The next-version outcome refines Issue #51 to avoid unnecessary control traffic:
+v1.2.0 refines Issue #51 to avoid unnecessary control traffic:
 
 - a valid `CHAT_TURN_GUARDIAN_STATUS_V1={"decision":"..."}` record at the exact end of the latest assistant response is parsed directly;
 - deterministic hard HOLD remains authoritative, while an obvious deterministic continuation may avoid an unnecessary self-check when no marker exists;
@@ -290,4 +290,4 @@ The next-version outcome refines Issue #51 to avoid unnecessary control traffic:
 
 This protocol does not claim account-level or cross-conversation model memory. It relies on the current conversation context, checks every response independently, and falls back safely when the contract is absent. All permanent identity, OWNER/MIRROR, human-precedence, empty-composer, final revalidation, no-blind-retry, platform-boundary, and advisory-output invariants remain unchanged.
 
-[`CONVERSATION_STATUS_PROTOCOL.md`](CONVERSATION_STATUS_PROTOCOL.md) is authoritative for the exact encoding, state order, fallback rule, and acceptance coverage. Section 12 remains the historical v1.1.0 outcome.
+[`CONVERSATION_STATUS_PROTOCOL.md`](CONVERSATION_STATUS_PROTOCOL.md) is authoritative for the exact encoding, state order, fallback rule, and acceptance coverage. Section 12 remains the historical v1.1.0 outcome. GitHub PR, CI, and Release records own the immutable integration, validation, and delivery evidence for v1.2.0.

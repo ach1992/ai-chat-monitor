@@ -2,11 +2,11 @@
 
 Chat Turn Guardian is a standalone Chromium Manifest V3 extension for safely supervising explicitly selected ChatGPT Web conversations. It reads a strict machine-readable status from the end of the latest assistant response when available, uses conservative local rules for obvious cases, and sends a bounded same-conversation self-check only when the status is missing and the stop remains ambiguous.
 
-**Release status: v1.1.0 is the current release; Issue #56 is a next-version draft change.** Package/manifest version remains `1.1.0` until a separate release-preparation change is approved. The extension has **not** been submitted to or published on the Chrome Web Store.
+**Current release: v1.2.0.** This release delivers the status-first conversation protocol from Issue #56. The extension has **not** been submitted to or published on the Chrome Web Store.
 
 The chat's own agent, Skill, or workflow remains responsible for **what work should happen**. Guardian only decides whether another ordinary turn may be requested without genuine human involvement.
 
-## Next-version capabilities in this draft
+## v1.2.0 capabilities
 
 - Independent supervision of multiple ChatGPT tabs/conversations.
 - Current-tab ON/OFF control with bounded reconnect/recovery.
@@ -53,6 +53,7 @@ Chat Turn Guardian is fail-closed by design:
 Durable references:
 
 - [Architecture](docs/ARCHITECTURE.md)
+- [Changelog](CHANGELOG.md)
 - [Conversation status protocol](docs/CONVERSATION_STATUS_PROTOCOL.md)
 - [v1 validation and security evidence](docs/V1_VALIDATION.md)
 - [Project specification](docs/PROJECT_SPEC.md)
@@ -67,6 +68,14 @@ Durable references:
 - A Telegram bot token and destination only if optional Telegram notifications are desired.
 
 ## Install from source / validated ZIP
+
+For v1.2.0, download these files from the GitHub Release **Assets** section:
+
+- `chat-turn-guardian-1.2.0.zip` — the built extension to install;
+- `SHA256SUMS.txt` — the checksum to verify the ZIP; and
+- `build-info.json` — the exact source-commit provenance.
+
+Do not download GitHub's automatic **Source code (zip)** or **Source code (tar.gz)** archives; those are repository sources, not the built extension. Verify the ZIP against `SHA256SUMS.txt`, extract it, and select the extracted directory whose root directly contains `manifest.json`.
 
 From a fresh clone:
 
@@ -101,9 +110,11 @@ Guardian starts fail-closed; installation alone does not enable automatic contro
 
 Preserve extension/storage identity:
 
-1. Back up the currently loaded unpacked extension folder if desired.
-2. Overwrite the contents of that **same folder** with the newer validated build.
-3. Open `chrome://extensions` and click **Reload** for Chat Turn Guardian.
+1. Use **Pause All** before replacing the files.
+2. Back up the currently loaded unpacked extension folder if desired.
+3. Overwrite the contents of that **same folder** with the newer validated build.
+4. Open `chrome://extensions` and click **Reload** for Chat Turn Guardian.
+5. Resume only after Guardian has reconnected and obtained fresh page evidence.
 
 Do **not** Remove/re-add the extension merely to update a build unless an unavoidable identity-breaking reason has been proven.
 
@@ -149,7 +160,7 @@ These services matched Guardian's current transport when this v1.0 documentation
 
 For **OpenAI**, you may sign into ChatGPT and the API Platform with the same OpenAI identity, but ChatGPT Free/Plus/Pro/Business access is not an API key and does not itself provide Guardian API usage. Create an API project/key through the API Platform and use its separate billing/credits as applicable.
 
-For **Claude / Anthropic**, do not enter `https://api.anthropic.com` as Generic OpenAI-compatible. Guardian v1.0's generic adapter uses OpenAI-style `/chat/completions` + Bearer authentication; Anthropic's native Messages API uses a different protocol/authentication contract. Native Claude support requires a dedicated future Guardian adapter.
+For **Claude / Anthropic**, do not enter `https://api.anthropic.com` as Generic OpenAI-compatible. Guardian's current generic adapter uses OpenAI-style `/chat/completions` + Bearer authentication; Anthropic's native Messages API uses a different protocol/authentication contract. Native Claude support requires a dedicated future Guardian adapter.
 
 Recommended setup flow:
 
@@ -271,7 +282,7 @@ Rare platform states such as a naturally occurring silent terminal/no fresh assi
 
 ## Chrome Web Store status
 
-The v1.0 codebase is engineered to be Chrome Web Store ready: Manifest V3, production icons/assets, deterministic package/provenance, no remotely hosted executable code, permission/privacy justifications, public privacy policy, and listing copy are maintained in the repository.
+The current codebase is engineered to be Chrome Web Store ready: Manifest V3, production icons/assets, deterministic package/provenance, no remotely hosted executable code, permission/privacy justifications, public privacy policy, and listing copy are maintained in the repository.
 
 See [docs/STORE_READINESS.md](docs/STORE_READINESS.md) and [docs/CHROME_WEB_STORE_LISTING.md](docs/CHROME_WEB_STORE_LISTING.md).
 
@@ -279,6 +290,6 @@ See [docs/STORE_READINESS.md](docs/STORE_READINESS.md) and [docs/CHROME_WEB_STOR
 
 ## Project boundary and future development
 
-Chat Turn Guardian v1.0 is a focused supervision product, not a general browser agent, project manager, GitHub orchestrator, approval authority, or safeguard-bypass mechanism. Telegram v1 is outbound-only; inbound commands/remote control require a separate future security/authorization design.
+Chat Turn Guardian is a focused supervision product, not a general browser agent, project manager, GitHub orchestrator, approval authority, or safeguard-bypass mechanism. Telegram v1 is outbound-only; inbound commands/remote control require a separate future security/authorization design.
 
 The v1.0 baseline is intentionally modular so future work can add notification channels, native provider adapters, page adapters, or other bounded capabilities through normal Issues/PRs without changing guarded-send authority. Permanent product invariants live in [docs/PROJECT_SPEC.md](docs/PROJECT_SPEC.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

@@ -1,15 +1,15 @@
 # Chrome Web Store Readiness
 
-Status: **v1.0 engineering readiness complete; Chrome Web Store publication deferred.**
+Status: **v1.2.0 engineering readiness complete; Chrome Web Store publication deferred.**
 
-Chat Turn Guardian v1.0 is engineered so a later public Chrome Web Store submission does not require weakening its security, privacy, permission, or architecture boundaries. This document is the durable release/distribution runbook. It is **not** a claim that Google has reviewed, approved, or published the extension.
+Chat Turn Guardian v1.2.0 is engineered so a later public Chrome Web Store submission does not require weakening its security, privacy, permission, or architecture boundaries. This document is the durable release/distribution runbook. It is **not** a claim that Google has reviewed, approved, or published the extension.
 
 Chrome Web Store policies and Developer Dashboard wording are version-sensitive. Re-verify current official requirements immediately before any future submission.
 
-## v1.0 release architecture
+## Current release architecture
 
 - Manifest V3, Chrome/Chromium 114+.
-- Product/manifest/package version: `1.0.0` for the v1.0 release line.
+- Product/manifest/package version: `1.2.0`.
 - Production extension/action icon set at 16, 32, 48, and 128 pixels under `src/assets/`.
 - Toolbar action opens the Side Panel through `chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })`; unsupported tabs remain disabled by explicit host/tab gating.
 - No remotely hosted executable code. AI-provider and Telegram responses are data only and are never evaluated as extension logic.
@@ -19,7 +19,7 @@ Chrome Web Store policies and Developer Dashboard wording are version-sensitive.
 
 ## Product and authority constraints
 
-Store distribution must preserve the v1.0 product boundary:
+Store distribution must preserve the current product boundary:
 
 - one narrow purpose: supervise explicitly selected ChatGPT conversations, safely continue only needless turn boundaries, and notify the user when configured;
 - human interaction always wins;
@@ -69,7 +69,7 @@ Current behavior/disclosure includes:
 - optional AI classification sends only minimized, secret-redacted bounded recent context directly to the selected provider;
 - optional Telegram sends bounded notification metadata and does not send full ChatGPT messages by default;
 - provider API keys and Telegram bot tokens are not rendered back after storage and do not enter page/content/log/audit/status surfaces;
-- there is no developer-operated backend, analytics service, advertising service, or data broker in v1.0;
+- there is no developer-operated backend, analytics service, advertising service, or data broker in the current release;
 - the privacy policy records the Chrome Web Store User Data Policy / Limited Use commitment applicable to the intended distribution path.
 
 The Side Panel contains provider/Telegram disclosures and a collapsed **Privacy & Data** section at the bottom. The authoritative reviewer/listing copy is [`CHROME_WEB_STORE_LISTING.md`](CHROME_WEB_STORE_LISTING.md).
@@ -84,9 +84,9 @@ Repository assets currently include:
 
 A future submission still needs at least one clean screenshot captured from the **real current runtime** at an accepted Store size such as 1280x800 or 640x400. Do not fabricate/mock a screenshot and do not expose provider keys, Telegram bot tokens, destination identifiers, or sensitive ChatGPT content.
 
-## v1.0 engineering evidence
+## Engineering evidence
 
-The v1.0 baseline has production-like validation for the principal advertised surfaces, including:
+The v1.0 baseline and subsequent release regressions provide production-like validation for the principal advertised surfaces, including:
 
 - multi-tab supervision and guarded AUTO behavior;
 - human-interaction and OWNER/MIRROR safety paths;
@@ -117,4 +117,4 @@ For unpacked validation upgrades, overwrite the **same existing unpacked extensi
 
 ## Publication gate
 
-v1.0 engineering readiness does not imply Store delivery. Actual Chrome Web Store upload/submission/publication is an external production release action and is intentionally deferred. No Store action should be performed until it becomes an explicit owner-authorized outcome with current policy/package/listing evidence.
+v1.2.0 engineering readiness does not imply Store delivery. Actual Chrome Web Store upload/submission/publication is an external production release action and is intentionally deferred. No Store action should be performed until it becomes an explicit owner-authorized outcome with current policy/package/listing evidence.

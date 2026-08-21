@@ -1,6 +1,6 @@
 # In-chat self-check classifier — v1.1.0 implementation
 
-Status: Historical v1.1.0 contract for Issue #51. The next-version terminal-status protocol in [`CONVERSATION_STATUS_PROTOCOL.md`](CONVERSATION_STATUS_PROTOCOL.md) supersedes the repeated stop-response shape: a valid status on the latest assistant response is consumed directly, and this self-check is now only a bounded fallback when that status is absent.
+Status: Historical v1.1.0 contract for Issue #51. The v1.2.0 terminal-status protocol in [`CONVERSATION_STATUS_PROTOCOL.md`](CONVERSATION_STATUS_PROTOCOL.md) supersedes the repeated stop-response shape: a valid status on the latest assistant response is consumed directly, and this self-check is now only a bounded fallback when that status is absent.
 
 This document records the v1.1.0 design added to the already validated v1.0 baseline. Issue #51 owns implementation and acceptance.
 
@@ -176,8 +176,9 @@ Issue #51 should add focused automated and live coverage for at least:
 
 ## 11. Documentation truth
 
-After Issue #51 integration:
+After Issue #51 integration and its v1.2.0 supersession:
 
-- `README.md` and `docs/ARCHITECTURE.md` describe the shipped v1.1.0 runtime;
+- this document remains the historical v1.1.0 self-check contract;
+- `README.md`, `docs/ARCHITECTURE.md`, and `docs/CONVERSATION_STATUS_PROTOCOL.md` describe the shipped v1.2.0 status-first runtime;
 - `docs/V1_VALIDATION.md` remains the historical v1.0 acceptance record;
 - exact-head CI validates the implementation; live ChatGPT smoke evidence must not be claimed until it exists.

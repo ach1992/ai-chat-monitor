@@ -511,9 +511,9 @@ Existing stagnation tracking and the hard fuse must include repeated probe/resum
 
 See [`IN_CHAT_SELF_CHECK.md`](IN_CHAT_SELF_CHECK.md) and Issue #51 for the implementation details and acceptance scenarios.
 
-## 15. Conversation terminal-status override (Issue #56 / next version)
+## 15. Conversation terminal-status override (Issue #56 / v1.2.0)
 
-The next-version runtime replaces the normal repeated probe-first path in Section 14 with a status-first path. The historical v1.1.0 section above remains evidence for Issue #51; where the two sections differ, this section governs the current implementation.
+The v1.2.0 runtime replaces the normal repeated probe-first path in Section 14 with a status-first path. The historical v1.1.0 section above remains evidence for Issue #51; where the two sections differ, this section governs the current implementation.
 
 ```text
 STABLE RESPONSE

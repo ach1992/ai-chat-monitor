@@ -1,6 +1,6 @@
 # Conversation terminal-status protocol
 
-Status: Implemented for [Issue #56](https://github.com/ach1992/chat-turn-guardian/issues/56) on the next-version draft branch. This contract supersedes the repeated per-stop reply shape from Issue #51 while retaining its guarded in-chat fallback.
+Status: Shipped in v1.2.0 for [Issue #56](https://github.com/ach1992/chat-turn-guardian/issues/56). This contract supersedes the repeated per-stop reply shape from Issue #51 while retaining its guarded in-chat fallback.
 
 ## Goal
 

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Chat Turn Guardian",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Safely supervises explicitly selected ChatGPT conversations without bypassing human or platform boundaries.",
   "minimum_chrome_version": "114",
   "permissions": ["storage", "sidePanel", "notifications"],
