@@ -45,18 +45,18 @@ function notification(overrides = {}) {
   };
 }
 
-test("Telegram notification text is structured, event-aware, and bounded", () => {
+test("Telegram notification text is structured, event-aware, HTML-safe, and bounded", () => {
   assert.equal(
     telegramNotificationText(notification()),
     [
-      "🛡️ Chat Turn Guardian",
+      "<b>🛡️ Chat Turn Guardian</b>",
       "━━━━━━━━━━━━",
-      "✅ ChatGPT response finished",
+      "<b>✅ ChatGPT response finished</b>",
       "",
       "A selected assistant response finished.",
       "",
-      "💬 Conversation",
-      "conversation-1234567890",
+      "<b>💬 Conversation</b>",
+      "<code>conversation-1234567890</code>",
     ].join("\n"),
   );
 
@@ -69,16 +69,17 @@ test("Telegram notification text is structured, event-aware, and bounded", () =>
     ["EXTENSION_ERROR", "🚨"],
   ]);
   for (const [event, icon] of eventIcons) {
-    assert.match(telegramNotificationText(notification({ event })), new RegExp(`\\n${icon} `, "u"));
+    assert.match(telegramNotificationText(notification({ event })), new RegExp(`\\n<b>${icon} `, "u"));
   }
 
   const bounded = telegramNotificationText(notification({
-    title: " title ".repeat(100),
-    message: " details ".repeat(200),
-    conversationId: "conversation-".repeat(100),
+    title: " <title>& ".repeat(100),
+    message: " <details>& ".repeat(200),
+    conversationId: "conversation-<&>".repeat(100),
   }));
   assert.ok(bounded.length <= 700);
   assert.doesNotMatch(bounded, /Conversation:/);
+  assert.doesNotMatch(bounded, /<title>|<details>/);
 });
 
 test("browser and inherited Telegram channels coexist for the same Guardian event", async () => {
@@ -97,8 +98,8 @@ test("browser and inherited Telegram channels coexist for the same Guardian even
   assert.equal(telegram.length, 1);
   assert.equal(telegram[0].token, TOKEN);
   assert.equal(telegram[0].destination, "123456789");
-  assert.match(telegram[0].text, /🛡️ Chat Turn Guardian/);
-  assert.match(telegram[0].text, /💬 Conversation\nconversation-1234567890/);
+  assert.match(telegram[0].text, /<b>🛡️ Chat Turn Guardian<\/b>/);
+  assert.match(telegram[0].text, /<b>💬 Conversation<\/b>\n<code>conversation-1234567890<\/code>/);
   assert.equal(settings.snapshot().health.status, "HEALTHY");
 });
 
@@ -134,7 +135,7 @@ test("custom Telegram event selection can notify without enabling the browser ev
   await manager.deliver(notification({ event: "UNSURE", browserEnabled: false }));
   assert.equal(browserCalls, 0);
   assert.equal(telegramEvents.length, 1);
-  assert.match(telegramEvents[0], /⚠️ ChatGPT response finished/);
+  assert.match(telegramEvents[0], /<b>⚠️ ChatGPT response finished<\/b>/);
 });
 
 test("Telegram failure is isolated after browser delivery and records only sanitized health", async () => {
@@ -167,8 +168,9 @@ test("Test notification is structured, explicit, and independent of the enabled 
   assert.equal(sent.length, 1);
   assert.equal(sent[0].token, TOKEN);
   assert.equal(sent[0].destination, "123456789");
-  assert.match(sent[0].text, /🧪 Telegram test successful/);
+  assert.match(sent[0].text, /<b>🧪 Telegram test successful<\/b>/);
   assert.match(sent[0].text, /Delivery is configured correctly\./);
+  assert.match(sent[0].text, /<i>No chat content was included\.<\/i>/);
   assert.doesNotMatch(sent[0].text, /conversation|assistant response/i);
   assert.equal(response.enabled, false);
   assert.equal(response.health.status, "HEALTHY");
@@ -197,7 +199,7 @@ test("Test notification can use an unsaved Side Panel draft without persisting i
   assert.equal(sent.length, 1);
   assert.equal(sent[0].token, DRAFT_TOKEN);
   assert.equal(sent[0].destination, "987654321");
-  assert.match(sent[0].text, /🧪 Telegram test successful/);
+  assert.match(sent[0].text, /<b>🧪 Telegram test successful<\/b>/);
   assert.deepEqual(settings.snapshot(), before);
   assert.equal(response.configured, true);
   assert.equal(response.enabled, true);

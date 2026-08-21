@@ -19,9 +19,12 @@ import type {
   TelegramSettingsState,
 } from "./types.js";
 
-const NOTIFICATION_ICON = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAACmklEQVR4nO3byVEjQQAF0c94ACfGAvDfmvGA27jAHAgCNGqhXqpry0wH1NH/aYno0sPj88t7DNuv1hdgbRMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBVOrv25/Wl7CYACr0OX6PCARwcv+P3hsCAZzYrbF7QiCAk7o3ci8IBHBCa8ftAYEACrd11NYIBFCwvWO2RCCAQh0dsRUCARSoxHhPv18LXMn2BHCwkcdPBHCo0cdPBLC7GcZPBLCrWcZPBLC5mcZPBLCp2cZPBLC6GcdPBLCqWcdPBHC3mcdPBPBjs4+fCOBmhPETASxGGT8RwFWk8RMBXEQbP+kYQO3n48Txk04B1D5HTx0/6RBA7XP05PGTzgDUPkdPHz/pCEDtc/SO/1EXAGqfo3f8r5oDqH2O3vEvawqg9jl6x7+uGYDa72THX64ZgBI3s+ZvhxnHTxp/BdRA4Pg/1/xH4JkIHP9+zQEk5yBw/HV1ASApi8Dx1/fw+Pzy3voivtf6//IJZ/yko0+Az1rf/NavX7vuACTtRqCNn3QKIKk/BnH8pGMASb1RqOMnnQNIzh+HPH4yAIDkvJHo4yeDAEjKj+X4Hw0DICk3muN/NRSA5Ph4jn/ZcACS/SM6/nVDAki2j+n4yw0LIFk/quPfrruHQXtbeojk8PebBoDta+ivADueAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOD9A59V1Pv7P/C7AAAAAElFTkSuQmCC";
+const NOTIFICATION_ICON = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAACmklEQVR4nO3byVEjQQAF0c94ACfGAvDfmvGA27jAHAgCNGqhXqpry0wH1NH/aYno0sPj88t7DNuv1hdgbRMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBVOrv25/Wl7CYACr0OX6PCARwcv+P3hsCAZzYrbF7QiCAk7o3ci8IBHBCa8ftAYEACrd11NYIBFCwvWO2RCCAQh0dsRUCARSoxHhPv18LXMn2BHCwkcdPBHCo0cdPBLC7GcZPBLCrWcZPBLC5mcZPBLCp2cZPBLC6GcdPBLCqWcdPBHC3mcdPBPBjs4+fCOBmhPETASxGGT8RwFWk8RMBXEQbP+kYQO3n48Txk04B1D5HTx0/6RBA7XP05PGTzgDUPkdPHz/pCEDtc/SO/1EXAGqfo3f8r5oDqH2O3vEvawqg9jl6x7+uGYDa72THX64ZgBI3s+ZvhxnHTxp/BdRA4Pg/1/xH4JkIHP9+zQEk5yBw/HV1ASApi8Dx1/fw+Pzy3voivtf6//IJZ/yko0+Az1rf/NavX7vuACTtRqCNn3QKIKk/BnH8pGMASb1RqOMnnQNIzh+HPH4yAIDkvJHo4yeDAEjKj+X4Hw0DICk3muN/NRSA5Ph4jn/ZcACS/SM6/nVDAki2j+n4yw0LIFk/quPfrruHQXtbeojk8PebBoDta+ivADueAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOD9A59V1Pv7P/C7AAAAAElFTkSuQmCC";
 const MAX_TELEGRAM_MESSAGE_LENGTH = 700;
 const TELEGRAM_DIVIDER = "━━━━━━━━━━━━";
+const MAX_TELEGRAM_TITLE_HTML_LENGTH = 140;
+const MAX_TELEGRAM_DETAIL_HTML_LENGTH = 260;
+const MAX_TELEGRAM_CONVERSATION_HTML_LENGTH = 120;
 
 const TELEGRAM_EVENT_ICON: Record<GuardianNotification["event"], string> = {
   RESPONSE_COMPLETE: "✅",
@@ -70,30 +73,68 @@ function sameConfiguration(
   return stored.botToken === candidate.botToken && stored.destination === candidate.destination;
 }
 
+function normalizedTelegramText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function escapeTelegramHtml(value: string, maxEncodedLength: number): string {
+  let escaped = "";
+  for (const char of value) {
+    const encoded = char === "&"
+      ? "&amp;"
+      : char === "<"
+        ? "&lt;"
+        : char === ">"
+          ? "&gt;"
+          : char === '"'
+            ? "&quot;"
+            : char === "'"
+              ? "&#39;"
+              : char;
+    if (escaped.length + encoded.length > maxEncodedLength) break;
+    escaped += encoded;
+  }
+  return escaped;
+}
+
 export function telegramNotificationText(notification: GuardianNotification): string {
-  const title = notification.title.replace(/\s+/g, " ").trim().slice(0, 120);
-  const message = notification.message.replace(/\s+/g, " ").trim().slice(0, 360);
-  const conversation = notification.conversationId?.replace(/\s+/g, " ").trim().slice(0, 80);
+  const title = escapeTelegramHtml(
+    normalizedTelegramText(notification.title),
+    MAX_TELEGRAM_TITLE_HTML_LENGTH,
+  );
+  const message = escapeTelegramHtml(
+    normalizedTelegramText(notification.message),
+    MAX_TELEGRAM_DETAIL_HTML_LENGTH,
+  );
+  const conversation = notification.conversationId === undefined
+    ? undefined
+    : escapeTelegramHtml(
+      normalizedTelegramText(notification.conversationId),
+      MAX_TELEGRAM_CONVERSATION_HTML_LENGTH,
+    );
   const sections = [
-    "🛡️ Chat Turn Guardian",
+    "<b>🛡️ Chat Turn Guardian</b>",
     TELEGRAM_DIVIDER,
-    `${TELEGRAM_EVENT_ICON[notification.event]} ${title}`,
+    `<b>${TELEGRAM_EVENT_ICON[notification.event]} ${title}</b>`,
     ...(message.length === 0 ? [] : ["", message]),
     ...(conversation === undefined || conversation.length === 0
       ? []
-      : ["", "💬 Conversation", conversation]),
+      : ["", "<b>💬 Conversation</b>", `<code>${conversation}</code>`]),
   ];
-  return sections.join("\n").slice(0, MAX_TELEGRAM_MESSAGE_LENGTH);
+  const text = sections.join("\n");
+  return text.length <= MAX_TELEGRAM_MESSAGE_LENGTH
+    ? text
+    : "<b>🛡️ Chat Turn Guardian</b>\n🚨 Notification formatting exceeded its safe bound.";
 }
 
 function telegramTestNotificationText(): string {
   return [
-    "🛡️ Chat Turn Guardian",
+    "<b>🛡️ Chat Turn Guardian</b>",
     TELEGRAM_DIVIDER,
-    "🧪 Telegram test successful",
+    "<b>🧪 Telegram test successful</b>",
     "",
     "Delivery is configured correctly.",
-    "No chat content was included.",
+    "<i>No chat content was included.</i>",
   ].join("\n");
 }
 
