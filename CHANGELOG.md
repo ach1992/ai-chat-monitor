@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.3 — 2026-08-22
+
+- Fixed a live false-positive guarded-send error that could occur when ChatGPT completed a Guardian-triggered response too quickly for the generation/Stop state to be sampled.
+- Preserved fail-closed send verification: fast completion is reconciled only when the exact intended Guardian user turn is present, the same conversation/route remains current, human state is unchanged, the page is high-confidence and idle, no blocker is present, and a fresh assistant response follows that turn.
+- Preserved the no-blind-retry invariant; unresolved or stale send evidence remains `AMBIGUOUS_WRITE`.
+- Upgraded Telegram notification presentation to Telegram HTML with bold Guardian/event headings, bold Conversation labels, code-formatted conversation IDs, and italicized privacy text in Test notifications.
+- Escaped all dynamic Telegram text before HTML formatting so notification content cannot break markup or inject formatting.
+- Added regression coverage for rapid completed-send reconciliation, stale/human-changed fail-closed cases, Telegram HTML structure/escaping/bounds, and `parse_mode: HTML` transport behavior.
+
+Tracking: [PR #64](https://github.com/ach1992/chat-turn-guardian/pull/64).
+
 ## 1.2.2 — 2026-08-22
 
 - Reworked Telegram notifications into a structured, easier-to-scan layout with a consistent Guardian header, divider, event-specific visual markers, clearly separated details, and conversation identity.
