@@ -184,6 +184,68 @@ test("guarded send waits for asynchronously enabled ChatGPT send control", async
   assert.equal(result.observedAssistantFingerprint, assistantFingerprint);
 });
 
+test("guarded send verifies a fast completed turn without waiting for the verification timeout", async () => {
+  const GuardianContent = await loadAdapter();
+  const document = new FakeDocument();
+  const userTurn = new FakeElement({ attrs: { "data-testid": "conversation-turn-user-1" } });
+  const assistantTurn = new FakeElement({ attrs: { "data-testid": "conversation-turn-assistant-1" } });
+  const user = new FakeElement({ textContent: "Run the next step.", order: 1 });
+  const assistant = new FakeElement({
+    textContent: "Ready for the next step.",
+    attrs: { "data-message-id": "assistant-1" },
+    order: 2,
+  });
+  user.parent = userTurn;
+  assistant.parent = assistantTurn;
+  const composer = new FakeTextAreaElement({ value: "", order: 3 });
+  let clicks = 0;
+  const send = new FakeButtonElement({
+    attrs: { "data-testid": "send-button" },
+    order: 4,
+    onClick: () => {
+      clicks += 1;
+      const sentTurn = new FakeElement({ attrs: { "data-testid": "conversation-turn-user-2" } });
+      const sentUser = new FakeElement({ textContent: composer.value, order: 5 });
+      sentUser.parent = sentTurn;
+      const completedTurn = new FakeElement({ attrs: { "data-testid": "conversation-turn-assistant-2" } });
+      const completedAssistant = new FakeElement({
+        textContent: 'CHAT_TURN_GUARDIAN_STATUS_V1={"decision":"HOLD_HUMAN_OPERATION"}',
+        attrs: { "data-message-id": "assistant-2" },
+        order: 6,
+      });
+      completedAssistant.parent = completedTurn;
+      document.set('[data-message-author-role="user"]', [user, sentUser]);
+      document.set('[data-message-author-role="assistant"]', [assistant, completedAssistant]);
+      // Intentionally never expose a Stop control: this models a response that
+      // finishes before a hidden/background tab can sample the transient state.
+    },
+  });
+  send.disabled = false;
+
+  document.set('[data-message-author-role="user"]', [user]);
+  document.set('[data-message-author-role="assistant"]', [assistant]);
+  document.set("#prompt-textarea", [composer]);
+  document.set('button[data-testid="send-button"]', [send]);
+
+  const assistantFingerprint = await sha256(assistant.textContent);
+  const adapter = new GuardianContent.BrowserChatGPTAdapter(document, { pathname: "/c/chat-1" });
+  const startedAt = Date.now();
+  const result = await adapter.guardedSend({
+    decisionId: "decision-background-fast-completion",
+    conversationId: "chat-1",
+    routeKey: "/c/chat-1",
+    assistantFingerprint,
+    assistantDomMessageId: "assistant-1",
+    continuationText: "Continue.",
+  });
+
+  assert.equal(clicks, 1);
+  assert.equal(result.status, "VERIFIED");
+  assert.equal(result.observedConversationId, "chat-1");
+  assert.equal(result.observedAssistantFingerprint, assistantFingerprint);
+  assert.ok(Date.now() - startedAt < 1_000, "verification should not wait for the 5s timeout");
+});
+
 test("trusted human-state change during post-mutation settle still wins", async () => {
   const GuardianContent = await loadAdapter();
   let humanStateCurrent = true;
