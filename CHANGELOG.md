@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.2 — 2026-08-22
+
+- Reworked Telegram notifications into a structured, easier-to-scan layout with a consistent Guardian header, divider, event-specific visual markers, clearly separated details, and conversation identity.
+- Added distinct visual markers for response completion, human-attention, uncertainty, stagnation, provider-error, and extension-error notifications.
+- Updated the Telegram test notification to use the same structured presentation while preserving its no-chat-content privacy boundary.
+- Preserved existing notification selection, delivery authority, credential handling, 700-character message bound, browser notifications, and ChatGPT automation behavior.
+- Added regression coverage for Telegram message structure, event markers, bounds, channel coexistence, and test-notification privacy.
+
+Tracking: [PR #62](https://github.com/ach1992/chat-turn-guardian/pull/62).
+
 ## 1.2.1 — 2026-08-20
 
 - Reworked the one-time conversation protocol into a readable multiline prompt that explicitly preserves the current project's direction, scope, priority, and plan.
