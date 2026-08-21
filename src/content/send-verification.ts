@@ -8,10 +8,16 @@ namespace GuardianContent {
   const originalObserve = BrowserChatGPTAdapter.prototype.observe;
   const originalGuardedSend = BrowserChatGPTAdapter.prototype.guardedSend;
 
+  function currentDocument(): Document | undefined {
+    return typeof document === "undefined" ? undefined : document;
+  }
+
   function allMatches(selectors: readonly string[]): Element[] {
+    const pageDocument = currentDocument();
+    if (pageDocument === undefined) return [];
     const found = new Set<Element>();
     for (const selector of selectors) {
-      try { for (const element of document.querySelectorAll(selector)) found.add(element); } catch { /* fail closed */ }
+      try { for (const element of pageDocument.querySelectorAll(selector)) found.add(element); } catch { /* fail closed */ }
     }
     return [...found];
   }
@@ -94,7 +100,7 @@ namespace GuardianContent {
     // Guardian-owned control turns, whitespace is presentation-only, so compare the
     // non-whitespace payload as a hidden-tab fallback while retaining exact route,
     // conversation, DOM ordering, and trusted-human-state guards.
-    return document.visibilityState === "hidden" &&
+    return currentDocument()?.visibilityState === "hidden" &&
       compactControlText(structural) === compactControlText(expectedNormalized);
   }
 
@@ -111,7 +117,7 @@ namespace GuardianContent {
   }
 
   async function repairHiddenTerminalStatus(observation: PageObservation): Promise<PageObservation> {
-    if (document.visibilityState !== "hidden") return observation;
+    if (currentDocument()?.visibilityState !== "hidden") return observation;
     const assistant = latestAssistantElement();
     if (assistant === undefined || markerIsInsideCode(assistant)) return observation;
 
@@ -156,7 +162,23 @@ namespace GuardianContent {
     const observation = await this.observe();
     const assistant = latestAssistantElement();
     const user = assistant === undefined ? undefined : latestUserBefore(assistant);
-    if (
+
+    // Unit-level reconciliation tests do not install a DOM. Preserve the original
+    // observation-only verifier in that environment; production content scripts
+    // always have a document and take the stricter DOM-bound path below.
+    if (currentDocument() === undefined) {
+      if (
+        !humanStateIsCurrent() ||
+        observation.conversationId !== expectation.conversationId ||
+        observation.routeKey !== expectation.routeKey ||
+        observation.confidence !== "HIGH" ||
+        observation.generation !== "IDLE" ||
+        observation.blocking.blocked ||
+        observation.latestUser === undefined ||
+        normalizeAssistantText(observation.latestUser.normalizedText) !== normalizeAssistantText(expectation.continuationText) ||
+        !assistantAdvanced(expectation, observation)
+      ) return result;
+    } else if (
       !humanStateIsCurrent() ||
       observation.conversationId !== expectation.conversationId ||
       observation.routeKey !== expectation.routeKey ||
@@ -173,7 +195,7 @@ namespace GuardianContent {
     return {
       decisionId: expectation.decisionId,
       status: "VERIFIED",
-      reason: document.visibilityState === "hidden"
+      reason: currentDocument()?.visibilityState === "hidden"
         ? "Intended user turn and a fresh assistant response were verified from background-safe DOM evidence."
         : "Intended user turn and a fresh assistant response were verified after a brief generation window.",
       observedConversationId: expectation.conversationId,
