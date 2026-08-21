@@ -1,20 +1,20 @@
 # Chrome Web Store Readiness
 
-Status: **v1.2.3 engineering readiness complete; Chrome Web Store publication deferred.**
+Status: **v1.2.4 engineering readiness complete; Chrome Web Store publication deferred.**
 
-Chat Turn Guardian v1.2.3 is engineered so a later public Chrome Web Store submission does not require weakening its security, privacy, permission, or architecture boundaries. This document is the durable release/distribution runbook. It is **not** a claim that Google has reviewed, approved, or published the extension.
+Chat Turn Guardian v1.2.4 is engineered so a later public Chrome Web Store submission does not require weakening its security, privacy, permission, or architecture boundaries. This document is the durable release/distribution runbook. It is **not** a claim that Google has reviewed, approved, or published the extension.
 
 Chrome Web Store policies and Developer Dashboard wording are version-sensitive. Re-verify current official requirements immediately before any future submission.
 
 ## Current release architecture
 
 - Manifest V3, Chrome/Chromium 114+.
-- Product/manifest/package version: `1.2.3`.
+- Product/manifest/package version: `1.2.4`.
 - Production extension/action icon set at 16, 32, 48, and 128 pixels under `src/assets/`.
 - Toolbar action opens the Side Panel through `chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })`; unsupported tabs remain disabled by explicit host/tab gating.
 - No remotely hosted executable code. AI-provider and Telegram responses are data only and are never evaluated as extension logic.
 - Telegram notification presentation is structured, event-aware, and sent with escaped Telegram HTML emphasis; it remains outbound-only and observational, and formatting does not expand notification data, credentials, or ChatGPT mutation authority.
-- Guarded-send verification remains fail-closed; a very fast completed response can reconcile a previously ambiguous send only from the exact intended user turn plus fresh same-conversation assistant evidence, with unchanged human state and no blind retry.
+- Guarded-send verification remains fail-closed; background/inactive-tab timer throttling is tolerated by accepting either the transient generation signal or an exact intended Guardian user turn followed by a genuinely fresh same-conversation assistant turn, while preserving current route, trusted human state, and no-blind-retry behavior.
 - `scripts/lint.mjs` rejects `eval()`, `new Function()`, remote `importScripts()`, remote dynamic imports, and remotely hosted executable `<script>` sources in extension source.
 - Release packaging is deterministic, verifies manifest-referenced assets, requires `manifest.json` / `package.json` version parity, and excludes TypeScript, source maps, `.env` files, credentials, and unrelated development artifacts.
 - CI validates the exact candidate SHA and retains release-package/provenance artifacts.
@@ -119,4 +119,4 @@ For unpacked validation upgrades, overwrite the **same existing unpacked extensi
 
 ## Publication gate
 
-v1.2.3 engineering readiness does not imply Store delivery. Actual Chrome Web Store upload/submission/publication is an external production release action and is intentionally deferred. No Store action should be performed until it becomes an explicit owner-authorized outcome with current policy/package/listing evidence.
+v1.2.4 engineering readiness does not imply Store delivery. Actual Chrome Web Store upload/submission/publication is an external production release action and is intentionally deferred. No Store action should be performed until it becomes an explicit owner-authorized outcome with current policy/package/listing evidence.
