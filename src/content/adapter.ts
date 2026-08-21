@@ -463,6 +463,7 @@ namespace GuardianContent {
 
       const usersBefore = userMatches(this.#document);
       const userCountBefore = usersBefore.length;
+      const assistantCountBefore = assistantMatches(this.#document).length;
       const latestUserBefore = usersBefore.at(-1);
       const latestUserTextBefore = latestUserBefore === undefined ? undefined : normalizeAssistantText(elementText(latestUserBefore));
       if (!setComposerText(composer, expectation.continuationText)) {
@@ -519,6 +520,9 @@ namespace GuardianContent {
         expectation,
         userCountBefore,
         latestUserTextBefore,
+        assistantCountBefore,
+        capturedAssistant,
+        humanStateIsCurrent,
         SEND_VERIFICATION_TIMEOUT_MS,
       );
       if (!verified) {
@@ -537,12 +541,16 @@ namespace GuardianContent {
       expectation: GuardedContinuationExpectation,
       userCountBefore: number,
       latestUserTextBefore: string | undefined,
+      assistantCountBefore: number,
+      assistantBefore: Element,
+      humanStateIsCurrent: GuardedHumanStateCheck,
       timeoutMs: number,
     ): Promise<boolean> {
       return new Promise((resolve) => {
         let settled = false;
         let sawUserTurn = false;
         let sawGeneration = false;
+        const intendedText = normalizeAssistantText(expectation.continuationText);
         const finish = (value: boolean): void => {
           if (settled) return;
           settled = true;
@@ -552,6 +560,7 @@ namespace GuardianContent {
         };
         const check = (): void => {
           if (
+            !humanStateIsCurrent() ||
             this.currentConversationId() !== expectation.conversationId ||
             this.currentRouteKey() !== expectation.routeKey
           ) {
@@ -563,14 +572,34 @@ namespace GuardianContent {
           if (latestUser !== undefined) {
             const latestText = normalizeAssistantText(elementText(latestUser));
             if (
-              latestText === normalizeAssistantText(expectation.continuationText) &&
+              latestText === intendedText &&
               (users.length > userCountBefore || latestUserTextBefore !== latestText)
             ) {
               sawUserTurn = true;
             }
           }
           if (firstMatch<HTMLElement>(this.#document, STOP_SELECTORS) !== undefined) sawGeneration = true;
-          if (sawUserTurn && sawGeneration) finish(true);
+
+          // Hidden Chromium tabs may throttle timers enough for a fast response to
+          // finish without the transient Stop control ever being sampled. A fresh
+          // assistant turn ordered after the exact Guardian user turn is equivalent
+          // positive evidence that the guarded send was accepted, and it is detected
+          // directly from DOM mutation rather than waiting for the timeout path.
+          let sawFreshAssistantTurn = false;
+          if (sawUserTurn) {
+            const assistants = assistantMatches(this.#document);
+            const latestAssistant = assistants.at(-1);
+            if (
+              latestAssistant !== undefined &&
+              (assistants.length > assistantCountBefore || latestAssistant !== assistantBefore)
+            ) {
+              const precedingUser = latestUserBeforeAssistant(this.#document, latestAssistant);
+              sawFreshAssistantTurn = precedingUser !== undefined &&
+                normalizeAssistantText(elementText(precedingUser)) === intendedText;
+            }
+          }
+
+          if (sawUserTurn && (sawGeneration || sawFreshAssistantTurn)) finish(true);
         };
         const observer = new MutationObserver(check);
         observer.observe(this.#document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
