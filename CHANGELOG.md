@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.1 — 2026-08-20
+
+- Reworked the one-time conversation protocol into a readable multiline prompt that explicitly preserves the current project's direction, scope, priority, and plan.
+- Preserved those line breaks when Guardian writes into ChatGPT's contenteditable composer.
+- Added exact status-specific automatic replies: autonomous continuation for `CONTINUE`, one bounded recheck for `PLATFORM_ERROR`/`RATE_LIMIT`, one reclassification request for `UNSURE`, and no message for HOLD or `COMPLETE`.
+- Prevented recovery and uncertainty replies from repeating within the same human-interaction epoch while retaining identity, OWNER/MIRROR, human-precedence, no-blind-retry, stagnation, and hard-fuse safeguards.
+
+Tracking: [Issue #57](https://github.com/ach1992/chat-turn-guardian/issues/57).
+
 ## 1.2.0 — 2026-08-20
 
 - Added the strict terminal `CHAT_TURN_GUARDIAN_STATUS_V1` protocol so a machine-readable final status is consumed directly without an unnecessary self-check.

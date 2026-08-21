@@ -1,6 +1,6 @@
 # Chat Turn Guardian — Project Specification
 
-Status: Accepted living specification; v1.0 baseline complete; Issue #51 shipped in v1.1.0; Issue #56 shipped in v1.2.0
+Status: Accepted living specification; v1.0 baseline complete; Issue #51 shipped in v1.1.0; Issue #56 shipped in v1.2.0; Issue #57 shipped in v1.2.1
 Repository: `ach1992/chat-turn-guardian`  
 Primary target: ChatGPT Web on Chromium-based browsers
 
@@ -291,3 +291,17 @@ v1.2.0 refines Issue #51 to avoid unnecessary control traffic:
 This protocol does not claim account-level or cross-conversation model memory. It relies on the current conversation context, checks every response independently, and falls back safely when the contract is absent. All permanent identity, OWNER/MIRROR, human-precedence, empty-composer, final revalidation, no-blind-retry, platform-boundary, and advisory-output invariants remain unchanged.
 
 [`CONVERSATION_STATUS_PROTOCOL.md`](CONVERSATION_STATUS_PROTOCOL.md) is authoritative for the exact encoding, state order, fallback rule, and acceptance coverage. Section 12 remains the historical v1.1.0 outcome. GitHub PR, CI, and Release records own the immutable integration, validation, and delivery evidence for v1.2.0.
+
+## 14. v1.2.1 outcome — formatted protocol and status-specific replies (Issue #57)
+
+v1.2.1 preserves the v1.2.0 status-first contract while making its visible control traffic deterministic and decision-specific:
+
+- the one-time bootstrap has stable readable sections and explicitly cannot redirect or continue the existing task;
+- contenteditable composer insertion preserves its exact newline structure;
+- `CONTINUE` requests continued autonomous completion;
+- `PLATFORM_ERROR` and `RATE_LIMIT` request one blocker recheck and resume only if resolved;
+- `UNSURE` requests one fresh status classification;
+- human-approval, human-decision, human-operation, and completion statuses cause no automatic message;
+- recovery and uncertainty responses do not repeat within the same human-interaction epoch.
+
+All responses remain advisory candidates until the existing final guarded-send path revalidates exact conversation/response identity, ownership, human precedence, composer safety, policy, stagnation, and the hard fuse. GitHub PR, CI, and Release records own the immutable integration, validation, and delivery evidence for v1.2.1.

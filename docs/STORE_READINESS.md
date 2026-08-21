@@ -1,15 +1,15 @@
 # Chrome Web Store Readiness
 
-Status: **v1.2.0 engineering readiness complete; Chrome Web Store publication deferred.**
+Status: **v1.2.1 engineering readiness complete; Chrome Web Store publication deferred.**
 
-Chat Turn Guardian v1.2.0 is engineered so a later public Chrome Web Store submission does not require weakening its security, privacy, permission, or architecture boundaries. This document is the durable release/distribution runbook. It is **not** a claim that Google has reviewed, approved, or published the extension.
+Chat Turn Guardian v1.2.1 is engineered so a later public Chrome Web Store submission does not require weakening its security, privacy, permission, or architecture boundaries. This document is the durable release/distribution runbook. It is **not** a claim that Google has reviewed, approved, or published the extension.
 
 Chrome Web Store policies and Developer Dashboard wording are version-sensitive. Re-verify current official requirements immediately before any future submission.
 
 ## Current release architecture
 
 - Manifest V3, Chrome/Chromium 114+.
-- Product/manifest/package version: `1.2.0`.
+- Product/manifest/package version: `1.2.1`.
 - Production extension/action icon set at 16, 32, 48, and 128 pixels under `src/assets/`.
 - Toolbar action opens the Side Panel through `chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })`; unsupported tabs remain disabled by explicit host/tab gating.
 - No remotely hosted executable code. AI-provider and Telegram responses are data only and are never evaluated as extension logic.
@@ -27,7 +27,7 @@ Store distribution must preserve the current product boundary:
 - OWNER/MIRROR isolation; MIRROR never auto-sends;
 - empty-composer and final synchronous revalidation immediately before mutation;
 - stale-decision cancellation, no blind retry, and ambiguous-write freeze;
-- consume a valid exact terminal conversation status without an unnecessary self-check, and fail closed when fallback output remains uncertain;
+- consume a valid exact terminal conversation status without an unnecessary self-check, use only its decision-specific bounded response, and fail closed when fallback output remains uncertain;
 - fail closed on uncertainty/provider failure/platform blockers;
 - provider output remains advisory only;
 - provider/Telegram credentials remain in trusted extension contexts and secret-free status/log/audit surfaces;
@@ -117,4 +117,4 @@ For unpacked validation upgrades, overwrite the **same existing unpacked extensi
 
 ## Publication gate
 
-v1.2.0 engineering readiness does not imply Store delivery. Actual Chrome Web Store upload/submission/publication is an external production release action and is intentionally deferred. No Store action should be performed until it becomes an explicit owner-authorized outcome with current policy/package/listing evidence.
+v1.2.1 engineering readiness does not imply Store delivery. Actual Chrome Web Store upload/submission/publication is an external production release action and is intentionally deferred. No Store action should be performed until it becomes an explicit owner-authorized outcome with current policy/package/listing evidence.

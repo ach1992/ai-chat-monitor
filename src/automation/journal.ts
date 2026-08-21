@@ -52,7 +52,12 @@ function validRecord(record: WriteGuardRecord): boolean {
     record.documentId.length > 0 &&
     Number.isFinite(record.attemptedAt) &&
     (record.disposition === "ATTEMPTED" || record.disposition === "AMBIGUOUS" || record.disposition === "VERIFIED") &&
-    (record.action === undefined || record.action === "CONTINUATION" || record.action === "PROTOCOL_BOOTSTRAP") &&
+    (
+      record.action === undefined ||
+      record.action === "CONTINUATION" ||
+      record.action === "PROTOCOL_BOOTSTRAP" ||
+      record.action === "STATUS_RESPONSE"
+    ) &&
     (record.conversationProtocolVersion === undefined || (
       Number.isInteger(record.conversationProtocolVersion) && record.conversationProtocolVersion >= 1
     )) &&
@@ -126,10 +131,26 @@ export class AutomationWriteJournal {
     );
   }
 
+  hasVerifiedStatusResponseSince(
+    conversationId: string,
+    continuationText: string,
+    since: number | undefined,
+  ): boolean {
+    const controlText = boundedControlText(continuationText);
+    if (controlText === undefined) return false;
+    return this.#state.records.some((record) =>
+      record.conversationId === conversationId &&
+      record.disposition === "VERIFIED" &&
+      record.action === "STATUS_RESPONSE" &&
+      record.continuationText === controlText &&
+      (since === undefined || record.attemptedAt > since),
+    );
+  }
+
   reserve(envelope: AutomationDecisionEnvelope): Promise<boolean> {
     return this.#enqueue(async () => {
       const assistantDomMessageId = boundedDomMessageId(envelope.assistantDomMessageId);
-      const continuationText = envelope.action === "PROTOCOL_BOOTSTRAP"
+      const continuationText = envelope.action === "PROTOCOL_BOOTSTRAP" || envelope.action === "STATUS_RESPONSE"
         ? boundedControlText(envelope.continuationText)
         : undefined;
       const retained = envelope.lastUserInteractionAt === undefined

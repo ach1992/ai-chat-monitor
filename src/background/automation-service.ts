@@ -14,7 +14,10 @@ import {
   type ResolvedAutomationPolicy,
 } from "../automation/types.js";
 import { ConservativeStopClassifier } from "../classification/classifier.js";
-import { stripConversationProtocolStatus } from "../classification/conversation-protocol.js";
+import {
+  isRecoverableConversationProtocolClassification,
+  stripConversationProtocolStatus,
+} from "../classification/conversation-protocol.js";
 import type { SessionView } from "../core/session-registry.js";
 import { fetchProviderModelCatalog } from "../providers/catalog.js";
 import { createProviderManager } from "../providers/manager.js";
@@ -110,7 +113,11 @@ export class AutomationService {
             {
               type: "background:guarded-send",
               protocolVersion: 2,
-              action: envelope.action,
+              action:
+                envelope.action === "STATUS_RESPONSE" &&
+                isRecoverableConversationProtocolClassification(envelope.classification)
+                  ? "STATUS_RECOVERY"
+                  : envelope.action,
               decisionId: envelope.decisionId,
               agentInstanceId: envelope.agentInstanceId,
               pageEpoch: envelope.pageEpoch,
@@ -377,7 +384,7 @@ export class AutomationService {
       freshPolicy.revision !== envelope.policyRevision ||
       freshPolicy.mode !== "AUTO" ||
       freshPolicy.emergencyPaused ||
-      freshPolicy.continuationText !== envelope.continuationText
+      (envelope.action === "CONTINUATION" && freshPolicy.continuationText !== envelope.continuationText)
     ) {
       return {
         decisionId: envelope.decisionId,
