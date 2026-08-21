@@ -2,11 +2,11 @@
 
 Chat Turn Guardian is a standalone Chromium Manifest V3 extension for safely supervising explicitly selected ChatGPT Web conversations. It reads a strict machine-readable status from the end of the latest assistant response when available, uses conservative local rules for obvious cases, and sends a bounded same-conversation self-check only when the status is missing and the stop remains ambiguous.
 
-**Current release: v1.2.4.** This patch preserves v1.2.3 behavior while fixing the remaining background/inactive-tab guarded-send false positive caused by Chromium timer throttling: an exact Guardian user turn followed by a genuinely fresh assistant turn can verify the send even when the transient Stop/generation control is never sampled. The extension has **not** been submitted to or published on the Chrome Web Store.
+**Current release: v1.2.5.** This patch fixes the remaining hidden/background-tab status-reading failure: when Chromium leaves layout-derived `innerText` stale, Guardian can recover the latest terminal status from background-safe structural DOM evidence without weakening foreground behavior, human precedence, or fail-closed send verification. The extension has **not** been submitted to or published on the Chrome Web Store.
 
 The chat's own agent, Skill, or workflow remains responsible for **what work should happen**. Guardian only decides whether another ordinary turn may be requested without genuine human involvement.
 
-## v1.2.4 capabilities
+## v1.2.5 capabilities
 
 - Independent supervision of multiple ChatGPT tabs/conversations.
 - Current-tab ON/OFF control with bounded reconnect/recovery.
@@ -27,7 +27,7 @@ The chat's own agent, Skill, or workflow remains responsible for **what work sho
 - OWNER/MIRROR duplicate-conversation isolation; MIRROR never auto-sends.
 - Human typing/sending/editing/stopping/navigation/policy changes stale pending automation.
 - Empty-composer requirement and final synchronous revalidation immediately before mutation.
-- Post-send verification accepts either observed generation or a fresh assistant turn following the exact Guardian user turn, covering background-tab throttling while preserving ambiguous-write freeze and no blind retry.
+- Post-send verification accepts either observed generation or a fresh assistant turn following the exact Guardian user turn; hidden tabs additionally use background-safe structural DOM evidence when layout-derived text is stale, while preserving ambiguous-write freeze and no blind retry.
 - Browser notifications for response completion, HOLD/attention, UNSURE, provider/extension errors, and stagnation.
 - Optional Telegram v1 outbound notifications through the user's own bot with hidden credential storage, inherited/custom event routing, health state, structured event-aware escaped HTML messages, and Test notification.
 - Progress-aware stagnation detection plus a separate configurable hard safety fuse.
@@ -71,9 +71,9 @@ Durable references:
 
 ## Install from source / validated ZIP
 
-For v1.2.4, download these files from the GitHub Release **Assets** section:
+For v1.2.5, download these files from the GitHub Release **Assets** section:
 
-- `chat-turn-guardian-1.2.4.zip` — the built extension to install;
+- `chat-turn-guardian-1.2.5.zip` — the built extension to install;
 - `SHA256SUMS.txt` — the checksum to verify the ZIP; and
 - `build-info.json` — the exact source-commit provenance.
 
