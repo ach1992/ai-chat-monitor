@@ -2,11 +2,11 @@
 
 Chat Turn Guardian is a standalone Chromium Manifest V3 extension for safely supervising explicitly selected ChatGPT Web conversations. It reads a strict machine-readable status from the end of the latest assistant response when available, uses conservative local rules for obvious cases, and sends a bounded same-conversation self-check only when the status is missing and the stop remains ambiguous.
 
-**Current release: v1.2.1.** This patch keeps the status-first protocol from Issue #56 and adds the formatted bootstrap and status-specific response behavior from Issue #57. The extension has **not** been submitted to or published on the Chrome Web Store.
+**Current release: v1.2.2.** This patch preserves the v1.2.1 status-first behavior and adds structured, event-aware Telegram notification formatting from PR #62. The extension has **not** been submitted to or published on the Chrome Web Store.
 
 The chat's own agent, Skill, or workflow remains responsible for **what work should happen**. Guardian only decides whether another ordinary turn may be requested without genuine human involvement.
 
-## v1.2.1 capabilities
+## v1.2.2 capabilities
 
 - Independent supervision of multiple ChatGPT tabs/conversations.
 - Current-tab ON/OFF control with bounded reconnect/recovery.
@@ -29,7 +29,7 @@ The chat's own agent, Skill, or workflow remains responsible for **what work sho
 - Empty-composer requirement and final synchronous revalidation immediately before mutation.
 - Post-send verification, ambiguous-write freeze, and no blind retry.
 - Browser notifications for response completion, HOLD/attention, UNSURE, provider/extension errors, and stagnation.
-- Optional Telegram v1 outbound notifications through the user's own bot with hidden credential storage, inherited/custom event routing, health state, and Test notification.
+- Optional Telegram v1 outbound notifications through the user's own bot with hidden credential storage, inherited/custom event routing, health state, structured event-aware messages, and Test notification.
 - Progress-aware stagnation detection plus a separate configurable hard safety fuse.
 - Bounded, redacted, clearable audit history.
 - Persistent Side Panel for multi-chat management, providers, Telegram, Pause All, privacy disclosure, runtime state, and diagnostics.
@@ -71,9 +71,9 @@ Durable references:
 
 ## Install from source / validated ZIP
 
-For v1.2.1, download these files from the GitHub Release **Assets** section:
+For v1.2.2, download these files from the GitHub Release **Assets** section:
 
-- `chat-turn-guardian-1.2.1.zip` — the built extension to install;
+- `chat-turn-guardian-1.2.2.zip` — the built extension to install;
 - `SHA256SUMS.txt` — the checksum to verify the ZIP; and
 - `build-info.json` — the exact source-commit provenance.
 
