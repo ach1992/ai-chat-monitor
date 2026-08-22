@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.0.0 — release candidate
+
+- Pivoted Chat Turn Guardian from guarded automatic continuation to a strictly read-only ChatGPT monitor/notifier.
+- Removed ChatGPT composer mutation, guarded-send, automatic Retry/Continue behavior, self-check/bootstrap/recovery turns, continuation timing/cooldown, write-journal authority, and automatic-control OWNER/MIRROR semantics.
+- Added monitoring policy schema v2 with safe migration from v1.2.5: old `OFF` stays disabled; `OBSERVE`, `NOTIFY_ONLY`, and `AUTO` migrate to monitoring enabled without restoring send authority.
+- Added normalized monitoring page states and transition/episode events for response completion, manual continuation availability, human gates, completion, Retry/error/rate-limit/auth/verification/conversation-limit states, provider failure/unknown state, generation stall, and repeated-response diagnostics.
+- Added conversation/response event history and deduplication across DOM churn, service-worker restarts, and duplicate tabs.
+- Added independently configurable Browser and local Sound event routing; Sound uses a Manifest V3 offscreen document.
+- Preserved outbound-only Telegram notifications and provider fallback while making both strictly observational.
+- Replaced the public protocol marker with stable `CHAT_TURN_GUARDIAN_STATUS={"decision":"<VALUE>"}` while retaining `_V1` parsing for compatibility only.
+- Hardened marker parsing so the record must be the unique standalone terminal line and is rejected inside backtick/tilde code fences or other non-standalone output containers.
+- Added Side Panel status-protocol setup with separate copyable Custom Instructions and per-chat instruction variants; Guardian never sends either instruction itself.
+- Added marker health, current page/semantic state and source, monitoring ON/OFF, event controls, provider/Telegram management, and bounded event diagnostics to the Side Panel.
+- Updated package/manifest version to `2.0.0` and rewrote README, Project Spec, Architecture, Privacy, Store listing/readiness, and status-protocol documentation for the new single purpose.
+- Updated regression coverage to enforce the read-only runtime/protocol boundary and the v2 permission/data-handling model.
+
+Tracking: [Issue #71](https://github.com/ach1992/chat-turn-guardian/issues/71) and [PR #72](https://github.com/ach1992/chat-turn-guardian/pull/72).
+
 ## 1.2.5 — 2026-08-22
 
 - Fixed hidden/background-tab status reading when Chromium leaves layout-derived `innerText` stale while the conversation DOM already contains the completed assistant response.
