@@ -89,6 +89,9 @@ test("Side Panel exposes monitoring, compact protocol setup, notifications, prov
     "chat-actions",
     "protocol-preview",
     "telegram-operation-status",
+    "disclosure.panel-section",
+    "disclosure[open] > summary",
+    ":not(summary) + :not(summary)",
     "@media (max-width: 430px)",
     "@media (max-width: 350px)",
   ]) {
@@ -100,6 +103,9 @@ test("Side Panel exposes monitoring, compact protocol setup, notifications, prov
     "Protocol marker health must not use negative vertical spacing",
   );
   assert.match(styles, /\.panel-section\s*\{[^}]*gap:\s*0\.78rem/s);
+  assert.match(styles, /\.disclosure\.panel-section\s*\{[^}]*gap:\s*0/s);
+  assert.match(styles, /\.disclosure\[open\]\s*>\s*summary\s*\{[^}]*margin-bottom:\s*var\(--space-3\)/s);
+  assert.match(styles, /\.disclosure\[open\]\s*>\s*:not\(summary\)\s*\+\s*:not\(summary\)\s*\{[^}]*margin-top:\s*var\(--space-3\)/s);
   assert.match(styles, /\.chat-list[^\{]*\{[^}]*gap:\s*0\.72rem/s);
 
   for (const messageType of [
