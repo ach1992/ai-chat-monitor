@@ -2,7 +2,7 @@
 
 Chat Turn Guardian is a Chromium Manifest V3 extension that **monitors selected ChatGPT conversations without controlling them**. It observes page/runtime state, resolves an optional semantic work status, and sends configurable Browser, local sound, and Telegram notifications.
 
-**Development candidate: v2.0.0.** v2 is a breaking product pivot from guarded auto-continuation to read-only monitoring. It is not released yet.
+**Current stable release: v2.0.0.** v2 is a breaking product pivot from guarded auto-continuation to strictly read-only monitoring. The verified GitHub release is published at [v2.0.0](https://github.com/ach1992/chat-turn-guardian/releases/tag/v2.0.0).
 
 ## v2 single purpose
 
@@ -142,7 +142,7 @@ npm run package
 
 The CI workflow validates the exact candidate SHA, runs the extension smoke check, verifies the ZIP layout/provenance, and uploads the `artifacts/` directory as a GitHub Actions artifact.
 
-## Load an unpacked test build
+## Load an unpacked build
 
 1. Extract the validated ZIP so `manifest.json` is at the extracted directory root.
 2. Open `chrome://extensions`.
@@ -206,4 +206,12 @@ See [PRIVACY.md](PRIVACY.md) for the complete current policy.
 
 ## Release state
 
-v2.0.0 remains a development candidate until the exact candidate passes required validation, receives the required review/integration decision, is merged, and the release artifact is explicitly published. A successful test ZIP by itself is not a public release.
+`v2.0.0` is the current published GitHub release and is marked **Latest**.
+
+- Integrated `main` release commit: `eb4e90a21cd578620bda855ce2e3ab37aee39027`
+- Release ZIP: `chat-turn-guardian-2.0.0.zip`
+- Packaged runtime files: `48`
+- Release ZIP SHA-256: `800d76293a867e3ba0c8780dfb932788b55bc9393f03112d2b73801f10c70c2f`
+- Published release: [Chat Turn Guardian v2.0.0](https://github.com/ach1992/chat-turn-guardian/releases/tag/v2.0.0)
+
+Chrome Web Store submission/publication is a separate production action and has **not** been performed. See [Store readiness](docs/STORE_READINESS.md) before any future Store submission.
