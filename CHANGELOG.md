@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.0.0 — release candidate
+## 2.0.0 — 2026-08-22
 
 - Pivoted Chat Turn Guardian from guarded automatic continuation to a strictly read-only ChatGPT monitor/notifier.
 - Removed ChatGPT composer mutation, guarded-send, automatic Retry/Continue behavior, self-check/bootstrap/recovery turns, continuation timing/cooldown, write-journal authority, and automatic-control OWNER/MIRROR semantics.
@@ -15,8 +15,10 @@
 - Added marker health, current page/semantic state and source, monitoring ON/OFF, event controls, provider/Telegram management, and bounded event diagnostics to the Side Panel.
 - Updated package/manifest version to `2.0.0` and rewrote README, Project Spec, Architecture, Privacy, Store listing/readiness, and status-protocol documentation for the new single purpose.
 - Updated regression coverage to enforce the read-only runtime/protocol boundary and the v2 permission/data-handling model.
+- Completed Owner live Chromium acceptance and integrated PR #72 into `main` at `eb4e90a21cd578620bda855ce2e3ab37aee39027`.
+- Published GitHub Release `v2.0.0` with a 48-file extension ZIP; SHA-256 `800d76293a867e3ba0c8780dfb932788b55bc9393f03112d2b73801f10c70c2f`.
 
-Tracking: [Issue #71](https://github.com/ach1992/chat-turn-guardian/issues/71) and [PR #72](https://github.com/ach1992/chat-turn-guardian/pull/72).
+Tracking: [Issue #71](https://github.com/ach1992/chat-turn-guardian/issues/71), [PR #72](https://github.com/ach1992/chat-turn-guardian/pull/72), and [Release v2.0.0](https://github.com/ach1992/chat-turn-guardian/releases/tag/v2.0.0).
 
 ## 1.2.5 — 2026-08-22
 
