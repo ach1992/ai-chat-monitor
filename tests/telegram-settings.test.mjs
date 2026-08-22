@@ -45,7 +45,7 @@ test("blank token retains only the same destination while explicit token replace
   const retained = resolveTelegramSettingsMutation(first, mutation({
     botToken: "",
     eventMode: "CUSTOM",
-    events: ["HUMAN_ATTENTION_REQUIRED"],
+    events: ["HUMAN_OPERATION_REQUIRED"],
   }));
   assert.equal(retained.botToken, TOKEN_A);
   assert.equal(retained.eventMode, "CUSTOM");
@@ -70,6 +70,30 @@ test("Telegram settings persist across store instances without exposing the cred
   assert.equal(loaded.botToken, TOKEN_A);
   assert.deepEqual(loaded.events, ["RESPONSE_COMPLETE", "PROVIDER_ERROR"]);
   assert.equal(redactTelegramSettings(loaded).configured, true);
+});
+
+test("legacy v1 notification selections migrate without discarding the saved Telegram credential", async () => {
+  const persistence = memoryPersistence({
+    version: 1,
+    enabled: true,
+    destination: "123456789",
+    eventMode: "CUSTOM",
+    events: ["HUMAN_ATTENTION_REQUIRED", "UNSURE", "STAGNATION"],
+    health: { status: "HEALTHY", checkedAt: 12 },
+    botToken: TOKEN_A,
+  });
+  const store = new TelegramSettingsStore(persistence);
+  const loaded = await store.load();
+
+  assert.equal(loaded.botToken, TOKEN_A);
+  assert.equal(loaded.enabled, true);
+  assert.ok(loaded.events.includes("APPROVAL_REQUIRED"));
+  assert.ok(loaded.events.includes("DECISION_REQUIRED"));
+  assert.ok(loaded.events.includes("HUMAN_OPERATION_REQUIRED"));
+  assert.ok(loaded.events.includes("TASK_COMPLETE"));
+  assert.ok(loaded.events.includes("SEMANTIC_UNKNOWN"));
+  assert.ok(loaded.events.includes("REPEATED_RESPONSE"));
+  assert.ok(loaded.events.includes("GENERATION_STALLED"));
 });
 
 test("stale delivery health cannot overwrite health for a replaced Telegram credential", async () => {
