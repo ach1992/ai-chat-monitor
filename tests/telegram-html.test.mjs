@@ -9,9 +9,9 @@ const TOKEN = "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ_abc123";
 function notification(overrides = {}) {
   return {
     id: "guardian:test-html",
-    event: "HUMAN_ATTENTION_REQUIRED",
-    title: "Chat needs human attention",
-    message: "The assistant supplied a valid terminal conversation status.",
+    event: "APPROVAL_REQUIRED",
+    title: "Approval required",
+    message: "The monitored chat is waiting for human approval.",
     browserEnabled: true,
     conversationId: "conversation-1234567890",
     ...overrides,
@@ -27,9 +27,8 @@ function jsonResponse(body, status = 200) {
 
 test("Telegram notification HTML emphasizes event and conversation identity", () => {
   const text = telegramNotificationText(notification());
-
   assert.match(text, /^<b>🛡️ Chat Turn Guardian<\/b>/);
-  assert.match(text, /<b>👤 Chat needs human attention<\/b>/);
+  assert.match(text, /<b>👤 Approval required<\/b>/);
   assert.match(text, /<b>💬 Conversation<\/b>\n<code>conversation-1234567890<\/code>/);
   assert.ok(text.length <= 700);
 });
@@ -40,7 +39,6 @@ test("Telegram notification HTML escapes dynamic text and keeps markup balanced"
     message: "Unsafe <b>injected</b> & details",
     conversationId: "chat<&>42",
   }));
-
   assert.match(text, /Needs &lt;review&gt; &amp; &quot;approval&quot;/);
   assert.match(text, /Unsafe &lt;b&gt;injected&lt;\/b&gt; &amp; details/);
   assert.match(text, /<code>chat&lt;&amp;&gt;42<\/code>/);
