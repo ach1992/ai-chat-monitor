@@ -276,6 +276,19 @@ export class MonitoringPolicyRepository {
     });
   }
 
+  clearChats(): Promise<MonitoringPolicyState> {
+    return this.#enqueue(async () => {
+      const nextState = normalizeState({
+        ...this.#state,
+        revision: nextRevision(this.#state.revision),
+        chats: [],
+      });
+      await this.#persistence.save(nextState);
+      this.#state = nextState;
+      return this.snapshot();
+    });
+  }
+
   #patchEvents(
     existing: MonitoringEventType[] | undefined,
     patch: MonitoringEventType[] | null | undefined,
