@@ -81,6 +81,11 @@ export interface MonitoringServiceStatus {
   runtime?: MonitoringRuntimeStatus;
 }
 
+export interface MonitoringResetResult {
+  state: MonitoringPolicyState;
+  cleared: number;
+}
+
 function pageState(observation: PageObservation): MonitoringPageState {
   const reasons = new Set(observation.blocking.reasons);
   if (reasons.has("RATE_LIMIT")) return "RATE_LIMIT";
@@ -292,7 +297,7 @@ export class MonitoringService {
       ...(assistant.domMessageId === undefined ? {} : { domMessageId: assistant.domMessageId }),
     });
 
-    let eventType = pageEvent ?? eventForDecision(resolution.decision) ?? "RESPONSE_COMPLETE";
+    let eventType = pageEvent ?? eventForDecision(resolution.deision) ?? "RESPONSE_COMPLETE";
     if (resolution.classification?.reasonCode === "PROVIDER_FAILURE") eventType = "PROVIDER_ERROR";
     if (repeated && pageEvent === undefined) eventType = "REPEATED_RESPONSE";
 
@@ -329,6 +334,27 @@ export class MonitoringService {
     return this.#policies.updateDefaults(patch);
   }
 
+  async resetChats(): Promise<MonitoringResetResult> {
+    await this.#ready;
+    const before = this.#policies.snapshot();
+    const state = await this.#policies.clearChats();
+    this.#generation.clear();
+    this.#lastAssistant.clear();
+    this.#cache = { version: 1, entries: [] };
+    try { await this.#cacheStorage.set(CACHE_KEY, this.#cache); } catch { /* cache reset is best effort */ }
+
+    for (const tabId of [...this.#runtime.keys()]) {
+      const session = this.#getSession(tabId);
+      if (session === undefined) {
+        this.#runtime.delete(tabId);
+        continue;
+      }
+      await this.handleSession(session);
+    }
+
+    return { state, cleared: before.chats.length };
+  }
+
   async status(tabId: number): Promise<MonitoringServiceStatus> {
     await this.#ready;
     const session = this.#getSession(tabId);
@@ -354,6 +380,7 @@ export class MonitoringService {
     return this.#withProviderWrite(async () => {
       const current = await this.#providerSettings.load();
       const existing = current.profiles.find((candidate) => candidate.id === mutation.id);
+      const previousOrigin = existing === undefined ? undefined : providerOriginPattern(existing);
       const profile = resolveProviderProfileMutation(mutation, existing);
       const profiles = current.profiles.filter((candidate) => candidate.id !== profile.id);
       profiles.push(profile);
@@ -362,6 +389,12 @@ export class MonitoringService {
       const order = makePrimary ? [profile.id, ...withoutProfile] : wasActive ? [...current.order] : [...withoutProfile, profile.id];
       const next: ProviderSettingsState = { version: 1, profiles, order };
       await this.#providerSettings.save(next);
+      if (previousOrigin !== undefined && previousOrigin !== providerOriginPattern(profile)) {
+        const stillUsed = next.profiles.some((candidate) => providerOriginPattern(candidate) === previousOrigin);
+        if (!stillUsed) {
+          try { await chrome.permissions.remove({ origins: [previousOrigin] }); } catch { /* optional permission cleanup */ }
+        }
+      }
       return this.#providerSettings.load();
     });
   }
