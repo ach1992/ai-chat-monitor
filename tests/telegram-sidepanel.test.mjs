@@ -67,6 +67,22 @@ test("Telegram Test uses the current unsaved form while recurring refresh preser
   assert.match(background, /manager\.testTelegram\(request\.settings\)/);
 });
 
+test("Telegram Save and Test actions expose visible working, success, and error feedback", async () => {
+  const ui = await readDist("sidepanel/telegram-ui.js");
+  for (const marker of [
+    "Saving Telegram settings",
+    "Saved ✓",
+    "Save failed",
+    "Sending Telegram test notification",
+    "Delivered ✓",
+    "Test failed",
+    "actionState",
+    "operation-status telegram-operation-status",
+  ]) {
+    assert.match(ui, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+});
+
 test("Telegram UI keeps privacy disclosure near the bottom and collapsed", async () => {
   const ui = await readDist("sidepanel/telegram-ui.js");
   assert.match(ui, /relocatePrivacyDisclosure/);
