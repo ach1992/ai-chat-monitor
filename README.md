@@ -2,7 +2,7 @@
 
 Chat Turn Guardian is a Chromium Manifest V3 extension that **monitors selected ChatGPT conversations without controlling them**. It observes page/runtime state, resolves an optional semantic work status, and sends configurable Browser, local sound, and Telegram notifications.
 
-**Current stable release: v2.0.0.** v2 is a breaking product pivot from guarded auto-continuation to strictly read-only monitoring. The verified GitHub release is published at [v2.0.0](https://github.com/ach1992/chat-turn-guardian/releases/tag/v2.0.0).
+**Current stable release: v2.0.1.** v2 is a breaking product pivot from guarded auto-continuation to strictly read-only monitoring. The verified GitHub release is published at [v2.0.1](https://github.com/ach1992/chat-turn-guardian/releases/tag/v2.0.1).
 
 ## v2 single purpose
 
@@ -114,7 +114,7 @@ v2 migrates legacy chat policy to monitoring-only behavior:
 
 No pending v1 automatic action is restored after upgrade.
 
-Because v2 changes the product contract, the version is `2.0.0` rather than another `1.x` patch/minor release.
+The breaking product-contract change began at `v2.0.0`; `v2.0.1` is a compatible patch release in the same read-only v2 line.
 
 ## Requirements
 
@@ -206,12 +206,12 @@ See [PRIVACY.md](PRIVACY.md) for the complete current policy.
 
 ## Release state
 
-`v2.0.0` is the current published GitHub release and is marked **Latest**.
+`v2.0.1` is the current verified published GitHub release.
 
-- Integrated `main` release commit: `eb4e90a21cd578620bda855ce2e3ab37aee39027`
-- Release ZIP: `chat-turn-guardian-2.0.0.zip`
+- Release target commit: `53fd7a09abc99c157e15835d391ca4611eb128ec`
+- Release ZIP: `chat-turn-guardian-2.0.1.zip`
 - Packaged runtime files: `48`
-- Release ZIP SHA-256: `800d76293a867e3ba0c8780dfb932788b55bc9393f03112d2b73801f10c70c2f`
-- Published release: [Chat Turn Guardian v2.0.0](https://github.com/ach1992/chat-turn-guardian/releases/tag/v2.0.0)
+- Release ZIP SHA-256: `8aca51ced17ca1133293600df80abc9422170ded1f63fab221822da6b0bfe821`
+- Published release: [Chat Turn Guardian v2.0.1](https://github.com/ach1992/chat-turn-guardian/releases/tag/v2.0.1)
 
 Chrome Web Store submission/publication is a separate production action and has **not** been performed. See [Store readiness](docs/STORE_READINESS.md) before any future Store submission.
