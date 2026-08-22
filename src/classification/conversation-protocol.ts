@@ -60,13 +60,24 @@ function markerOccurrences(raw: string): Array<{ prefix: string; index: number }
 }
 
 function markerAppearsInsideOpenFence(lines: string[], markerLineIndex: number): boolean {
-  let fenceOpen = false;
+  let openFence: { char: "`" | "~"; length: number } | undefined;
+
   for (let index = 0; index < markerLineIndex; index += 1) {
     const line = lines[index] ?? "";
-    const fences = line.match(/```/g)?.length ?? 0;
-    if (fences % 2 !== 0) fenceOpen = !fenceOpen;
+    const match = /^\s*(`{3,}|~{3,})/.exec(line);
+    const token = match?.[1];
+    if (token === undefined) continue;
+
+    const char = token[0] as "`" | "~";
+    if (openFence === undefined) {
+      openFence = { char, length: token.length };
+      continue;
+    }
+
+    if (char === openFence.char && token.length >= openFence.length) openFence = undefined;
   }
-  return fenceOpen;
+
+  return openFence !== undefined;
 }
 
 export function inspectConversationStatusMarker(raw: string): ConversationStatusMarkerResult {
