@@ -1,8 +1,8 @@
-# Chrome Web Store Readiness — v2.0.0
+# Chrome Web Store Readiness — v2.0.1
 
 Status:
 
-- **GitHub release:** `v2.0.0` published and verified.
+- **GitHub release:** `v2.0.1` published and verified.
 - **Chrome Web Store:** not submitted or published; production action deferred.
 
 This document tracks engineering and disclosure readiness for a future Chrome Web Store submission. The published GitHub release does not itself authorize Store upload, submission, visibility changes, or publication.
@@ -17,7 +17,7 @@ This document tracks engineering and disclosure readiness for a future Chrome We
 
 ## Runtime safety
 
-Verified for the released v2.0.0 baseline:
+Verified for the released v2.0.1 baseline:
 
 - [x] Exact candidate validation is green.
 - [x] Static/runtime regression coverage proves no ChatGPT composer write or conversation-control activation path exists.
@@ -26,8 +26,10 @@ Verified for the released v2.0.0 baseline:
 - [x] Duplicate/background tabs do not duplicate one response episode's provider work/notification.
 - [x] Service-worker restart cannot restore v1 send authority.
 - [x] v1.2.5 policy migration produces monitoring-only state.
+- [x] Browser notification delivery uses the packaged extension icon through `chrome.runtime.getURL()` and the Promise-based `chrome.notifications.create()` API.
+- [x] Browser notification delivery was verified live on Chromium/Windows with real monitored events before publication.
 
-Final candidate CI: run `#283` / `32602415717` — PASS. Post-merge `main` CI: run `#284` / `32602529859` — PASS.
+Browser-notification fix candidate CI: run `#287` / `32604126619` — PASS. v2.0.1 release-prep CI: run `#289` / `32605344943` — PASS. One-time publication-trigger PR CI: run `#291` / `32605700154` — PASS.
 
 ## Permissions
 
@@ -66,7 +68,7 @@ Permission rationale is documented in `docs/CHROME_WEB_STORE_LISTING.md` and mus
 ## Remote code
 
 - [x] No remotely hosted executable code is intended.
-- [x] Released v2.0.0 package passed the repository remote-code/package regression checks.
+- [x] Released v2.0.1 package passed the repository remote-code/package regression checks.
 
 All extension JavaScript is packaged locally. Optional provider and Telegram requests exchange data only.
 
@@ -92,14 +94,17 @@ CI must:
 - verify `build-info.json` points to the exact candidate SHA;
 - upload the package/checksum/provenance artifacts.
 
-Published v2.0.0 evidence:
+Published v2.0.1 evidence:
 
-- Release: https://github.com/ach1992/chat-turn-guardian/releases/tag/v2.0.0
-- Integrated `main`: `eb4e90a21cd578620bda855ce2e3ab37aee39027`
-- Release ZIP: `chat-turn-guardian-2.0.0.zip`
+- Release: https://github.com/ach1992/chat-turn-guardian/releases/tag/v2.0.1
+- Release target: `53fd7a09abc99c157e15835d391ca4611eb128ec`
+- Release ZIP: `chat-turn-guardian-2.0.1.zip`
 - Runtime files: `48`
-- SHA-256: `800d76293a867e3ba0c8780dfb932788b55bc9393f03112d2b73801f10c70c2f`
-- Published checksum and build provenance were re-downloaded and verified after release.
+- SHA-256: `8aca51ced17ca1133293600df80abc9422170ded1f63fab221822da6b0bfe821`
+- Release is non-draft and non-prerelease.
+- Tag resolves exactly to the release target.
+- `chat-turn-guardian-2.0.1.zip`, `SHA256SUMS.txt`, and `build-info.json` are present as release assets.
+- Published build provenance and ZIP were re-downloaded; source identity, file count, version, and SHA-256 were verified after publication.
 
 ## Store assets
 
@@ -109,7 +114,7 @@ Published v2.0.0 evidence:
 
 ## Documentation alignment
 
-The released v2.0.0 baseline is aligned across:
+The released v2.0.1 baseline is aligned across:
 
 - `README.md`
 - `docs/PROJECT_SPEC.md`
