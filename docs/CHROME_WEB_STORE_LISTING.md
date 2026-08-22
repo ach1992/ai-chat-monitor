@@ -1,6 +1,6 @@
 # Chrome Web Store Listing — Chat Turn Guardian v2.0.0
 
-> Draft listing copy for the v2.0.0 release candidate. The extension is not published until an explicit release decision is made.
+> Draft Chrome Web Store listing copy for the released v2.0.0 product baseline. GitHub Release `v2.0.0` is published, but the extension has not been submitted to or published in the Chrome Web Store.
 
 ## Name
 
@@ -76,4 +76,4 @@ Repository promotional assets:
 - `store-assets/small-promo-440x280.png` — 440x280
 - `store-assets/marquee-1400x560.png` — 1400x560
 
-Before submission, screenshots and final listing copy must match the exact published candidate behavior and version.
+Before Store submission, screenshots and final Dashboard/listing declarations must be captured/reviewed against the exact submission build. The current released GitHub baseline is `v2.0.0` at `eb4e90a21cd578620bda855ce2e3ab37aee39027`; a later Store submission must revalidate its own exact source/package identity if development has moved on.
