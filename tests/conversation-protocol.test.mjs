@@ -63,6 +63,8 @@ test("status must be the unique standalone terminal line and outside fenced code
     `| ${status("CONTINUE")} |`,
     `\`\`\`json\n${status("CONTINUE")}\n\`\`\``,
     `\`\`\`text\n${status("CONTINUE")}`,
+    `~~~json\n${status("CONTINUE")}\n~~~`,
+    `~~~~text\n${status("CONTINUE")}`,
     `${status("CONTINUE")}\n${status("COMPLETE")}`,
     `${status("CONTINUE")}\n${status("CONTINUE", LEGACY_GUARDIAN_STATUS_PREFIX)}`,
     `${GUARDIAN_STATUS_PREFIX}{"decision":"CONTINUE","extra":true}`,
