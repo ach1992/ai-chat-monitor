@@ -22,6 +22,7 @@ namespace GuardianContentAgent {
   }
 
   const FOCUS_INTENT_WINDOW_MS = 1_500;
+  const PERIODIC_OBSERVATION_MS = 15_000;
   const adapter = new GuardianContent.BrowserChatGPTAdapter(document, location);
   const agentInstanceId = crypto.randomUUID();
   let pageEpoch = 1;
@@ -231,5 +232,6 @@ namespace GuardianContentAgent {
   window.addEventListener("popstate", checkRoute);
   window.addEventListener("hashchange", checkRoute);
   window.setInterval(checkRoute, 500);
+  window.setInterval(() => scheduleObservation(0), PERIODIC_OBSERVATION_MS);
   void announceAgent().then(() => scheduleObservation(0));
 }
