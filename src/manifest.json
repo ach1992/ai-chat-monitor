@@ -4,7 +4,7 @@
   "version": "1.2.5",
   "description": "Monitors selected ChatGPT conversations and notifies you about completion, attention, and platform states without sending chat messages.",
   "minimum_chrome_version": "114",
-  "permissions": ["storage", "sidePanel", "notifications", "offscreen"],
+  "permissions": ["storage", "sidePanel", "notifications", "offscreen", "clipboardWrite"],
   "host_permissions": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
   "optional_host_permissions": ["https://*/*"],
   "icons": {
