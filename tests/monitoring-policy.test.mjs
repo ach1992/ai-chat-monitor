@@ -56,3 +56,33 @@ test("repository resolves sparse per-chat monitoring overrides", async () => {
   assert.equal(resolved.stallThresholdMs, 90_000);
   assert.deepEqual(resolved.browserEvents, DEFAULT_MONITORING_POLICY.defaults.browserEvents);
 });
+
+test("clearing monitored chats preserves defaults and removes every saved conversation policy", async () => {
+  let stored;
+  const repository = new MonitoringPolicyRepository({
+    load: async () => stored,
+    save: async (state) => { stored = structuredClone(state); },
+  });
+  await repository.restore();
+  await repository.updateDefaults({
+    soundEvents: ["TASK_COMPLETE"],
+    stallThresholdMs: 120_000,
+    suppressLowPriorityWhileFocused: false,
+  });
+  await repository.updateChat("chat-alpha", { enabled: true, browserEvents: ["RETRY_AVAILABLE"] });
+  await repository.updateChat("chat-beta", { enabled: true, soundEvents: ["RATE_LIMIT"] });
+
+  const before = repository.snapshot();
+  assert.equal(before.chats.length, 2);
+  const cleared = await repository.clearChats();
+
+  assert.equal(cleared.chats.length, 0);
+  assert.equal(cleared.revision, before.revision + 1);
+  assert.deepEqual(cleared.defaults, before.defaults);
+  assert.deepEqual(stored, cleared);
+  assert.equal(repository.resolve("chat-alpha").enabled, false);
+  assert.equal(repository.resolve("chat-beta").enabled, false);
+  assert.deepEqual(repository.resolve("chat-alpha").soundEvents, ["TASK_COMPLETE"]);
+  assert.equal(repository.resolve("chat-alpha").stallThresholdMs, 120_000);
+  assert.equal(repository.resolve("chat-alpha").suppressLowPriorityWhileFocused, false);
+});
