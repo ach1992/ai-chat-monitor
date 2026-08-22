@@ -25,6 +25,7 @@ export interface GuardianNotification {
   message: string;
   browserEnabled: boolean;
   soundEnabled?: boolean;
+  telegramInheritedEnabled?: boolean;
   conversationId?: string;
   tabId?: number;
 }
