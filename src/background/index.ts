@@ -40,6 +40,7 @@ import {
   type SessionMutationResult,
   type SessionRegistryState,
 } from "../core/session-registry.js";
+import { isPanelMonitoringChatsReset, type MonitoringChatsResetResponse } from "../monitoring/reset-protocol.js";
 import { MonitoringService } from "../monitoring/service.js";
 import { ProviderConfigurationError, redactProviderProfile } from "../providers/settings.js";
 import { testProviderClassifierReadiness } from "../providers/readiness.js";
@@ -277,19 +278,19 @@ async function handleOverview(sender: chrome.runtime.MessageSender): Promise<Gua
     const providerSettings = await monitoring.providerSettings();
     const chats: ManagedChatStatus[] = [];
     for (const session of registry.list()) {
+      if (session.conversationId === undefined) continue;
+      const overrides = policyState.chats.find((chat) => chat.conversationId === session.conversationId);
+      if (overrides?.enabled !== true) continue;
       const status = await monitoring.status(session.tabId);
-      const overrides = session.conversationId === undefined
-        ? undefined
-        : policyState.chats.find((chat) => chat.conversationId === session.conversationId);
       chats.push({
         tabId: session.tabId,
-        ...(session.conversationId === undefined ? {} : { conversationId: session.conversationId }),
+        conversationId: session.conversationId,
         routeKey: session.routeKey,
         controlEligibility: session.controlEligibility,
         lastSeenAt: session.lastSeenAt,
         ...(session.observation?.pageTitle === undefined ? {} : { pageTitle: session.observation.pageTitle }),
         ...(session.observation === undefined ? {} : { generation: session.observation.generation }),
-        ...(overrides === undefined ? {} : { overrides: structuredClone(overrides) }),
+        overrides: structuredClone(overrides),
         ...(status.policy === undefined ? {} : { policy: status.policy }),
         ...(status.runtime === undefined ? {} : { runtime: status.runtime }),
       });
@@ -354,6 +355,23 @@ async function handleMonitoringDefaultsUpdate(message: PanelMonitoringDefaultsUp
     return monitoringPolicyResponse();
   } catch {
     return protocolError("STORAGE_FAILURE", "Unable to persist monitoring defaults.");
+  }
+}
+
+async function handleMonitoringChatsReset(sender: chrome.runtime.MessageSender): Promise<GuardianResponse | MonitoringChatsResetResponse> {
+  if (!trustedExtensionSender(sender)) return protocolError("INVALID_SENDER", "Only trusted extension pages may reset monitored chats.");
+  try {
+    await registryReady;
+    await mutationQueue;
+    const result = await monitoring.resetChats();
+    return {
+      type: "background:monitoring-chats-reset",
+      protocolVersion: PROTOCOL_VERSION,
+      revision: result.state.revision,
+      cleared: result.cleared,
+    };
+  } catch {
+    return protocolError("STORAGE_FAILURE", "Unable to reset monitored chats.");
   }
 }
 
@@ -443,6 +461,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (isPanelOverviewRequest(message)) { void handleOverview(sender).then(sendResponse); return true; }
   if (isPanelMonitoringPolicyUpdate(message)) { void handleMonitoringPolicyUpdate(message, sender).then(sendResponse); return true; }
   if (isPanelMonitoringDefaultsUpdate(message)) { void handleMonitoringDefaultsUpdate(message, sender).then(sendResponse); return true; }
+  if (isPanelMonitoringChatsReset(message)) { void handleMonitoringChatsReset(sender).then(sendResponse); return true; }
   if (isPanelProviderProfileUpsert(message)) { void handleProviderProfileUpsert(message, sender).then(sendResponse); return true; }
   if (isPanelProviderModelCatalogRequest(message)) { void handleProviderModelCatalog(message, sender).then(sendResponse); return true; }
   if (isPanelProviderClassifierReadinessRequest(message)) { void handleProviderClassifierReadiness(message, sender).then(sendResponse); return true; }
