@@ -18,6 +18,7 @@ declare namespace chrome {
     const onMessage: MessageEvent;
     const lastError: { message?: string } | undefined;
 
+    function getURL(path: string): string;
     function sendMessage<TResponse = unknown>(message: unknown): Promise<TResponse>;
   }
 
@@ -136,8 +137,7 @@ declare namespace chrome {
     function create(
       notificationId: string,
       options: NotificationOptions,
-      callback?: (notificationId: string) => void,
-    ): void;
+    ): Promise<string>;
   }
 
   namespace offscreen {

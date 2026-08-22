@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { NotificationManager, telegramNotificationText } from "../dist/notifications/manager.js";
+import { NotificationManager, browserNotification, telegramNotificationText } from "../dist/notifications/manager.js";
 import { TelegramDeliveryError } from "../dist/notifications/telegram.js";
 
 const TOKEN = "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ_abc123";
@@ -77,6 +77,58 @@ test("Telegram text is structured, event-aware, HTML-safe, and bounded", () => {
   }));
   assert.ok(bounded.length <= 700);
   assert.doesNotMatch(bounded, /<title>|<details>/);
+});
+
+test("Browser notification uses the packaged extension icon through the Promise API", async () => {
+  const priorChrome = globalThis.chrome;
+  const calls = [];
+  globalThis.chrome = {
+    runtime: {
+      getURL(path) { return `chrome-extension://guardian/${path}`; },
+    },
+    notifications: {
+      async create(id, options) {
+        calls.push({ id, options });
+        return id;
+      },
+    },
+  };
+
+  try {
+    await browserNotification(notification());
+    assert.deepEqual(calls, [{
+      id: "guardian:test",
+      options: {
+        type: "basic",
+        iconUrl: "chrome-extension://guardian/assets/icon-128.png",
+        title: "Task complete",
+        message: "The monitored chat reports that the requested work is complete.",
+        priority: 0,
+      },
+    }]);
+  } finally {
+    if (priorChrome === undefined) delete globalThis.chrome;
+    else globalThis.chrome = priorChrome;
+  }
+});
+
+test("Browser notification propagates Chrome delivery failures", async () => {
+  const priorChrome = globalThis.chrome;
+  globalThis.chrome = {
+    runtime: {
+      getURL(path) { return `chrome-extension://guardian/${path}`; },
+    },
+    notifications: {
+      async create() { throw new Error("notification delivery failed"); },
+    },
+  };
+
+  try {
+    await assert.rejects(() => browserNotification(notification()), /notification delivery failed/);
+  } finally {
+    if (priorChrome === undefined) delete globalThis.chrome;
+    else globalThis.chrome = priorChrome;
+  }
 });
 
 test("browser, sound, and inherited Telegram can coexist for one monitoring event", async () => {
