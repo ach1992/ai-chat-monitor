@@ -1,0 +1,113 @@
+name: Publish v2.0.1
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/publish-v2.0.1.yml]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      ORIGINAL_TARGET_SHA: 1e45c841a38bb3bc2539894c51d44e75c8eb91d5
+      TAG: v2.0.1
+      VERSION: 2.0.1
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Verify release source
+        run: |
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test "$(node -p 'require("./package.json").version')" = "$VERSION"
+          test "$(node -p 'require("./src/manifest.json").version')" = "$VERSION"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm run validate
+      - run: npm run smoke:extension
+      - run: npm run package
+      - name: Verify package and capture hash
+        id: package
+        run: |
+          ZIP="artifacts/chat-turn-guardian-${VERSION}.zip"
+          test -f "$ZIP"
+          unzip -t "$ZIP"
+          test "$(unzip -Z1 "$ZIP" | grep -c '^manifest.json$')" -eq 1
+          test "$(unzip -Z1 "$ZIP" | grep -Ec '\.(ts|map)$|(^|/)\.env($|\.)')" -eq 0
+          test "$(unzip -Z1 "$ZIP" | wc -l)" -eq 48
+          HASH="$(sha256sum "$ZIP" | awk '{print $1}')"
+          grep -q "$HASH  chat-turn-guardian-${VERSION}.zip" artifacts/SHA256SUMS.txt
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+          echo "sha256=$HASH" >> "$GITHUB_OUTPUT"
+      - name: Reconcile existing release
+        id: state
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            TARGET="$(gh release view "$TAG" --json targetCommitish --jq .targetCommitish)"
+            if [ "$TARGET" != "$ORIGINAL_TARGET_SHA" ] && [ "$TARGET" != "$GITHUB_SHA" ]; then
+              echo "Existing release targets unexpected commit $TARGET" >&2
+              exit 1
+            fi
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "target=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+            if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+              echo "Tag exists without a readable release; refusing overwrite." >&2
+              exit 1
+            fi
+          fi
+      - name: Publish GitHub release
+        if: steps.state.outputs.exists == 'false'
+        run: |
+          cat > /tmp/release-notes.md <<'EOF'
+          ## Chat Turn Guardian v2.0.1
+
+          Patch release for Browser notification delivery in the v2 read-only monitor.
+
+          - Browser notifications now use the packaged extension icon resolved through `chrome.runtime.getURL()`.
+          - Browser delivery uses the Promise-based `chrome.notifications.create()` path.
+          - Direct regression coverage validates the real Browser notification wrapper and failure propagation.
+          - Live Chromium/Windows testing confirmed notifications display for real monitored events.
+          - The v2 read-only contract, Telegram/provider boundaries, monitoring/classification behavior, and deduplication semantics are unchanged.
+
+          Tracking: Issue #74 and PR #75.
+          EOF
+          gh release create "$TAG" \
+            "${{ steps.package.outputs.zip }}" \
+            artifacts/SHA256SUMS.txt \
+            artifacts/build-info.json \
+            --target "$GITHUB_SHA" \
+            --title "Chat Turn Guardian v2.0.1" \
+            --notes-file /tmp/release-notes.md
+      - name: Verify published release
+        id: verify
+        run: |
+          RELEASE_JSON="$(gh release view "$TAG" --json tagName,targetCommitish,isDraft,isPrerelease,url)"
+          TARGET="$(echo "$RELEASE_JSON" | jq -r .targetCommitish)"
+          test "$(echo "$RELEASE_JSON" | jq -r .tagName)" = "$TAG"
+          test "$(echo "$RELEASE_JSON" | jq -r .isDraft)" = "false"
+          test "$(echo "$RELEASE_JSON" | jq -r .isPrerelease)" = "false"
+          test "$TARGET" = "${{ steps.state.outputs.target }}"
+          TAG_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" --jq .object.sha)"
+          test "$TAG_SHA" = "$TARGET"
+          test "$(gh release view "$TAG" --json assets --jq '[.assets[].name | select(. == "chat-turn-guardian-2.0.1.zip" or . == "SHA256SUMS.txt" or . == "build-info.json")] | length')" -eq 3
+          mkdir -p /tmp/release-verify
+          gh release download "$TAG" --pattern "chat-turn-guardian-${VERSION}.zip" --pattern "build-info.json" --dir /tmp/release-verify
+          test "$(sha256sum "/tmp/release-verify/chat-turn-guardian-${VERSION}.zip" | awk '{print $1}')" = "${{ steps.package.outputs.sha256 }}"
+          node -e 'const fs=require("node:fs"); const info=JSON.parse(fs.readFileSync("/tmp/release-verify/build-info.json","utf8")); if(info.sourceSha!==process.argv[1]) throw new Error(`sourceSha ${info.sourceSha}`); if(info.version!==process.env.VERSION) throw new Error(`version ${info.version}`); if(info.fileCount!==48) throw new Error(`fileCount ${info.fileCount}`);' "$TARGET"
+          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+          echo "url=$(echo "$RELEASE_JSON" | jq -r .url)" >> "$GITHUB_OUTPUT"
+      - name: Record release evidence
+        run: |
+          gh issue comment 74 --body "v2.0.1 publication verified. Target: \`${{ steps.verify.outputs.target }}\`. Release ZIP: \`chat-turn-guardian-${VERSION}.zip\`. SHA-256: \`${{ steps.package.outputs.sha256 }}\`. Release is non-draft/non-prerelease, tag resolves exactly to the release target, all three custom assets are present, build provenance matches the target, and the published ZIP was downloaded and hash-verified. Release: ${{ steps.verify.outputs.url }}"
