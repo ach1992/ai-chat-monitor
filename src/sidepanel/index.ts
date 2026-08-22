@@ -139,6 +139,7 @@ const browserInputs = new Map<MonitoringEventType, HTMLInputElement>();
 const soundInputs = new Map<MonitoringEventType, HTMLInputElement>();
 let latestOverview: PanelOverviewResponse | undefined;
 let refreshInFlight = false;
+let notificationDefaultsDirty = false;
 let resetConfirmUntil = 0;
 let resetConfirmTimer: number | undefined;
 
@@ -246,6 +247,9 @@ function buildEventChecks(root: HTMLElement, target: Map<MonitoringEventType, HT
 
 buildEventChecks(browserEventsRoot, browserInputs);
 buildEventChecks(soundEventsRoot, soundInputs);
+
+defaultsForm.addEventListener("input", () => { notificationDefaultsDirty = true; });
+defaultsForm.addEventListener("change", () => { notificationDefaultsDirty = true; });
 
 function isSupportedUrl(url: string | undefined): boolean {
   if (url === undefined) return false;
@@ -423,10 +427,12 @@ function renderOverview(data: PanelOverviewResponse): void {
     chatList.append(e("div", "empty-state", "No monitored chats. Turn monitoring on from Current tab to add one."));
   }
 
-  for (const [event, input] of browserInputs) input.checked = data.defaults.browserEvents.includes(event);
-  for (const [event, input] of soundInputs) input.checked = data.defaults.soundEvents.includes(event);
-  stallThresholdInput.value = String(Math.round(data.defaults.stallThresholdMs / 1_000));
-  suppressFocusedInput.checked = data.defaults.suppressLowPriorityWhileFocused;
+  if (!notificationDefaultsDirty) {
+    for (const [event, input] of browserInputs) input.checked = data.defaults.browserEvents.includes(event);
+    for (const [event, input] of soundInputs) input.checked = data.defaults.soundEvents.includes(event);
+    stallThresholdInput.value = String(Math.round(data.defaults.stallThresholdMs / 1_000));
+    suppressFocusedInput.checked = data.defaults.suppressLowPriorityWhileFocused;
+  }
 
   const events = [...data.events].reverse();
   eventList.replaceChildren(...events.map(renderEvent));
@@ -483,6 +489,7 @@ defaultsForm.addEventListener("submit", (event) => {
   setButtonState(defaultsSaveButton, "working", "Saving…");
   void chrome.runtime.sendMessage<GuardianResponse>(request).then(async (response) => {
     if (response.type === "background:error") throw new Error(response.message);
+    notificationDefaultsDirty = false;
     detailsElement.textContent = "Notification defaults saved.";
     summaryCard.dataset.tone = "ok";
     flashButton(defaultsSaveButton, "success", "Saved ✓", "Save notification defaults");
