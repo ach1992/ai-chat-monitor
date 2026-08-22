@@ -6,9 +6,10 @@ async function readDist(path) {
   return readFile(new URL(`../dist/${path}`, import.meta.url), "utf8");
 }
 
-test("Side Panel exposes monitoring, protocol setup, notifications, providers, and event history", async () => {
-  const [html, script, providerScript, telegramScript, contentScript] = await Promise.all([
+test("Side Panel exposes monitoring, compact protocol setup, notifications, providers, and event history", async () => {
+  const [html, styles, script, providerScript, telegramScript, contentScript] = await Promise.all([
     readDist("sidepanel/index.html"),
+    readDist("sidepanel/styles.css"),
     readDist("sidepanel/index.js"),
     readDist("sidepanel/provider-ui.js"),
     readDist("sidepanel/telegram-ui.js"),
@@ -22,9 +23,12 @@ test("Side Panel exposes monitoring, protocol setup, notifications, providers, a
     "data-chat-instruction",
     "data-copy-custom",
     "data-copy-chat",
+    "data-save-defaults",
     "data-browser-events",
     "data-sound-events",
     "data-chat-list",
+    "data-reset-chats",
+    "data-reset-status",
     "data-event-list",
     "data-history-clear",
     "data-provider-manager-v2",
@@ -33,20 +37,28 @@ test("Side Panel exposes monitoring, protocol setup, notifications, providers, a
   }
 
   assert.match(html, /Read-only chat monitor/i);
-  assert.match(html, /Guardian works without this protocol/i);
+  assert.match(html, /Guardian still works when the marker is missing/i);
   assert.match(html, /Guardian only observes/i);
   assert.match(html, /never writes to ChatGPT/i);
+  assert.match(html, /Only chats with monitoring enabled are shown here/i);
+  assert.match(html, /protocol-preview/);
+  assert.match(html, /Recommended/);
   assert.doesNotMatch(html, /Continuation text|Continue delay|hard fuse|Pause All|AUTO only sends/i);
 
   for (const messageType of [
     "panel:overview-request",
     "panel:monitoring-policy-update",
     "panel:monitoring-defaults-update",
+    "panel:monitoring-chats-reset",
     "panel:history-clear",
   ]) {
     assert.match(script, new RegExp(messageType));
   }
 
+  assert.match(script, /Confirm reset/);
+  assert.match(script, /Copied/);
+  assert.match(script, /Saving/);
+  assert.match(script, /Refreshing/);
   assert.match(script, /CHAT_TURN_GUARDIAN_STATUS=\\?\{?[^\n]*decision/);
   assert.doesNotMatch(script, /CHAT_TURN_GUARDIAN_STATUS_V1=/);
   for (const decision of [
@@ -64,6 +76,21 @@ test("Side Panel exposes monitoring, protocol setup, notifications, providers, a
   assert.match(script, /exact, strict, or format-exclusive output/i);
   assert.match(script, /outside Markdown code fences/i);
   assert.match(script, /Do not use CONTINUE when a real human gate is required/i);
+
+  for (const token of [
+    "data-action-state",
+    "badge[data-tone=",
+    "--green:",
+    "--amber:",
+    "--red:",
+    "--violet:",
+    "chat-actions",
+    "protocol-preview",
+    "@media (max-width: 430px)",
+    "@media (max-width: 350px)",
+  ]) {
+    assert.ok(styles.includes(token), `Expected responsive/color UX token: ${token}`);
+  }
 
   for (const messageType of [
     "panel:provider-model-catalog-request",
