@@ -23,7 +23,7 @@ import type {
   ProviderProfileMutation,
   ProviderSettingsState,
 } from "../providers/types.js";
-import type { BlockingReason, PageObservation } from "../shared/observation.js";
+import type { PageObservation } from "../shared/observation.js";
 import { createDurableStorage, createEphemeralStorage } from "../storage/index.js";
 import { MonitoringHistoryRepository, type MonitoringHistoryState } from "./history.js";
 import { MonitoringPolicyRepository, type MonitoringPolicyPersistence } from "./policy.js";
@@ -53,10 +53,10 @@ interface LegacyAutomationPolicyState {
 
 interface ResolutionCacheEntry {
   key: string;
-  decision?: ConversationProtocolDecision;
+  decision?: ConversationProtocolDecision | undefined;
   source: SemanticStatusSource;
   marker: ConversationStatusMarkerResult;
-  classification?: ClassificationResult;
+  classification?: ClassificationResult | undefined;
 }
 
 interface ResolutionCacheState {
@@ -258,19 +258,25 @@ export class MonitoringService {
     }
     this.#generation.delete(conversationId);
 
+    const pageEvent = eventForPageState(state);
     const assistant = observation.latestAssistant;
     if (assistant === undefined || observation.confidence !== "HIGH") {
-      this.#runtime.set(session.tabId, {
+      const uiDecision = semanticFromUi(state);
+      const runtime: MonitoringRuntimeStatus = {
         tabId: session.tabId,
         conversationId,
         enabled: true,
         generation: observation.generation,
         pageState: state,
         blockingReasons: [...observation.blocking.reasons],
-        semanticSource: "UNKNOWN",
+        ...(uiDecision === undefined ? {} : { semanticDecision: uiDecision }),
+        semanticSource: uiDecision === undefined ? "UNKNOWN" : "UI",
         markerHealth: "MISSING",
+        ...(pageEvent === undefined ? {} : { lastEvent: pageEvent }),
         updatedAt: Date.now(),
-      });
+      };
+      this.#runtime.set(session.tabId, runtime);
+      if (pageEvent !== undefined) await this.#emitEvent(session, policy, runtime, pageEvent);
       return;
     }
 
@@ -286,7 +292,6 @@ export class MonitoringService {
       ...(assistant.domMessageId === undefined ? {} : { domMessageId: assistant.domMessageId }),
     });
 
-    const pageEvent = eventForPageState(state);
     let eventType = pageEvent ?? eventForDecision(resolution.decision) ?? "RESPONSE_COMPLETE";
     if (resolution.classification?.reasonCode === "PROVIDER_FAILURE") eventType = "PROVIDER_ERROR";
     if (repeated && pageEvent === undefined) eventType = "REPEATED_RESPONSE";
@@ -327,9 +332,10 @@ export class MonitoringService {
   async status(tabId: number): Promise<MonitoringServiceStatus> {
     await this.#ready;
     const session = this.#getSession(tabId);
+    const runtime = this.#runtime.get(tabId);
     return {
       ...(session?.conversationId === undefined ? {} : { policy: this.#policies.resolve(session.conversationId) }),
-      ...(this.#runtime.get(tabId) === undefined ? {} : { runtime: structuredClone(this.#runtime.get(tabId)) as MonitoringRuntimeStatus }),
+      ...(runtime === undefined ? {} : { runtime: structuredClone(runtime) }),
     };
   }
 
@@ -384,8 +390,8 @@ export class MonitoringService {
       };
       await this.#providerSettings.save(next);
       if (removed !== undefined) {
-        const origin = providerOriginPattern(removed.baseUrl);
-        const stillUsed = next.profiles.some((profile) => providerOriginPattern(profile.baseUrl) === origin);
+        const origin = providerOriginPattern(removed);
+        const stillUsed = next.profiles.some((profile) => providerOriginPattern(profile) === origin);
         if (!stillUsed) {
           try { await chrome.permissions.remove({ origins: [origin] }); } catch { /* optional permission cleanup */ }
         }
@@ -425,7 +431,7 @@ export class MonitoringService {
       return this.#cacheResolution({ key, decision: uiDecision, source: "UI", marker });
     }
 
-    if (marker.health === "DETECTED" || marker.health === "LEGACY") {
+    if ((marker.health === "DETECTED" || marker.health === "LEGACY") && marker.decision !== undefined) {
       const classification = parseConversationProtocolStatus(assistant.normalizedText);
       return this.#cacheResolution({
         key,
