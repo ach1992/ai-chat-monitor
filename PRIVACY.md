@@ -1,87 +1,100 @@
 # Chat Turn Guardian Privacy Policy
 
-Last updated: August 21, 2026
+Last updated: August 22, 2026
 
-Chat Turn Guardian is a Chromium extension whose single purpose is to supervise user-selected ChatGPT Web conversations and, only when its safety gates allow, request a configured continuation turn. It does not operate a developer-owned backend, analytics service, advertising service, or data broker.
+Chat Turn Guardian is a Chromium extension whose single purpose is to monitor user-selected ChatGPT Web conversations and notify the user about response completion, attention states, semantic work state, and platform/runtime conditions. v2 is read-only with respect to ChatGPT: it does not write to the ChatGPT composer, activate ChatGPT conversation controls, or create conversation turns.
 
-This policy describes the data handled by the extension, why it is handled, where it is stored, and when it is sent to services the user chooses to configure.
+Chat Turn Guardian does not operate a developer-owned backend, analytics service, advertising service, or data broker.
 
-## Data processed on supported ChatGPT pages
+## Data processed locally
 
-Chat Turn Guardian runs content scripts only on the supported ChatGPT Web origins declared in the extension manifest. To provide supervision, it processes page state such as conversation/route identity, generation state, blocking UI, composer state, user interaction timing, and recent visible user/assistant turn content.
+To monitor a selected ChatGPT conversation, the extension may read and process locally:
 
-Full conversation text is not persisted in the extension's audit history. Recent turn text may be held transiently in extension memory while the current page state is being evaluated. The extension derives bounded fingerprints and structured state needed for stale-state detection, ownership isolation, guarded-send revalidation, reliability checks, and audit diagnostics.
+- the supported ChatGPT page URL/route and conversation identity;
+- the latest relevant user and assistant text needed for bounded semantic classification;
+- response fingerprints, DOM message identity, generation state, visible blocker/action state, and related monitoring metadata;
+- the optional terminal `CHAT_TURN_GUARDIAN_STATUS={...}` marker;
+- local monitoring policy, notification preferences, provider configuration, Telegram configuration, and bounded diagnostics/history.
 
-When an ambiguous assistant response does not already contain the versioned machine-readable Guardian status, the extension may inject one bounded in-chat self-check. That message asks the current conversation to classify the preceding work state and remember a terminal-status format for later replies. A valid terminal status is processed locally and avoids that extra self-check. The extension does not claim or create account-level model memory.
+Chat content is treated as untrusted input.
 
-## AI classifier providers
+## What is stored
 
-AI classification is optional. If the user configures OpenRouter, NaraRouter, or a generic OpenAI-compatible HTTPS provider, Chat Turn Guardian may send a minimized recent conversation context to that selected provider when an ambiguous finished response needs classification.
+Trusted extension storage may contain:
 
-Before provider transport, Chat Turn Guardian:
+- per-chat monitoring ON/OFF policy and notification preferences;
+- optional provider profiles, including API credentials;
+- optional Telegram bot token/destination and sanitized delivery health;
+- bounded monitoring-event metadata needed for deduplication and diagnostics;
+- bounded runtime/cache identity used to avoid duplicate classification or notifications.
 
-- limits context to at most 4 recent turns;
-- limits each turn to at most 4,000 characters and total context to at most 8,000 characters;
-- minimizes large code/log blocks;
-- redacts common API-key, bearer-token, and token-like patterns; and
-- sends only the classification context needed to return an advisory `CONTINUE`, `HOLD`, or `UNSURE` result.
+Monitoring history does **not** intentionally store full ChatGPT transcripts or credentials. Provider credentials and Telegram bot tokens are not rendered back in ordinary Side Panel status output after saving.
 
-Provider requests are sent directly from the trusted extension context to the provider endpoint over HTTPS. Automatic redirects are refused. The selected provider receives the transmitted context, model request, and the provider credential supplied by the user. Provider handling of that data is governed by the provider's own terms and privacy policy.
+Legacy v1 automatic-send/write-journal authority is not restored or migrated into v2 monitoring authority.
 
-Chat Turn Guardian does not give any AI provider access to the DOM, browser tabs, approval authority, guarded-send mutation, or other extension credentials. Provider output is advisory and cannot authorize a send by itself.
+## Optional AI provider transfer
 
-## Telegram notifications
+If the user configures one or more AI classifier providers, Guardian uses them only as semantic fallback when high-confidence page/UI evidence, a valid terminal status marker, and strong local deterministic rules do not resolve the work state.
 
-Telegram is optional and outbound-only. If the user configures and enables Telegram notifications, the extension sends notifications directly from the trusted extension context to the official Telegram Bot API over HTTPS using the bot token and destination supplied by the user.
+Before provider transfer, Guardian bounds/minimizes the recent context and applies secret redaction. Provider output is advisory and cannot control ChatGPT or authorize page mutation.
 
-Telegram v1 sends bounded Guardian notification metadata: the Guardian notification title, a bounded event/reason message, and a bounded conversation identifier when available. It does not send full chat transcripts or full ChatGPT messages. A Test notification contains only a fixed Chat Turn Guardian test message.
+Depending on the provider chosen by the user, data is sent directly from the extension to that provider's configured HTTPS endpoint. The provider's own privacy, retention, account, billing, and processing policies apply independently.
 
-The user's Telegram bot token is a credential. It is stored only in trusted extension storage and is never returned in ordinary status APIs, rendered back into the Side Panel, written to audit history, or included in displayed transport errors. Telegram receives the Bot API request required to deliver the notification. Telegram's handling of that data is governed by Telegram's own terms and privacy policy.
+If no provider is configured, Guardian does not send chat context to an AI provider.
 
-Telegram cannot approve, control, or inject ChatGPT turns. Telegram delivery success or failure cannot change classifier output, `AUTO`/`HOLD` semantics, ownership, guarded-send authority, or conversation content.
+## Telegram transfer
 
-## Browser notifications
+Telegram support is outbound notification-only and is disabled until configured by the user.
 
-Browser notifications are generated locally through the Chromium notifications API. Enabling Telegram does not replace browser notifications. Browser notification delivery does not send notification content to a Chat Turn Guardian-operated service.
+When enabled, Guardian sends bounded notification metadata directly to Telegram's Bot API using the user's bot token and destination. Default notification content is event-oriented metadata such as the event type and conversation identity; Guardian does not intentionally send full ChatGPT transcripts to Telegram by default.
 
-## Data stored by the extension
+Telegram cannot approve decisions, control Guardian, or send ChatGPT turns through this extension. There is no inbound Telegram remote-control channel in v2.
 
-Chat Turn Guardian uses Chromium extension storage for the minimum state needed to provide its features. Depending on configuration, this can include:
+Telegram's own privacy and bot-platform policies apply independently.
 
-- automation policies and per-conversation settings;
-- provider profiles, including provider API keys;
-- Telegram configuration, including the bot token and destination;
-- bounded audit/reliability metadata and fingerprints; and
-- short-lived runtime state and a durable guarded-write journal used to prevent blind replay across service-worker/browser restarts.
+## Browser notifications and sound
 
-The guarded-write journal contains bounded control metadata such as conversation/message fingerprints, DOM response identifiers when available, action type, protocol version, decision identifier, timestamps, and disposition. It is capped at 4,096 records and compacts a conversation's obsolete records after a fresh human-interaction epoch. It does not store full assistant responses or full chat transcripts. For exact control-turn reconciliation it may store bounded Guardian-generated control text, including protocol-bootstrap and status-response text, but not arbitrary chat content.
+Browser notifications use Chromium's local `chrome.notifications` API. Optional sound uses a Manifest V3 offscreen extension document. These features do not require sending ChatGPT content to a developer-owned service.
 
-Durable credential-bearing storage is restricted to trusted extension contexts. Provider API keys and Telegram bot tokens are not exposed to ChatGPT page scripts or content scripts.
+## Clipboard
 
-Provider credentials are removed when their provider profile is removed. A Telegram bot token remains stored while that Telegram configuration exists, including while Telegram delivery is disabled; entering a new token replaces it. Extension data can also be removed by uninstalling the extension or clearing its extension storage through the browser.
+The `clipboardWrite` permission supports explicit user-initiated Copy actions for the status-protocol setup text in the Side Panel. Guardian does not use clipboard access to paste or send messages into ChatGPT.
 
 ## Host permissions
 
-Persistent host access is limited to the supported ChatGPT Web origins because page supervision is the extension's primary user-facing purpose.
+Persistent host access is limited to supported ChatGPT origins:
 
-The manifest also declares optional `https://*/*` host permission as a runtime envelope. This does not grant broad website access at installation. It allows the user to configure an arbitrary HTTPS OpenAI-compatible provider endpoint. When provider or Telegram access is needed, the Side Panel requests permission for the exact origin involved. Provider-origin permissions that are no longer used are removed on a best-effort basis.
+- `https://chatgpt.com/*`
+- `https://chat.openai.com/*`
 
-## Data sharing and sales
+The manifest also declares optional HTTPS host permission so a user can configure an arbitrary HTTPS OpenAI-compatible provider whose origin is not known at install time. Guardian requests the exact selected provider origin at runtime where required.
 
-Chat Turn Guardian does not sell user data. It does not use user data for advertising, credit-worthiness, or unrelated profiling. It does not transfer user data to a developer-operated server.
+Telegram access is requested for the Telegram Bot API origin only when Telegram is configured.
 
-Data is shared only with an external provider or Telegram when the user enables the corresponding feature and the transfer is necessary to provide that feature, as described above.
+## Security boundaries
 
-## Security and limited use
+v2 intentionally removes ChatGPT mutation authority. The extension runtime must not:
 
-Chat Turn Guardian limits collection, use, and transmission of user data to the extension's disclosed single purpose and related security/reliability operations. Credentials are kept in trusted extension storage; external transports require HTTPS; transport errors are sanitized; provider redirects are refused; and external notification/classification systems are isolated from chat mutation authority.
+- write to the composer;
+- click Send, Retry, Continue generating, Regenerate, Stop, confirmation, verification, or other ChatGPT conversation controls;
+- generate or inject self-check/bootstrap/recovery turns;
+- treat provider or Telegram output as browser mutation authority;
+- bypass platform/account limits, authentication, verification, CAPTCHAs, confirmations, approvals, or safety controls.
 
-Chat Turn Guardian's use and transfer of user data adheres to the Chrome Web Store User Data Policy, including its Limited Use requirements. User data is not used or transferred for personalized advertising, unrelated profiling, credit-worthiness, or any purpose unrelated to the extension's disclosed user-facing functionality and the security/reliability needed to provide it.
+Known page/UI blocker evidence outranks contradictory semantic/provider interpretation.
 
-## Changes to this policy
+## Data sale, advertising, and analytics
 
-If runtime data handling changes materially, this policy and the relevant in-product disclosures will be updated before that changed handling is released. Historical versions remain available through the public Git repository.
+Chat Turn Guardian does not sell user data and does not include advertising or developer-operated behavioral analytics.
 
-## Contact
+## User control
 
-Privacy questions and reports can be submitted through the public Chat Turn Guardian GitHub repository's issue tracker: `https://github.com/ach1992/chat-turn-guardian/issues`.
+Users choose which conversations are monitored and can turn monitoring off from the Side Panel. Provider fallback, sound, Telegram, and individual notification event selections are configurable. Event history can be cleared from the Side Panel.
+
+Removing the extension removes its browser-managed extension storage according to Chromium behavior.
+
+## Source and verification
+
+The project is developed in the public repository and release packages are generated by the repository build pipeline with source-SHA provenance and checksums. Public release status is separate from development/test builds.
+
+For implementation details see [Architecture](docs/ARCHITECTURE.md), [Project specification](docs/PROJECT_SPEC.md), and [Store readiness](docs/STORE_READINESS.md).
