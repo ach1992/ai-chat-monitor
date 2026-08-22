@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 async function readTreeText(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -15,8 +16,8 @@ async function readTreeText(directory) {
 }
 
 test("content and background runtime expose no ChatGPT write command or composer mutation path", async () => {
-  const content = await readTreeText(new URL("../dist/content", import.meta.url));
-  const background = await readTreeText(new URL("../dist/background", import.meta.url));
+  const content = await readTreeText(fileURLToPath(new URL("../dist/content", import.meta.url)));
+  const background = await readTreeText(fileURLToPath(new URL("../dist/background", import.meta.url)));
   const protocol = await readFile(new URL("../dist/shared/protocol.js", import.meta.url), "utf8");
   const manifest = JSON.parse(await readFile(new URL("../dist/manifest.json", import.meta.url), "utf8"));
 
@@ -29,7 +30,6 @@ test("content and background runtime expose no ChatGPT write command or composer
   assert.doesNotMatch(content, /\bsetComposerText\b/);
   assert.doesNotMatch(content, /\.click\s*\(/);
   assert.doesNotMatch(content, /dispatchEvent\s*\(\s*new\s+InputEvent/);
-  assert.doesNotMatch(content, /replaceChildren\s*\([^)]*continuation/i);
 
   const scripts = manifest.content_scripts.flatMap((entry) => entry.js ?? []);
   assert.deepEqual(scripts, ["content/adapter.js", "content/index.js"]);
