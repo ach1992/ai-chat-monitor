@@ -49,7 +49,7 @@ test("manifest and public release metadata stay aligned with the implemented per
   assert.equal(packageLock.packages[""].version, packageJson.version);
   assert.equal(typeof manifest.description, "string");
   assert.ok(manifest.description.length > 0);
-  assert.deepEqual(manifest.permissions, ["storage", "sidePanel", "notifications"]);
+  assert.deepEqual(manifest.permissions, ["storage", "sidePanel", "notifications", "offscreen", "clipboardWrite"]);
   assert.deepEqual(manifest.host_permissions, ["https://chatgpt.com/*", "https://chat.openai.com/*"]);
   assert.deepEqual(manifest.optional_host_permissions, ["https://*/*"]);
 
@@ -57,6 +57,8 @@ test("manifest and public release metadata stay aligned with the implemented per
     "**`storage`**",
     "**`sidePanel`**",
     "**`notifications`**",
+    "**`offscreen`**",
+    "**`clipboardWrite`**",
     "**Persistent host access: `https://chatgpt.com/*`, `https://chat.openai.com/*`**",
     "**Optional host envelope: `https://*/*`**",
     "**No, this extension does not use remotely hosted executable code.**",
@@ -64,24 +66,25 @@ test("manifest and public release metadata stay aligned with the implemented per
     assert.match(listing, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
 
-  assert.match(privacy, /Chrome Web Store User Data Policy, including its Limited Use requirements/);
+  assert.match(privacy, /read-only with respect to ChatGPT/);
   assert.match(privacy, /does not sell user data/);
-  assert.match(privacy, /generic OpenAI-compatible HTTPS provider/);
-  assert.match(privacy, /Telegram v1 sends bounded Guardian notification metadata/);
+  assert.match(privacy, /OpenAI-compatible provider/);
+  assert.match(privacy, /Telegram support is outbound notification-only/);
+  assert.match(privacy, /clipboardWrite/);
 });
 
-test("Side Panel prominently discloses provider and Telegram data transfers", async () => {
+test("Side Panel prominently discloses read-only provider and Telegram data handling", async () => {
   const [html, telegramUi] = await Promise.all([
     readText("dist/sidepanel/index.html"),
     readText("dist/sidepanel/telegram-ui.js"),
   ]);
 
   assert.match(html, /Privacy &amp; data/);
-  assert.match(html, /Full chat transcripts are not stored/);
-  assert.match(html, /minimized, secret-redacted recent context directly to that provider/);
-  assert.match(html, /Telegram v1 never sends full ChatGPT messages or accepts remote-control commands/);
+  assert.match(html, /Full transcripts are not stored/);
+  assert.match(html, /minimized, secret-redacted context/);
+  assert.match(html, /Telegram receives bounded notification metadata by default/);
+  assert.match(html, /Guardian never writes to ChatGPT/);
   assert.match(html, /github\.com\/ach1992\/chat-turn-guardian\/blob\/main\/PRIVACY\.md/);
-  assert.match(html, /at most 4 recent turns and 8,000 characters after secret redaction/);
   assert.match(telegramUi, /never sends full ChatGPT messages and accepts no inbound commands/);
 });
 
