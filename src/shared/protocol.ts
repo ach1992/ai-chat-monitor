@@ -1,15 +1,15 @@
 import { isPageObservation, type PageObservation } from "./observation.js";
 import type { ControlEligibility } from "../core/session-registry.js";
+import { MONITORING_EVENTS } from "../monitoring/policy.js";
 import type {
-  AutomationPolicyDefaults,
-  ChatAutomationPolicy,
-  ChatAutomationPolicyPatch,
-} from "../automation/policy.js";
-import type {
-  AutomationRuntimeStatus,
-  NotificationTrigger,
-  ResolvedAutomationPolicy,
-} from "../automation/types.js";
+  ChatMonitoringPolicy,
+  ChatMonitoringPolicyPatch,
+  MonitoringEvent,
+  MonitoringEventType,
+  MonitoringPolicyDefaults,
+  MonitoringRuntimeStatus,
+  ResolvedMonitoringPolicy,
+} from "../monitoring/types.js";
 import {
   isProviderCatalogSpec,
   isProviderProfileMutation,
@@ -21,7 +21,6 @@ import type {
   ProviderModelCatalogEntry,
   ProviderProfileMutation,
 } from "../providers/types.js";
-import type { AuditEvent } from "../reliability/audit.js";
 
 export const PROTOCOL_VERSION = 2 as const;
 
@@ -74,24 +73,18 @@ export interface PanelOverviewRequest {
   protocolVersion: typeof PROTOCOL_VERSION;
 }
 
-export interface PanelAutomationPolicyUpdate {
-  type: "panel:automation-policy-update";
+export interface PanelMonitoringPolicyUpdate {
+  type: "panel:monitoring-policy-update";
   protocolVersion: typeof PROTOCOL_VERSION;
   tabId: number;
   conversationId: string;
-  patch: ChatAutomationPolicyPatch;
+  patch: ChatMonitoringPolicyPatch;
 }
 
-export interface PanelAutomationDefaultsUpdate {
-  type: "panel:automation-defaults-update";
+export interface PanelMonitoringDefaultsUpdate {
+  type: "panel:monitoring-defaults-update";
   protocolVersion: typeof PROTOCOL_VERSION;
-  patch: Partial<AutomationPolicyDefaults>;
-}
-
-export interface PanelEmergencyPauseUpdate {
-  type: "panel:emergency-pause-update";
-  protocolVersion: typeof PROTOCOL_VERSION;
-  paused: boolean;
+  patch: Partial<MonitoringPolicyDefaults>;
 }
 
 export interface PanelProviderProfileUpsert {
@@ -125,8 +118,8 @@ export interface PanelProviderOrderUpdate {
   order: string[];
 }
 
-export interface PanelAuditClear {
-  type: "panel:audit-clear";
+export interface PanelHistoryClear {
+  type: "panel:history-clear";
   protocolVersion: typeof PROTOCOL_VERSION;
 }
 
@@ -147,8 +140,8 @@ export interface PanelStatusResponse {
   documentId?: string;
   conversationId?: string;
   controlEligibility?: ControlEligibility;
-  automationPolicy?: ResolvedAutomationPolicy;
-  automationRuntime?: AutomationRuntimeStatus;
+  monitoringPolicy?: ResolvedMonitoringPolicy;
+  monitoringRuntime?: MonitoringRuntimeStatus;
   lastSeenAt?: number;
 }
 
@@ -160,9 +153,9 @@ export interface ManagedChatStatus {
   controlEligibility: ControlEligibility;
   lastSeenAt: number;
   generation?: PageObservation["generation"];
-  overrides?: ChatAutomationPolicy;
-  policy?: ResolvedAutomationPolicy;
-  runtime?: AutomationRuntimeStatus;
+  overrides?: ChatMonitoringPolicy;
+  policy?: ResolvedMonitoringPolicy;
+  runtime?: MonitoringRuntimeStatus;
 }
 
 export interface RedactedProviderSettings {
@@ -174,21 +167,19 @@ export interface PanelOverviewResponse {
   type: "background:overview";
   protocolVersion: typeof PROTOCOL_VERSION;
   policyRevision: number;
-  emergencyPaused: boolean;
-  defaults: AutomationPolicyDefaults;
+  defaults: MonitoringPolicyDefaults;
   chats: ManagedChatStatus[];
   providers: RedactedProviderSettings;
-  audit: AuditEvent[];
+  events: MonitoringEvent[];
 }
 
-export interface AutomationPolicyResponse {
-  type: "background:automation-policy";
+export interface MonitoringPolicyResponse {
+  type: "background:monitoring-policy";
   protocolVersion: typeof PROTOCOL_VERSION;
   revision: number;
-  emergencyPaused: boolean;
   tabId?: number;
-  policy?: ResolvedAutomationPolicy;
-  runtime?: AutomationRuntimeStatus;
+  policy?: ResolvedMonitoringPolicy;
+  runtime?: MonitoringRuntimeStatus;
 }
 
 export interface ProviderSettingsResponse {
@@ -209,8 +200,8 @@ export interface ProviderClassifierReadinessResponse {
   result: ProviderClassifierReadinessResult;
 }
 
-export interface AuditClearResponse {
-  type: "background:audit-cleared";
+export interface HistoryClearResponse {
+  type: "background:history-cleared";
   protocolVersion: typeof PROTOCOL_VERSION;
 }
 
@@ -228,26 +219,27 @@ export type GuardianRequest =
   | ContentUserInteraction
   | PanelStatusRequest
   | PanelOverviewRequest
-  | PanelAutomationPolicyUpdate
-  | PanelAutomationDefaultsUpdate
-  | PanelEmergencyPauseUpdate
+  | PanelMonitoringPolicyUpdate
+  | PanelMonitoringDefaultsUpdate
   | PanelProviderProfileUpsert
   | PanelProviderModelCatalogRequest
   | PanelProviderClassifierReadinessRequest
   | PanelProviderProfileRemove
   | PanelProviderOrderUpdate
-  | PanelAuditClear;
+  | PanelHistoryClear;
 
 export type GuardianResponse =
   | ContentAgentAck
   | PanelStatusResponse
   | PanelOverviewResponse
-  | AutomationPolicyResponse
+  | MonitoringPolicyResponse
   | ProviderSettingsResponse
   | ProviderModelCatalogResponse
   | ProviderClassifierReadinessResponse
-  | AuditClearResponse
+  | HistoryClearResponse
   | ProtocolErrorResponse;
+
+const EVENT_SET = new Set<MonitoringEventType>(MONITORING_EVENTS);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -277,25 +269,6 @@ function isTabId(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 
-function validMode(value: unknown): boolean {
-  return value === "OFF" || value === "OBSERVE" || value === "AUTO" || value === "NOTIFY_ONLY";
-}
-
-function validDelayPatch(value: unknown, maximum: number): boolean {
-  return value === undefined || value === null || (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= maximum);
-}
-
-function validHardFuse(value: unknown, allowNull: boolean): boolean {
-  return value === undefined || (allowNull && value === null) || (typeof value === "number" && Number.isInteger(value) && value >= 5 && value <= 500);
-}
-
-function validNotificationTriggers(value: unknown, allowNull: boolean): value is NotificationTrigger[] | null {
-  if (value === null) return allowNull;
-  if (!Array.isArray(value) || value.length > 5) return false;
-  const allowed = new Set(["RESPONSE_FINISHED", "HOLD", "UNSURE", "ERROR", "STAGNATION"]);
-  return value.every((entry) => typeof entry === "string" && allowed.has(entry)) && new Set(value).size === value.length;
-}
-
 function hasOnlyKeys(value: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {
   return Object.keys(value).every((key) => allowed.has(key));
 }
@@ -305,55 +278,46 @@ function isProviderId(value: unknown): value is string {
 }
 
 function isProviderOrder(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length <= 32 && value.every(isProviderId) && new Set(value).size === value.length;
+}
+
+function isEventList(value: unknown, allowNull: boolean): value is MonitoringEventType[] | null {
+  if (value === null) return allowNull;
   return Array.isArray(value) &&
-    value.length <= 32 &&
-    value.every(isProviderId) &&
+    value.length <= EVENT_SET.size &&
+    value.every((entry) => typeof entry === "string" && EVENT_SET.has(entry as MonitoringEventType)) &&
     new Set(value).size === value.length;
 }
 
-function isChatPolicyPatch(value: unknown): value is ChatAutomationPolicyPatch {
+function validStallThreshold(value: unknown, allowNull: boolean): boolean {
+  return value === undefined ||
+    (allowNull && value === null) ||
+    (typeof value === "number" && Number.isInteger(value) && value >= 30_000 && value <= 3_600_000);
+}
+
+function isChatMonitoringPatch(value: unknown): value is ChatMonitoringPolicyPatch {
   if (!isRecord(value)) return false;
-  const allowed = new Set([
-    "mode",
-    "settleDelayMs",
-    "continueDelayMs",
-    "cooldownMs",
-    "continuationText",
-    "notificationTriggers",
-    "hardFuseMaxAutoContinues",
-  ]);
+  const allowed = new Set(["enabled", "browserEvents", "soundEvents", "stallThresholdMs", "suppressLowPriorityWhileFocused"]);
   if (!hasOnlyKeys(value, allowed) || Object.keys(value).length === 0) return false;
   return (
-    (value.mode === undefined || validMode(value.mode)) &&
-    validDelayPatch(value.settleDelayMs, 60_000) &&
-    validDelayPatch(value.continueDelayMs, 60_000) &&
-    validDelayPatch(value.cooldownMs, 300_000) &&
-    (value.continuationText === undefined || value.continuationText === null ||
-      (typeof value.continuationText === "string" && value.continuationText.trim().length > 0 && value.continuationText.length <= 200)) &&
-    (value.notificationTriggers === undefined || validNotificationTriggers(value.notificationTriggers, true)) &&
-    validHardFuse(value.hardFuseMaxAutoContinues, true)
+    (value.enabled === undefined || typeof value.enabled === "boolean") &&
+    (value.browserEvents === undefined || isEventList(value.browserEvents, true)) &&
+    (value.soundEvents === undefined || isEventList(value.soundEvents, true)) &&
+    validStallThreshold(value.stallThresholdMs, true) &&
+    (value.suppressLowPriorityWhileFocused === undefined || value.suppressLowPriorityWhileFocused === null ||
+      typeof value.suppressLowPriorityWhileFocused === "boolean")
   );
 }
 
-function isDefaultsPatch(value: unknown): value is Partial<AutomationPolicyDefaults> {
+function isDefaultsPatch(value: unknown): value is Partial<MonitoringPolicyDefaults> {
   if (!isRecord(value)) return false;
-  const allowed = new Set([
-    "settleDelayMs",
-    "continueDelayMs",
-    "cooldownMs",
-    "continuationText",
-    "notificationTriggers",
-    "hardFuseMaxAutoContinues",
-  ]);
+  const allowed = new Set(["browserEvents", "soundEvents", "stallThresholdMs", "suppressLowPriorityWhileFocused"]);
   if (!hasOnlyKeys(value, allowed) || Object.keys(value).length === 0) return false;
   return (
-    (value.settleDelayMs === undefined || validDelayPatch(value.settleDelayMs, 60_000)) && value.settleDelayMs !== null &&
-    (value.continueDelayMs === undefined || validDelayPatch(value.continueDelayMs, 60_000)) && value.continueDelayMs !== null &&
-    (value.cooldownMs === undefined || validDelayPatch(value.cooldownMs, 300_000)) && value.cooldownMs !== null &&
-    (value.continuationText === undefined ||
-      (typeof value.continuationText === "string" && value.continuationText.trim().length > 0 && value.continuationText.length <= 200)) &&
-    (value.notificationTriggers === undefined || validNotificationTriggers(value.notificationTriggers, false)) &&
-    validHardFuse(value.hardFuseMaxAutoContinues, false)
+    (value.browserEvents === undefined || isEventList(value.browserEvents, false)) &&
+    (value.soundEvents === undefined || isEventList(value.soundEvents, false)) &&
+    validStallThreshold(value.stallThresholdMs, false) && value.stallThresholdMs !== null &&
+    (value.suppressLowPriorityWhileFocused === undefined || typeof value.suppressLowPriorityWhileFocused === "boolean")
   );
 }
 
@@ -389,52 +353,31 @@ export function isPanelOverviewRequest(value: unknown): value is PanelOverviewRe
   return isRecord(value) && hasProtocolVersion(value) && value.type === "panel:overview-request";
 }
 
-export function isPanelAutomationPolicyUpdate(value: unknown): value is PanelAutomationPolicyUpdate {
+export function isPanelMonitoringPolicyUpdate(value: unknown): value is PanelMonitoringPolicyUpdate {
   return (
-    isRecord(value) &&
-    hasProtocolVersion(value) &&
-    value.type === "panel:automation-policy-update" &&
-    isTabId(value.tabId) &&
-    typeof value.conversationId === "string" &&
-    /^[A-Za-z0-9_-]{4,200}$/.test(value.conversationId) &&
-    isChatPolicyPatch(value.patch)
+    isRecord(value) && hasProtocolVersion(value) && value.type === "panel:monitoring-policy-update" &&
+    isTabId(value.tabId) && typeof value.conversationId === "string" &&
+    /^[A-Za-z0-9_-]{4,200}$/.test(value.conversationId) && isChatMonitoringPatch(value.patch)
   );
 }
 
-export function isPanelAutomationDefaultsUpdate(value: unknown): value is PanelAutomationDefaultsUpdate {
-  return isRecord(value) && hasProtocolVersion(value) && value.type === "panel:automation-defaults-update" && isDefaultsPatch(value.patch);
-}
-
-export function isPanelEmergencyPauseUpdate(value: unknown): value is PanelEmergencyPauseUpdate {
-  return isRecord(value) && hasProtocolVersion(value) && value.type === "panel:emergency-pause-update" && typeof value.paused === "boolean";
+export function isPanelMonitoringDefaultsUpdate(value: unknown): value is PanelMonitoringDefaultsUpdate {
+  return isRecord(value) && hasProtocolVersion(value) && value.type === "panel:monitoring-defaults-update" && isDefaultsPatch(value.patch);
 }
 
 export function isPanelProviderProfileUpsert(value: unknown): value is PanelProviderProfileUpsert {
   return (
-    isRecord(value) &&
-    hasProtocolVersion(value) &&
-    value.type === "panel:provider-profile-upsert" &&
-    isProviderProfileMutation(value.profile) &&
-    (value.makePrimary === undefined || typeof value.makePrimary === "boolean")
+    isRecord(value) && hasProtocolVersion(value) && value.type === "panel:provider-profile-upsert" &&
+    isProviderProfileMutation(value.profile) && (value.makePrimary === undefined || typeof value.makePrimary === "boolean")
   );
 }
 
 export function isPanelProviderModelCatalogRequest(value: unknown): value is PanelProviderModelCatalogRequest {
-  return (
-    isRecord(value) &&
-    hasProtocolVersion(value) &&
-    value.type === "panel:provider-model-catalog-request" &&
-    isProviderCatalogSpec(value.spec)
-  );
+  return isRecord(value) && hasProtocolVersion(value) && value.type === "panel:provider-model-catalog-request" && isProviderCatalogSpec(value.spec);
 }
 
 export function isPanelProviderClassifierReadinessRequest(value: unknown): value is PanelProviderClassifierReadinessRequest {
-  return (
-    isRecord(value) &&
-    hasProtocolVersion(value) &&
-    value.type === "panel:provider-classifier-readiness-request" &&
-    isProviderId(value.providerId)
-  );
+  return isRecord(value) && hasProtocolVersion(value) && value.type === "panel:provider-classifier-readiness-request" && isProviderId(value.providerId);
 }
 
 export function isPanelProviderProfileRemove(value: unknown): value is PanelProviderProfileRemove {
@@ -445,6 +388,6 @@ export function isPanelProviderOrderUpdate(value: unknown): value is PanelProvid
   return isRecord(value) && hasProtocolVersion(value) && value.type === "panel:provider-order-update" && isProviderOrder(value.order);
 }
 
-export function isPanelAuditClear(value: unknown): value is PanelAuditClear {
-  return isRecord(value) && hasProtocolVersion(value) && value.type === "panel:audit-clear";
+export function isPanelHistoryClear(value: unknown): value is PanelHistoryClear {
+  return isRecord(value) && hasProtocolVersion(value) && value.type === "panel:history-clear";
 }
