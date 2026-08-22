@@ -143,6 +143,9 @@ h3 { font-size: 0.9rem; }
 .current-tab-legacy[hidden] { display: none !important; }
 .current-card-primary { gap: 0.75rem; padding: 0.78rem; background: var(--surface-strong); }
 .current-card-primary[data-enabled="true"] { border-color: color-mix(in srgb, var(--green) 52%, var(--border)); background: var(--green-soft); }
+.current-card-primary > .section-heading { align-items: flex-start; gap: 0.9rem; }
+.current-card-primary > .section-heading > .title-block { flex: 1 1 0; width: 100%; }
+.current-card-primary > .section-heading > button { flex: 0 0 auto; min-width: 8.25rem; }
 .guardian-state-block { display: grid; justify-items: end; gap: 0.12rem; flex: 0 0 auto; }
 .guardian-state { font-size: 0.87rem; }
 .guardian-state[data-enabled="true"] { color: var(--green); font-weight: 850; }
@@ -176,6 +179,10 @@ h3 { font-size: 0.9rem; }
 .chat-card-disclosure > .chat-card > .chat-card-head:first-child,
 .chat-card-disclosure > .chat-card > .meta-row:nth-child(2) { display: none; }
 .title-block, .section-heading > div, .protocol-box-head > div { min-width: 0; }
+.title-block { display: grid; gap: 0.55rem; align-content: start; }
+.title-block > strong { display: block; line-height: 1.4; overflow-wrap: anywhere; unicode-bidi: plaintext; }
+.current-card-primary .title-block > strong { font-size: 0.92rem; font-weight: 800; }
+.chat-card .title-block > strong { padding: 0.42rem 0.55rem; border: 1px solid var(--border); border-radius: 0.58rem; background: var(--surface-soft); font-size: 0.76rem; font-weight: 800; line-height: 1.42; word-break: break-word; }
 .chat-title, .provider-copy .meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .meta-row, .runtime-row { display: flex; flex-wrap: wrap; gap: 0.42rem 0.5rem; align-items: center; min-width: 0; }
 .reason { padding: 0.5rem; border-radius: 0.58rem; background: var(--surface-strong); overflow-wrap: anywhere; }
@@ -270,6 +277,8 @@ h3 { font-size: 0.9rem; }
   .form-grid, .chat-controls, .check-grid, .current-actions, .catalog-controls { grid-template-columns: 1fr; }
   .wide { grid-column: auto; }
   .current-actions > button:only-child { grid-column: auto; }
+  .current-card-primary > .section-heading { flex-direction: column; align-items: stretch; }
+  .current-card-primary > .section-heading > button { width: 100%; min-width: 0; }
   .provider-row { flex-direction: column; align-items: stretch; }
   .provider-actions { width: 100%; justify-content: stretch; }
   .provider-actions > button { flex-basis: calc(50% - 0.2rem); }
