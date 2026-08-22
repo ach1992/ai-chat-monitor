@@ -2,17 +2,17 @@
 
 ## Product version
 
-Current released baseline: **v2.0.0**
+Current released baseline: **v2.0.1**
 
-v2 is a breaking product pivot from guarded automatic continuation to a strictly read-only ChatGPT conversation monitor and notifier.
+v2 is a breaking product pivot from guarded automatic continuation to a strictly read-only ChatGPT conversation monitor and notifier. `v2.0.1` is a compatible patch release in that same product contract.
 
 Released baseline evidence:
 
-- GitHub Release: `v2.0.0`
-- Integrated `main`: `eb4e90a21cd578620bda855ce2e3ab37aee39027`
-- Release ZIP: `chat-turn-guardian-2.0.0.zip`
+- GitHub Release: `v2.0.1`
+- Release target commit: `53fd7a09abc99c157e15835d391ca4611eb128ec`
+- Release ZIP: `chat-turn-guardian-2.0.1.zip`
 - Packaged runtime files: `48`
-- Release ZIP SHA-256: `800d76293a867e3ba0c8780dfb932788b55bc9393f03112d2b73801f10c70c2f`
+- Release ZIP SHA-256: `8aca51ced17ca1133293600df80abc9422170ded1f63fab221822da6b0bfe821`
 
 Future development starts from the current `main` baseline and should treat the v2 read-only boundary below as the durable product contract unless an explicit new product decision changes it.
 
@@ -155,6 +155,7 @@ Events are transition/episode based and deduplicated. A single response should p
 
 - configurable per event;
 - uses `chrome.notifications`;
+- uses the packaged extension icon resolved through `chrome.runtime.getURL()` for notification delivery;
 - may focus/open the known monitored tab when safely resolvable;
 - may suppress low-priority alerts while the exact chat is already focused when configured.
 
@@ -267,6 +268,10 @@ The released v2.0.0 outcome satisfied the following acceptance requirements and 
 - repository validation passes on the exact candidate SHA;
 - Owner live Chromium acceptance was completed before integration;
 - the deterministic release package was published with checksum/provenance and verified after publication.
+
+## v2.0.1 patch baseline
+
+The v2.0.1 patch preserves all v2.0.0 acceptance requirements and additionally verifies that Browser notification delivery uses the packaged extension icon and the Promise-based Chrome notification API. The fix was validated by automated regression coverage and by live Chromium/Windows delivery before publication.
 
 ## Historical note
 
