@@ -6,54 +6,64 @@ async function readDist(path) {
   return readFile(new URL(`../dist/${path}`, import.meta.url), "utf8");
 }
 
-test("Side Panel exposes the v1 management, provider, and reliability controls", async () => {
-  const [html, script, reliabilityScript, currentTabScript, providerScript, contentScript] = await Promise.all([
+test("Side Panel exposes monitoring, protocol setup, notifications, providers, and event history", async () => {
+  const [html, script, providerScript, telegramScript, contentScript] = await Promise.all([
     readDist("sidepanel/index.html"),
     readDist("sidepanel/index.js"),
-    readDist("sidepanel/reliability.js"),
-    readDist("sidepanel/current-tab-ui.js"),
     readDist("sidepanel/provider-ui.js"),
+    readDist("sidepanel/telegram-ui.js"),
     readDist("content/index.js"),
   ]);
 
   for (const marker of [
-    "data-pause-all",
-    "data-current-tab",
     "data-current-tab-live",
+    "data-marker-health",
+    "data-custom-instructions",
+    "data-chat-instruction",
+    "data-copy-custom",
+    "data-copy-chat",
+    "data-browser-events",
+    "data-sound-events",
     "data-chat-list",
-    "data-defaults-form",
+    "data-event-list",
+    "data-history-clear",
     "data-provider-manager-v2",
-    "data-provider-list-v2",
-    "data-provider-form-v2",
-    "data-provider-load-models-v2",
-    "data-provider-filter-v2",
-    "data-fuse-default-form",
-    "data-fuse-chat-list",
-    "data-audit-list",
-    "data-audit-clear",
   ]) {
     assert.match(html, new RegExp(marker));
   }
 
-  assert.match(html, /Guardian for this tab/);
-  assert.match(html, /NaraRouter/);
-  assert.match(html, /Generic OpenAI-compatible/);
-  assert.match(html, /Stored API keys stay in trusted extension storage/);
-  assert.match(html, /class="panel-section disclosure"/);
-  assert.match(html, /current-tab-ui\.js/);
-  assert.match(html, /provider-ui\.js/);
+  assert.match(html, /Read-only chat monitor/i);
+  assert.match(html, /Guardian works without this protocol/i);
+  assert.match(html, /Guardian only observes/i);
+  assert.match(html, /never writes to ChatGPT/i);
+  assert.doesNotMatch(html, /Continuation text|Continue delay|hard fuse|Pause All|AUTO only sends/i);
 
   for (const messageType of [
     "panel:overview-request",
-    "panel:automation-policy-update",
-    "panel:automation-defaults-update",
-    "panel:emergency-pause-update",
-    "panel:provider-profile-upsert",
-    "panel:provider-profile-remove",
-    "panel:provider-order-update",
+    "panel:monitoring-policy-update",
+    "panel:monitoring-defaults-update",
+    "panel:history-clear",
   ]) {
     assert.match(script, new RegExp(messageType));
   }
+
+  assert.match(script, /CHAT_TURN_GUARDIAN_STATUS=\\?\{?[^\n]*decision/);
+  assert.doesNotMatch(script, /CHAT_TURN_GUARDIAN_STATUS_V1=/);
+  for (const decision of [
+    "CONTINUE",
+    "HOLD_APPROVAL",
+    "HOLD_DECISION",
+    "HOLD_HUMAN_OPERATION",
+    "COMPLETE",
+    "PLATFORM_ERROR",
+    "RATE_LIMIT",
+    "UNSURE",
+  ]) {
+    assert.match(script, new RegExp(decision));
+  }
+  assert.match(script, /exact, strict, or format-exclusive output/i);
+  assert.match(script, /outside Markdown code fences/i);
+  assert.match(script, /Do not use CONTINUE when a real human gate is required/i);
 
   for (const messageType of [
     "panel:provider-model-catalog-request",
@@ -63,49 +73,17 @@ test("Side Panel exposes the v1 management, provider, and reliability controls",
   ]) {
     assert.match(providerScript, new RegExp(messageType));
   }
-  for (const marker of [
-    "OPENROUTER",
-    "NARAROUTER",
-    "OPENAI_COMPATIBLE",
-    "Leave blank to keep the stored key",
-    "filterProviderModelCatalog",
-    "chrome.permissions.request",
-  ]) {
-    assert.match(providerScript, new RegExp(marker.replaceAll(".", "\\.")));
-  }
 
-  for (const messageType of [
-    "panel:overview-request",
-    "panel:automation-policy-update",
-    "panel:automation-defaults-update",
-    "panel:audit-clear",
-  ]) {
-    assert.match(reliabilityScript, new RegExp(messageType));
-  }
-
-  for (const marker of [
-    "Turn Guardian ON",
-    "Turn Guardian OFF",
-    "panel:agent-probe",
-    "panel:agent-reconnect",
-    "panel:automation-policy-update",
-    "chrome.tabs.reload",
-    "chrome.tabs.onActivated",
-    "chrome.tabs.onUpdated",
-    "setInterval",
-  ]) {
-    assert.match(currentTabScript, new RegExp(marker.replaceAll(".", "\\.")));
-  }
+  assert.match(telegramScript, /outbound-only/i);
+  assert.match(telegramScript, /RETRY_AVAILABLE/);
+  assert.match(telegramScript, /TASK_COMPLETE/);
 
   assert.match(contentScript, /panel:agent-probe/);
   assert.match(contentScript, /panel:agent-reconnect/);
-  assert.match(contentScript, /content:agent-reconnected/);
-  assert.match(script, /chrome\.permissions\.request/);
-  assert.match(script, /chrome\.tabs\.update/);
-  assert.equal(script.includes(".innerHTML"), false, "chat/provider metadata should be rendered with textContent-safe DOM APIs");
-  assert.equal(providerScript.includes(".innerHTML"), false, "provider catalog metadata should be rendered with textContent-safe DOM APIs");
-  assert.equal(currentTabScript.includes(".innerHTML"), false, "current-tab metadata should be rendered with textContent-safe DOM APIs");
-  assert.equal(reliabilityScript.includes(".innerHTML"), false, "audit metadata should be rendered with textContent-safe DOM APIs");
+  assert.doesNotMatch(contentScript, /background:guarded-send|continuationText|decisionId/);
+
+  for (const source of [script, providerScript, telegramScript]) {
+    assert.equal(source.includes(".innerHTML"), false, "Side Panel metadata must use textContent-safe DOM APIs");
+  }
   assert.doesNotMatch(providerScript, /apiKeyInput\.value\s*=\s*profile/);
-  assert.doesNotMatch(reliabilityScript, /apiKey|normalizedText|latestAssistant/);
 });
