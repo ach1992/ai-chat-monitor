@@ -36,6 +36,11 @@ export interface BlockingSnapshot {
   reasons: BlockingReason[];
 }
 
+export interface PageActionSnapshot {
+  retryAvailable: boolean;
+  continueGeneratingAvailable: boolean;
+}
+
 export interface PageObservation {
   conversationId?: string;
   routeKey: string;
@@ -45,6 +50,7 @@ export interface PageObservation {
   latestAssistant?: AssistantResponseSnapshot;
   composer: ComposerSnapshot;
   blocking: BlockingSnapshot;
+  actions: PageActionSnapshot;
   confidence: ObservationConfidence;
   observedAt: number;
 }
@@ -110,7 +116,13 @@ export function isPageObservation(value: unknown): value is PageObservation {
   }
 
   if (!isRecord(value.blocking) || typeof value.blocking.blocked !== "boolean") return false;
-  if (!Array.isArray(value.blocking.reasons) || !value.blocking.reasons.every(isBlockingReason)) {
+  if (!Array.isArray(value.blocking.reasons) || !value.blocking.reasons.every(isBlockingReason)) return false;
+
+  if (!isRecord(value.actions)) return false;
+  if (
+    typeof value.actions.retryAvailable !== "boolean" ||
+    typeof value.actions.continueGeneratingAvailable !== "boolean"
+  ) {
     return false;
   }
 

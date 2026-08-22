@@ -6,7 +6,7 @@ async function readDist(path) {
   return readFile(new URL(`../dist/${path}`, import.meta.url), "utf8");
 }
 
-test("Side Panel exposes Telegram v1 configuration without rendering the saved secret", async () => {
+test("Side Panel exposes outbound-only Telegram monitoring configuration without rendering the saved secret", async () => {
   const [html, ui, background, transport, worker] = await Promise.all([
     readDist("sidepanel/index.html"),
     readDist("sidepanel/telegram-ui.js"),
@@ -21,10 +21,11 @@ test("Side Panel exposes Telegram v1 configuration without rendering the saved s
     "Chat ID / destination",
     "Bot Token",
     "Test notification",
-    "Assistant response completed",
-    "HOLD / human attention required",
+    "Response completed",
+    "Approval required",
+    "Retry available",
+    "Task complete",
     "Provider error",
-    "Extension / platform error",
     "@BotFather",
     "outbound-only",
   ]) {
@@ -51,7 +52,7 @@ test("Side Panel exposes Telegram v1 configuration without rendering the saved s
   assert.doesNotMatch(background, /getUpdates|webhook/i);
 });
 
-test("Telegram draft actions preserve unsaved form state and Test uses the current form", async () => {
+test("Telegram Test uses the current unsaved form while recurring refresh preserves dirty input", async () => {
   const [ui, background] = await Promise.all([
     readDist("sidepanel/telegram-ui.js"),
     readDist("notifications/background.js"),
@@ -60,17 +61,31 @@ test("Telegram draft actions preserve unsaved form state and Test uses the curre
   assert.match(ui, /let dirty = false/);
   assert.match(ui, /render\(settings, !dirty\)/);
   assert.match(ui, /function collectMutation\(\)/);
-  assert.match(ui, /panel:telegram-test-notification[\s\S]*settings: mutation/);
-  assert.match(ui, /Save settings to keep these values/);
+  assert.match(ui, /panel:telegram-test-notification/);
+  assert.match(ui, /settings: collectMutation\(\)/);
   assert.match(ui, /ui\.save\.disabled = value/);
-  assert.match(ui, /actions\.style\.gap = "0\.5rem"/);
   assert.match(background, /manager\.testTelegram\(request\.settings\)/);
 });
 
-test("Privacy disclosure is collapsed and moved to the bottom of the Side Panel at runtime", async () => {
+test("Telegram Save and Test actions expose visible working, success, and error feedback", async () => {
+  const ui = await readDist("sidepanel/telegram-ui.js");
+  for (const marker of [
+    "Saving Telegram settings",
+    "Saved ✓",
+    "Save failed",
+    "Sending Telegram test notification",
+    "Delivered ✓",
+    "Test failed",
+    "actionState",
+    "operation-status telegram-operation-status",
+  ]) {
+    assert.match(ui, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+});
+
+test("Telegram UI keeps privacy disclosure near the bottom and collapsed", async () => {
   const ui = await readDist("sidepanel/telegram-ui.js");
   assert.match(ui, /relocatePrivacyDisclosure/);
-  assert.match(ui, /"details", "panel-section disclosure privacy-disclosure"/);
   assert.match(ui, /details\.open = false/);
   assert.match(ui, /footer\.before\(details\)/);
 });

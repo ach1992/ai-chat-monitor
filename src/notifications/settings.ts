@@ -11,12 +11,32 @@ import type {
 const SETTINGS_KEY = "config";
 const ALL_EVENTS = new Set<GuardianNotificationEvent>([
   "RESPONSE_COMPLETE",
-  "HUMAN_ATTENTION_REQUIRED",
-  "UNSURE",
-  "STAGNATION",
+  "CONTINUE_READY",
+  "APPROVAL_REQUIRED",
+  "DECISION_REQUIRED",
+  "HUMAN_OPERATION_REQUIRED",
+  "TASK_COMPLETE",
+  "RETRY_AVAILABLE",
+  "PLATFORM_ERROR",
+  "NETWORK_ERROR",
+  "RATE_LIMIT",
+  "AUTH_REQUIRED",
+  "VERIFICATION_REQUIRED",
+  "CONVERSATION_FULL",
+  "SEMANTIC_UNKNOWN",
   "PROVIDER_ERROR",
+  "GENERATION_STALLED",
+  "REPEATED_RESPONSE",
   "EXTENSION_ERROR",
 ]);
+const LEGACY_EVENT_MAP: Readonly<Record<string, readonly GuardianNotificationEvent[]>> = {
+  RESPONSE_COMPLETE: ["RESPONSE_COMPLETE"],
+  HUMAN_ATTENTION_REQUIRED: ["APPROVAL_REQUIRED", "DECISION_REQUIRED", "HUMAN_OPERATION_REQUIRED", "TASK_COMPLETE"],
+  UNSURE: ["SEMANTIC_UNKNOWN"],
+  STAGNATION: ["REPEATED_RESPONSE", "GENERATION_STALLED"],
+  PROVIDER_ERROR: ["PROVIDER_ERROR"],
+  EXTENSION_ERROR: ["EXTENSION_ERROR"],
+};
 const HEALTH_CODES = new Set<TelegramHealthCode>([
   "TIMEOUT",
   "RATE_LIMIT",
@@ -74,6 +94,22 @@ function normalizeBotToken(value: string): string {
   return token;
 }
 
+function migrateStoredEvents(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  const migrated: GuardianNotificationEvent[] = [];
+  for (const raw of value) {
+    if (typeof raw !== "string") return value;
+    const mapped = ALL_EVENTS.has(raw as GuardianNotificationEvent)
+      ? [raw as GuardianNotificationEvent]
+      : LEGACY_EVENT_MAP[raw];
+    if (mapped === undefined) return value;
+    for (const event of mapped) {
+      if (!migrated.includes(event)) migrated.push(event);
+    }
+  }
+  return migrated;
+}
+
 function normalizeEvents(value: unknown): GuardianNotificationEvent[] {
   if (!Array.isArray(value) || value.length > ALL_EVENTS.size) {
     throw new TelegramConfigurationError("Telegram notification event selection is invalid.");
@@ -113,7 +149,7 @@ function normalizeStoredState(value: TelegramSettingsState | undefined): Telegra
     const destination = normalizeDestination(value.destination);
     const eventMode = value.eventMode === "CUSTOM" ? "CUSTOM" : value.eventMode === "INHERIT" ? "INHERIT" : undefined;
     if (eventMode === undefined) return cloneState(DEFAULT_TELEGRAM_SETTINGS);
-    const events = normalizeEvents(value.events);
+    const events = normalizeEvents(migrateStoredEvents(value.events));
     const botToken = value.botToken === undefined ? undefined : normalizeBotToken(value.botToken);
     const enabled = value.enabled && botToken !== undefined && destination.length > 0;
     return {

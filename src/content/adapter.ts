@@ -13,7 +13,6 @@ namespace GuardianContent {
     | "ACCOUNT_VERIFICATION"
     | "CONFIRMATION_REQUIRED"
     | "CONVERSATION_FULL";
-  export type GuardedHumanStateCheck = () => boolean;
 
   export interface PageObservation {
     conversationId?: string;
@@ -33,33 +32,17 @@ namespace GuardianContent {
     };
     composer: { present: boolean; hasText: boolean; focused: boolean };
     blocking: { blocked: boolean; reasons: BlockingReason[] };
+    actions: { retryAvailable: boolean; continueGeneratingAvailable: boolean };
     confidence: ObservationConfidence;
     observedAt: number;
   }
 
-  export interface GuardedContinuationExpectation {
-    purpose?: "CONTINUATION" | "PROTOCOL_BOOTSTRAP" | "STATUS_RESPONSE" | "STATUS_RECOVERY";
-    decisionId: string;
-    conversationId: string;
-    routeKey: string;
-    assistantFingerprint: string;
-    assistantDomMessageId?: string;
-    continuationText: string;
-  }
-
-  export interface PageGuardedSendResult {
-    decisionId: string;
-    status: "NOT_STARTED" | "VERIFIED" | "AMBIGUOUS";
-    reason: string;
-    observedConversationId?: string;
-    observedAssistantFingerprint?: string;
-  }
-
   const MAX_NORMALIZED_RESPONSE_CHARS = 12_000;
-  const GUARDIAN_STATUS_PREFIX = "CHAT_TURN_GUARDIAN_STATUS_V1=";
   const MAX_PAGE_TITLE_CHARS = 300;
-  const SEND_CONTROL_READY_TIMEOUT_MS = 1_500;
-  const SEND_VERIFICATION_TIMEOUT_MS = 5_000;
+  const STATUS_PREFIXES = [
+    "CHAT_TURN_GUARDIAN_STATUS=",
+    "CHAT_TURN_GUARDIAN_STATUS_V1=",
+  ] as const;
   const ASSISTANT_SELECTORS = ['[data-message-author-role="assistant"]', 'article[data-turn="assistant"]'] as const;
   const USER_SELECTORS = ['[data-message-author-role="user"]', 'article[data-turn="user"]'] as const;
   const TURN_SELECTOR = '[data-testid^="conversation-turn-"]';
@@ -91,6 +74,16 @@ namespace GuardianContent {
     '[role="alert"]',
     '[data-testid*="error"]',
     '[data-testid*="rate-limit"]',
+  ] as const;
+  const RETRY_SELECTORS = [
+    'button[data-testid*="retry"]',
+    'button[aria-label*="Retry"]',
+    'button[aria-label*="retry"]',
+  ] as const;
+  const CONTINUE_GENERATING_SELECTORS = [
+    'button[data-testid*="continue"]',
+    'button[aria-label*="Continue generating"]',
+    'button[aria-label*="continue generating"]',
   ] as const;
 
   export function extractConversationId(pathname: string): string | undefined {
@@ -130,7 +123,7 @@ namespace GuardianContent {
         const element = document.querySelector<T>(selector);
         if (element !== null) return element;
       } catch {
-        // DOM drift must fail closed.
+        // DOM drift must remain observational and fail closed.
       }
     }
     return undefined;
@@ -139,7 +132,7 @@ namespace GuardianContent {
   function allMatches(document: Document, selectors: readonly string[]): Element[] {
     const found = new Set<Element>();
     for (const selector of selectors) {
-      try { for (const element of document.querySelectorAll(selector)) found.add(element); } catch { /* fail closed */ }
+      try { for (const element of document.querySelectorAll(selector)) found.add(element); } catch { /* ignore invalid/drifted selectors */ }
     }
     return [...found];
   }
@@ -153,9 +146,10 @@ namespace GuardianContent {
       const user = users[index];
       if (user === undefined) continue;
       try {
-        if ((user.compareDocumentPosition(assistant) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0) return user;
+        const position = user.compareDocumentPosition(assistant);
+        if ((position & Node.DOCUMENT_POSITION_FOLLOWING) !== 0) return user;
       } catch {
-        // DOM drift must not guess at turn ordering.
+        return undefined;
       }
     }
     return undefined;
@@ -174,23 +168,35 @@ namespace GuardianContent {
     return false;
   }
 
+  function containsStatusPrefix(value: string): boolean {
+    return STATUS_PREFIXES.some((prefix) => value.includes(prefix));
+  }
+
   function elementText(element: Element): string {
     if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) return element.value;
-    const renderedText = element instanceof HTMLElement && typeof element.innerText === "string"
+
+    const rendered = element instanceof HTMLElement && typeof element.innerText === "string"
       ? element.innerText
       : element.textContent ?? "";
+    const structural = element.textContent ?? "";
+    let selected = rendered;
+
+    // Chromium may leave layout-derived innerText stale in background tabs while
+    // structural DOM text already contains the completed assistant response.
+    if (!containsStatusPrefix(rendered) && containsStatusPrefix(structural)) selected = structural;
+
     const querySelectorAll = (element as ParentNode).querySelectorAll;
-    if (renderedText.includes(GUARDIAN_STATUS_PREFIX) && typeof querySelectorAll === "function") {
+    if (containsStatusPrefix(selected) && typeof querySelectorAll === "function") {
       try {
         const markerIsInCode = [...querySelectorAll.call(element, "pre, code")].some((code) =>
-          (code.textContent ?? "").includes(GUARDIAN_STATUS_PREFIX),
+          containsStatusPrefix(code.textContent ?? ""),
         );
-        if (markerIsInCode) return `${renderedText}\n[Guardian status rendered inside a code block]`;
+        if (markerIsInCode) return `${selected}\n[Guardian status rendered inside a code block]`;
       } catch {
-        // DOM drift falls back to the visible rendered text.
+        // Keep the observed text; parser ambiguity still fails safely.
       }
     }
-    return renderedText;
+    return selected;
   }
 
   function readMessageId(element: Element): string | undefined {
@@ -231,103 +237,23 @@ namespace GuardianContent {
     return [...reasons];
   }
 
-  function pageBlockingReasons(document: Document): BlockingReason[] {
-    const reasons = new Set<BlockingReason>();
-    for (const surface of allMatches(document, BLOCKING_SELECTORS)) {
-      const text = normalizeAssistantText(elementText(surface)).slice(0, 2_000);
-      for (const reason of blockingReasons(surface, text)) reasons.add(reason);
+  function controlTextMatches(document: Document, pattern: RegExp): boolean {
+    try {
+      return [...document.querySelectorAll("button")].some((button) => {
+        const aria = button.getAttribute("aria-label") ?? "";
+        const testId = button.getAttribute("data-testid") ?? "";
+        const text = button.textContent ?? "";
+        return pattern.test(`${aria} ${testId} ${text}`);
+      });
+    } catch {
+      return false;
     }
-    return [...reasons];
-  }
-
-  function blockingAllowsPurpose(
-    reasons: readonly BlockingReason[],
-    purpose: GuardedContinuationExpectation["purpose"],
-  ): boolean {
-    if (reasons.length === 0) return true;
-    return (purpose === "PROTOCOL_BOOTSTRAP" || purpose === "STATUS_RECOVERY") && reasons.every((reason) =>
-      reason === "ERROR" || reason === "NETWORK" || reason === "RATE_LIMIT",
-    );
-  }
-
-  function pageAllowsPurpose(document: Document, purpose: GuardedContinuationExpectation["purpose"]): boolean {
-    return blockingAllowsPurpose(pageBlockingReasons(document), purpose);
   }
 
   function targetMatches(target: EventTarget | null, selectors: readonly string[]): boolean {
     if (!(target instanceof Element)) return false;
     return selectors.some((selector) => {
       try { return target.matches(selector) || target.closest(selector) !== null; } catch { return false; }
-    });
-  }
-
-  function sendControlIsUsable(element: HTMLElement): boolean {
-    if (element instanceof HTMLButtonElement && element.disabled) return false;
-    return element.getAttribute("aria-disabled") !== "true";
-  }
-
-  function setComposerText(composer: HTMLElement, text: string): boolean {
-    try {
-      if (composer instanceof HTMLTextAreaElement) {
-        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
-        if (setter !== undefined) setter.call(composer, text); else composer.value = text;
-      } else if (composer instanceof HTMLInputElement) {
-        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-        if (setter !== undefined) setter.call(composer, text); else composer.value = text;
-      } else if (composer.isContentEditable) {
-        const lines = text.replace(/\r\n?/g, "\n").split("\n");
-        const fragment = composer.ownerDocument.createDocumentFragment();
-        for (const [index, line] of lines.entries()) {
-          if (index > 0) fragment.append(composer.ownerDocument.createElement("br"));
-          fragment.append(composer.ownerDocument.createTextNode(line));
-        }
-        composer.replaceChildren(fragment);
-      } else {
-        return false;
-      }
-      try {
-        composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
-      } catch {
-        composer.dispatchEvent(new Event("input", { bubbles: true }));
-      }
-      return normalizeAssistantText(elementText(composer)) === normalizeAssistantText(text);
-    } catch {
-      return false;
-    }
-  }
-
-  function waitForUsableSendControl(
-    document: Document,
-    stateIsSafe: () => boolean,
-    timeoutMs: number,
-  ): Promise<"READY" | "UNSAFE" | "TIMEOUT"> {
-    return new Promise((resolve) => {
-      let settled = false;
-      let timeout: ReturnType<typeof setTimeout>;
-      const observer = new MutationObserver(() => { check(); });
-      const finish = (result: "READY" | "UNSAFE" | "TIMEOUT"): void => {
-        if (settled) return;
-        settled = true;
-        observer.disconnect();
-        clearTimeout(timeout);
-        resolve(result);
-      };
-      const check = (): void => {
-        if (!stateIsSafe()) {
-          finish("UNSAFE");
-          return;
-        }
-        const sendControl = firstMatch<HTMLElement>(document, SEND_SELECTORS);
-        if (sendControl !== undefined && sendControlIsUsable(sendControl)) finish("READY");
-      };
-      observer.observe(document.documentElement, {
-        subtree: true,
-        childList: true,
-        attributes: true,
-        attributeFilter: ["disabled", "aria-disabled", "aria-label", "data-testid"],
-      });
-      timeout = setTimeout(() => finish("TIMEOUT"), timeoutMs);
-      check();
     });
   }
 
@@ -365,12 +291,17 @@ namespace GuardianContent {
       const latestUserElement = latestAssistantElement === undefined
         ? undefined
         : latestUserBeforeAssistant(this.#document, latestAssistantElement);
-      const blockingSurfaces = allMatches(this.#document, BLOCKING_SELECTORS);
+
       const reasons = new Set<BlockingReason>();
-      for (const surface of blockingSurfaces) {
+      for (const surface of allMatches(this.#document, BLOCKING_SELECTORS)) {
         const text = normalizeAssistantText(elementText(surface)).slice(0, 2_000);
         for (const reason of blockingReasons(surface, text)) reasons.add(reason);
       }
+
+      const retryAvailable = firstMatch<HTMLElement>(this.#document, RETRY_SELECTORS) !== undefined ||
+        controlTextMatches(this.#document, /\bretry\b|\btry again\b/i);
+      const continueGeneratingAvailable = firstMatch<HTMLElement>(this.#document, CONTINUE_GENERATING_SELECTORS) !== undefined ||
+        controlTextMatches(this.#document, /continue generating/i);
       const generation: GenerationState = stopControl !== undefined ? "GENERATING" : composer !== undefined ? "IDLE" : "UNKNOWN";
       const composerText = composer === undefined ? "" : elementText(composer);
       const activeElement = this.#document.activeElement;
@@ -378,16 +309,23 @@ namespace GuardianContent {
       const pageTitle = typeof this.#document.title === "string"
         ? normalizeAssistantText(this.#document.title).slice(0, MAX_PAGE_TITLE_CHARS)
         : "";
+
       const observation: PageObservation = {
         routeKey: this.currentRouteKey(),
         ...(pageTitle.length === 0 ? {} : { pageTitle }),
         generation,
-        composer: { present: composer !== undefined, hasText: normalizeAssistantText(composerText).length > 0, focused: composerFocused },
+        composer: {
+          present: composer !== undefined,
+          hasText: normalizeAssistantText(composerText).length > 0,
+          focused: composerFocused,
+        },
         blocking: { blocked: reasons.size > 0, reasons: [...reasons].sort() },
+        actions: { retryAvailable, continueGeneratingAvailable },
         confidence: conversationId !== undefined && (composer !== undefined || latestAssistantElement !== undefined) ? "HIGH" : "LOW",
         observedAt,
         ...(conversationId === undefined ? {} : { conversationId }),
       };
+
       if (latestUserElement !== undefined) {
         const normalizedText = normalizeAssistantText(elementText(latestUserElement));
         if (normalizedText.length > 0) {
@@ -399,6 +337,7 @@ namespace GuardianContent {
           };
         }
       }
+
       if (latestAssistantElement !== undefined) {
         const normalizedText = normalizeAssistantText(elementText(latestAssistantElement));
         if (normalizedText.length > 0) {
@@ -411,201 +350,8 @@ namespace GuardianContent {
           };
         }
       }
+
       return observation;
-    }
-
-    async guardedSend(
-      expectation: GuardedContinuationExpectation,
-      humanStateIsCurrent: GuardedHumanStateCheck = () => true,
-    ): Promise<PageGuardedSendResult> {
-      const reject = (reason: string): PageGuardedSendResult => ({ decisionId: expectation.decisionId, status: "NOT_STARTED", reason });
-      const ambiguous = (reason: string): PageGuardedSendResult => ({ decisionId: expectation.decisionId, status: "AMBIGUOUS", reason });
-      const observation = await this.observe();
-      if (
-        !humanStateIsCurrent() ||
-        observation.conversationId !== expectation.conversationId ||
-        observation.routeKey !== expectation.routeKey ||
-        observation.confidence !== "HIGH" ||
-        observation.generation !== "IDLE" ||
-        !blockingAllowsPurpose(observation.blocking.reasons, expectation.purpose) ||
-        !observation.composer.present ||
-        observation.composer.hasText ||
-        observation.latestAssistant?.fingerprint !== expectation.assistantFingerprint ||
-        (expectation.assistantDomMessageId !== undefined && observation.latestAssistant.domMessageId !== expectation.assistantDomMessageId)
-      ) {
-        return reject("Final page identity, human interaction, or UI safety guard did not match the decision envelope.");
-      }
-
-      const capturedAssistant = assistantMatches(this.#document).at(-1);
-      if (capturedAssistant === undefined) return reject("Latest assistant response disappeared before mutation.");
-      const capturedAssistantText = normalizeAssistantText(elementText(capturedAssistant));
-      const capturedAssistantFingerprint = await fingerprintText(capturedAssistantText);
-
-      const currentAssistant = assistantMatches(this.#document).at(-1);
-      const composer = firstMatch<HTMLElement>(this.#document, COMPOSER_SELECTORS);
-      const currentAssistantText = currentAssistant === undefined ? "" : normalizeAssistantText(elementText(currentAssistant));
-      const currentMessageId = currentAssistant === undefined ? undefined : readMessageId(currentAssistant);
-
-      if (
-        !humanStateIsCurrent() ||
-        this.currentConversationId() !== expectation.conversationId ||
-        this.currentRouteKey() !== expectation.routeKey ||
-        capturedAssistantFingerprint !== expectation.assistantFingerprint ||
-        currentAssistantText !== capturedAssistantText ||
-        (expectation.assistantDomMessageId !== undefined && currentMessageId !== expectation.assistantDomMessageId) ||
-        composer === undefined ||
-        normalizeAssistantText(elementText(composer)).length > 0 ||
-        firstMatch<HTMLElement>(this.#document, STOP_SELECTORS) !== undefined ||
-        !pageAllowsPurpose(this.#document, expectation.purpose)
-      ) {
-        return reject("Synchronous pre-mutation revalidation detected changed page or human state.");
-      }
-
-      const usersBefore = userMatches(this.#document);
-      const userCountBefore = usersBefore.length;
-      const assistantCountBefore = assistantMatches(this.#document).length;
-      const latestUserBefore = usersBefore.at(-1);
-      const latestUserTextBefore = latestUserBefore === undefined ? undefined : normalizeAssistantText(elementText(latestUserBefore));
-      if (!setComposerText(composer, expectation.continuationText)) {
-        return ambiguous("Composer mutation started but the intended continuation text could not be confirmed.");
-      }
-
-      const intendedComposerText = normalizeAssistantText(expectation.continuationText);
-      const postMutationStateIsSafe = (): boolean => {
-        const liveAssistant = assistantMatches(this.#document).at(-1);
-        const liveComposer = firstMatch<HTMLElement>(this.#document, COMPOSER_SELECTORS);
-        const liveMessageId = liveAssistant === undefined ? undefined : readMessageId(liveAssistant);
-        return (
-          humanStateIsCurrent() &&
-          this.currentConversationId() === expectation.conversationId &&
-          this.currentRouteKey() === expectation.routeKey &&
-          liveAssistant !== undefined &&
-          normalizeAssistantText(elementText(liveAssistant)) === capturedAssistantText &&
-          (expectation.assistantDomMessageId === undefined || liveMessageId === expectation.assistantDomMessageId) &&
-          liveComposer !== undefined &&
-          normalizeAssistantText(elementText(liveComposer)) === intendedComposerText &&
-          firstMatch<HTMLElement>(this.#document, STOP_SELECTORS) === undefined &&
-          pageAllowsPurpose(this.#document, expectation.purpose)
-        );
-      };
-
-      const readiness = await waitForUsableSendControl(
-        this.#document,
-        postMutationStateIsSafe,
-        SEND_CONTROL_READY_TIMEOUT_MS,
-      );
-      if (readiness === "UNSAFE") {
-        return ambiguous("Page safety state changed after composer mutation and before send control became ready.");
-      }
-      if (readiness === "TIMEOUT") {
-        return ambiguous("Send control did not become usable after the guarded composer mutation.");
-      }
-
-      const postMutationSendControl = firstMatch<HTMLElement>(this.#document, SEND_SELECTORS);
-      if (
-        !postMutationStateIsSafe() ||
-        postMutationSendControl === undefined ||
-        !sendControlIsUsable(postMutationSendControl)
-      ) {
-        return ambiguous("Final synchronous post-mutation revalidation failed before send.");
-      }
-
-      try {
-        postMutationSendControl.click();
-      } catch {
-        return ambiguous("Send control invocation failed after composer mutation.");
-      }
-
-      const verified = await this.#verifySend(
-        expectation,
-        userCountBefore,
-        latestUserTextBefore,
-        assistantCountBefore,
-        capturedAssistant,
-        humanStateIsCurrent,
-        SEND_VERIFICATION_TIMEOUT_MS,
-      );
-      if (!verified) {
-        return ambiguous("The intended user turn and generation start could not both be verified.");
-      }
-      return {
-        decisionId: expectation.decisionId,
-        status: "VERIFIED",
-        reason: "Intended user turn appeared and generation started.",
-        observedConversationId: expectation.conversationId,
-        observedAssistantFingerprint: expectation.assistantFingerprint,
-      };
-    }
-
-    #verifySend(
-      expectation: GuardedContinuationExpectation,
-      userCountBefore: number,
-      latestUserTextBefore: string | undefined,
-      assistantCountBefore: number,
-      assistantBefore: Element,
-      humanStateIsCurrent: GuardedHumanStateCheck,
-      timeoutMs: number,
-    ): Promise<boolean> {
-      return new Promise((resolve) => {
-        let settled = false;
-        let sawUserTurn = false;
-        let sawGeneration = false;
-        const intendedText = normalizeAssistantText(expectation.continuationText);
-        const finish = (value: boolean): void => {
-          if (settled) return;
-          settled = true;
-          observer.disconnect();
-          clearTimeout(timeout);
-          resolve(value);
-        };
-        const check = (): void => {
-          if (
-            !humanStateIsCurrent() ||
-            this.currentConversationId() !== expectation.conversationId ||
-            this.currentRouteKey() !== expectation.routeKey
-          ) {
-            finish(false);
-            return;
-          }
-          const users = userMatches(this.#document);
-          const latestUser = users.at(-1);
-          if (latestUser !== undefined) {
-            const latestText = normalizeAssistantText(elementText(latestUser));
-            if (
-              latestText === intendedText &&
-              (users.length > userCountBefore || latestUserTextBefore !== latestText)
-            ) {
-              sawUserTurn = true;
-            }
-          }
-          if (firstMatch<HTMLElement>(this.#document, STOP_SELECTORS) !== undefined) sawGeneration = true;
-
-          // Hidden Chromium tabs may throttle timers enough for a fast response to
-          // finish without the transient Stop control ever being sampled. A fresh
-          // assistant turn ordered after the exact Guardian user turn is equivalent
-          // positive evidence that the guarded send was accepted, and it is detected
-          // directly from DOM mutation rather than waiting for the timeout path.
-          let sawFreshAssistantTurn = false;
-          if (sawUserTurn) {
-            const assistants = assistantMatches(this.#document);
-            const latestAssistant = assistants.at(-1);
-            if (
-              latestAssistant !== undefined &&
-              (assistants.length > assistantCountBefore || latestAssistant !== assistantBefore)
-            ) {
-              const precedingUser = latestUserBeforeAssistant(this.#document, latestAssistant);
-              sawFreshAssistantTurn = precedingUser !== undefined &&
-                normalizeAssistantText(elementText(precedingUser)) === intendedText;
-            }
-          }
-
-          if (sawUserTurn && (sawGeneration || sawFreshAssistantTurn)) finish(true);
-        };
-        const observer = new MutationObserver(check);
-        observer.observe(this.#document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
-        const timeout = setTimeout(() => finish(false), timeoutMs);
-        check();
-      });
     }
   }
 }

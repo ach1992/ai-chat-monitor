@@ -11,22 +11,6 @@ namespace GuardianContentAgent {
     | "EDIT_TURN"
     | "BLOCKING_INTERACTION";
 
-  interface GuardedSendMessage {
-    type: "background:guarded-send";
-    protocolVersion: 2;
-    action: "CONTINUATION" | "PROTOCOL_BOOTSTRAP" | "STATUS_RESPONSE" | "STATUS_RECOVERY";
-    decisionId: string;
-    agentInstanceId: string;
-    pageEpoch: number;
-    conversationId: string;
-    routeKey: string;
-    assistantFingerprint: string;
-    assistantDomMessageId?: string;
-    lastUserInteractionAt?: number;
-    continuationText: string;
-    expiresAt: number;
-  }
-
   interface PanelAgentProbeMessage {
     type: "panel:agent-probe";
     protocolVersion: 2;
@@ -38,6 +22,7 @@ namespace GuardianContentAgent {
   }
 
   const FOCUS_INTENT_WINDOW_MS = 1_500;
+  const PERIODIC_OBSERVATION_MS = 15_000;
   const adapter = new GuardianContent.BrowserChatGPTAdapter(document, location);
   const agentInstanceId = crypto.randomUUID();
   let pageEpoch = 1;
@@ -46,9 +31,7 @@ namespace GuardianContentAgent {
   let observationTimer: number | undefined;
   let observationGeneration = 0;
   let outboundQueue: Promise<void> = Promise.resolve();
-  let lastLocalUserInteractionAt: number | undefined;
   let lastKeyboardFocusIntentAt: number | undefined;
-  let guardedSendInFlight = false;
 
   function nextSequence(): number { sequence += 1; return sequence; }
 
@@ -64,30 +47,6 @@ namespace GuardianContentAgent {
 
   function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
-  }
-
-  function isGuardedSendMessage(value: unknown): value is GuardedSendMessage {
-    if (!isRecord(value)) return false;
-    return (
-      value.type === "background:guarded-send" &&
-      value.protocolVersion === GuardianContent.PROTOCOL_VERSION &&
-      (
-        value.action === "CONTINUATION" ||
-        value.action === "PROTOCOL_BOOTSTRAP" ||
-        value.action === "STATUS_RESPONSE" ||
-        value.action === "STATUS_RECOVERY"
-      ) &&
-      typeof value.decisionId === "string" && value.decisionId.length > 0 && value.decisionId.length <= 128 &&
-      typeof value.agentInstanceId === "string" && value.agentInstanceId.length > 0 && value.agentInstanceId.length <= 128 &&
-      typeof value.pageEpoch === "number" && Number.isInteger(value.pageEpoch) && value.pageEpoch >= 1 &&
-      typeof value.conversationId === "string" && value.conversationId.length >= 4 && value.conversationId.length <= 200 &&
-      typeof value.routeKey === "string" && value.routeKey.length > 0 && value.routeKey.length <= 500 &&
-      typeof value.assistantFingerprint === "string" && /^[a-f0-9]{64}$/.test(value.assistantFingerprint) &&
-      (value.assistantDomMessageId === undefined || typeof value.assistantDomMessageId === "string") &&
-      (value.lastUserInteractionAt === undefined || (typeof value.lastUserInteractionAt === "number" && Number.isFinite(value.lastUserInteractionAt))) &&
-      typeof value.continuationText === "string" && value.continuationText.trim().length > 0 && value.continuationText.length <= 1_000 &&
-      typeof value.expiresAt === "number" && Number.isFinite(value.expiresAt)
-    );
   }
 
   function isPanelAgentProbeMessage(value: unknown): value is PanelAgentProbeMessage {
@@ -110,40 +69,6 @@ namespace GuardianContentAgent {
     };
   }
 
-  async function handleGuardedSend(message: GuardedSendMessage): Promise<GuardianContent.PageGuardedSendResult> {
-    if (message.agentInstanceId !== agentInstanceId || message.pageEpoch !== pageEpoch || Date.now() > message.expiresAt) {
-      return { decisionId: message.decisionId, status: "NOT_STARTED", reason: "Content-agent identity or decision lifetime no longer matches." };
-    }
-    const humanStateIsCurrent = (): boolean => message.lastUserInteractionAt === lastLocalUserInteractionAt;
-    if (!humanStateIsCurrent()) {
-      return { decisionId: message.decisionId, status: "NOT_STARTED", reason: "Trusted human interaction changed after the decision evidence." };
-    }
-    if (guardedSendInFlight) {
-      return { decisionId: message.decisionId, status: "NOT_STARTED", reason: "Another guarded send is already active for this content agent." };
-    }
-
-    guardedSendInFlight = true;
-    observationGeneration += 1;
-    if (observationTimer !== undefined) {
-      clearTimeout(observationTimer);
-      observationTimer = undefined;
-    }
-    try {
-      return await adapter.guardedSend({
-        purpose: message.action,
-        decisionId: message.decisionId,
-        conversationId: message.conversationId,
-        routeKey: message.routeKey,
-        assistantFingerprint: message.assistantFingerprint,
-        ...(message.assistantDomMessageId === undefined ? {} : { assistantDomMessageId: message.assistantDomMessageId }),
-        continuationText: message.continuationText,
-      }, humanStateIsCurrent);
-    } finally {
-      guardedSendInFlight = false;
-      scheduleObservation(0);
-    }
-  }
-
   async function announceAgent(): Promise<boolean> {
     const conversationId = adapter.currentConversationId();
     const response = await send({
@@ -163,7 +88,10 @@ namespace GuardianContentAgent {
     pageEpoch += 1;
     lastRouteKey = nextRouteKey;
     observationGeneration += 1;
-    if (observationTimer !== undefined) { clearTimeout(observationTimer); observationTimer = undefined; }
+    if (observationTimer !== undefined) {
+      clearTimeout(observationTimer);
+      observationTimer = undefined;
+    }
     const conversationId = adapter.currentConversationId();
     const response = await send({
       type: "content:navigation",
@@ -205,11 +133,13 @@ namespace GuardianContentAgent {
   }
 
   function scheduleObservation(delayMs = 300): void {
-    if (guardedSendInFlight) return;
     observationGeneration += 1;
     const expectedGeneration = observationGeneration;
     if (observationTimer !== undefined) clearTimeout(observationTimer);
-    observationTimer = window.setTimeout(() => { observationTimer = undefined; void observe(expectedGeneration); }, delayMs);
+    observationTimer = window.setTimeout(() => {
+      observationTimer = undefined;
+      void observe(expectedGeneration);
+    }, delayMs);
   }
 
   function checkRoute(): void {
@@ -218,8 +148,6 @@ namespace GuardianContentAgent {
   }
 
   function emitUserInteraction(interaction: InteractionKind): void {
-    const sentAt = Math.max(Date.now(), (lastLocalUserInteractionAt ?? 0) + 1);
-    lastLocalUserInteractionAt = sentAt;
     void send({
       type: "content:user-interaction",
       protocolVersion: GuardianContent.PROTOCOL_VERSION,
@@ -227,7 +155,7 @@ namespace GuardianContentAgent {
       pageEpoch,
       sequence: nextSequence(),
       interaction,
-      sentAt,
+      sentAt: Date.now(),
     });
     scheduleObservation(0);
   }
@@ -260,11 +188,7 @@ namespace GuardianContentAgent {
       });
       return true;
     }
-    if (!isGuardedSendMessage(message)) return false;
-    void handleGuardedSend(message).then(sendResponse, () => {
-      sendResponse({ decisionId: message.decisionId, status: "AMBIGUOUS", reason: "Content-agent guarded send failed unexpectedly." });
-    });
-    return true;
+    return false;
   });
 
   const observer = new MutationObserver(() => { checkRoute(); scheduleObservation(); });
@@ -273,7 +197,7 @@ namespace GuardianContentAgent {
     childList: true,
     characterData: true,
     attributes: true,
-    attributeFilter: ["aria-label", "aria-busy", "data-testid", "data-message-author-role"],
+    attributeFilter: ["aria-label", "aria-busy", "data-testid", "data-message-author-role", "disabled"],
   });
 
   for (const eventName of ["beforeinput", "input", "paste", "compositionstart"] as const) {
@@ -282,10 +206,12 @@ namespace GuardianContentAgent {
       if (adapter.isComposerTarget(event.target)) emitUserInteraction("COMPOSER_INPUT");
     }, true);
   }
+
   document.addEventListener("focusin", (event) => {
     if (!event.isTrusted || !adapter.isComposerTarget(event.target)) return;
     if (consumeRecentKeyboardFocusIntent(performance.now())) emitUserInteraction("COMPOSER_FOCUS");
   }, true);
+
   document.addEventListener("keydown", (event) => {
     if (!event.isTrusted) return;
     if (event.key === "Tab") lastKeyboardFocusIntentAt = performance.now();
@@ -293,6 +219,7 @@ namespace GuardianContentAgent {
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) emitUserInteraction("MANUAL_SEND");
     else emitUserInteraction("COMPOSER_INPUT");
   }, true);
+
   document.addEventListener("pointerdown", (event) => {
     if (!event.isTrusted) return;
     if (adapter.isComposerTarget(event.target)) emitUserInteraction("COMPOSER_FOCUS");
@@ -305,5 +232,6 @@ namespace GuardianContentAgent {
   window.addEventListener("popstate", checkRoute);
   window.addEventListener("hashchange", checkRoute);
   window.setInterval(checkRoute, 500);
+  window.setInterval(() => scheduleObservation(0), PERIODIC_OBSERVATION_MS);
   void announceAgent().then(() => scheduleObservation(0));
 }

@@ -1,22 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  CONVERSATION_PROTOCOL_CONTINUE_RESPONSE,
-  CONVERSATION_PROTOCOL_RECOVERY_RESPONSE,
-  CONVERSATION_PROTOCOL_UNSURE_RESPONSE,
-  DEFAULT_CONVERSATION_PROTOCOL_PROMPT,
   GUARDIAN_STATUS_PREFIX,
+  LEGACY_GUARDIAN_STATUS_PREFIX,
   conversationProtocolDecision,
-  conversationProtocolResponseText,
   hasValidConversationProtocolStatus,
+  inspectConversationStatusMarker,
   parseConversationProtocolStatus,
   stripConversationProtocolStatus,
 } from "../dist/classification/conversation-protocol.js";
-import { DEFAULT_AUTOMATION_POLICY } from "../dist/automation/policy.js";
 
-const status = (decision) => `${GUARDIAN_STATUS_PREFIX}{"decision":"${decision}"}`;
+const status = (decision, prefix = GUARDIAN_STATUS_PREFIX) => `${prefix}{"decision":"${decision}"}`;
 
-test("the conversation protocol maps every strict terminal decision", () => {
+test("canonical standalone status maps every terminal decision", () => {
   const expected = new Map([
     ["CONTINUE", ["CONTINUE", "NEEDLESS_TURN_BOUNDARY"]],
     ["HOLD_APPROVAL", ["HOLD", "HUMAN_APPROVAL_REQUIRED"]],
@@ -29,77 +25,66 @@ test("the conversation protocol maps every strict terminal decision", () => {
   ]);
 
   for (const [value, [decision, reasonCode]] of expected) {
-    const parsed = parseConversationProtocolStatus(`Normal response.\n${status(value)}`);
+    const raw = `Normal response.\n\n${status(value)}`;
+    const marker = inspectConversationStatusMarker(raw);
+    assert.equal(marker.health, "DETECTED");
+    assert.equal(marker.decision, value);
+    assert.equal(conversationProtocolDecision(raw), value);
+    assert.equal(hasValidConversationProtocolStatus(raw), true);
+    const parsed = parseConversationProtocolStatus(raw);
     assert.equal(parsed.decision, decision);
     assert.equal(parsed.reasonCode, reasonCode);
     assert.equal(parsed.source, "CONVERSATION_PROTOCOL");
-    assert.equal(hasValidConversationProtocolStatus(status(value)), true);
   }
 });
 
-test("the terminal marker is exact, unique, strict, and must be the final suffix", () => {
-  for (const malformed of [
-    "CONTINUE",
-    '{"decision":"CONTINUE"}',
+test("legacy V1 marker remains readable but is identified as legacy", () => {
+  const raw = `Normal response.\n\n${status("HOLD_DECISION", LEGACY_GUARDIAN_STATUS_PREFIX)}`;
+  const marker = inspectConversationStatusMarker(raw);
+  assert.equal(marker.health, "LEGACY");
+  assert.equal(marker.decision, "HOLD_DECISION");
+  assert.equal(hasValidConversationProtocolStatus(raw), true);
+  assert.equal(parseConversationProtocolStatus(raw).reasonCode, "MATERIAL_DECISION_REQUIRED");
+});
+
+test("missing status is a valid fallback condition rather than a fabricated decision", () => {
+  const marker = inspectConversationStatusMarker("A normal response with no status metadata.");
+  assert.deepEqual(marker, { health: "MISSING" });
+  assert.equal(conversationProtocolDecision("A normal response with no status metadata."), undefined);
+  assert.equal(hasValidConversationProtocolStatus("A normal response with no status metadata."), false);
+  assert.equal(parseConversationProtocolStatus("A normal response with no status metadata.").decision, "UNSURE");
+});
+
+test("status must be the unique standalone terminal line and outside fenced code", () => {
+  const malformed = [
     `${status("CONTINUE")}\ntrailing text`,
-    `\`\`\`text\n${status("CONTINUE")}\n\`\`\``,
+    `prefix ${status("CONTINUE")}`,
+    `> ${status("CONTINUE")}`,
+    `| ${status("CONTINUE")} |`,
+    `\`\`\`json\n${status("CONTINUE")}\n\`\`\``,
     `\`\`\`text\n${status("CONTINUE")}`,
-    `${status("CONTINUE")}\n${status("CONTINUE")}`,
+    `~~~json\n${status("CONTINUE")}\n~~~`,
+    `~~~~text\n${status("CONTINUE")}`,
+    `${status("CONTINUE")}\n${status("COMPLETE")}`,
+    `${status("CONTINUE")}\n${status("CONTINUE", LEGACY_GUARDIAN_STATUS_PREFIX)}`,
     `${GUARDIAN_STATUS_PREFIX}{"decision":"CONTINUE","extra":true}`,
-    `${GUARDIAN_STATUS_PREFIX}{"decision":"HOLD_APPROVAL","decision":"CONTINUE"}`,
     `${GUARDIAN_STATUS_PREFIX}{"decision":"continue"}`,
     `${GUARDIAN_STATUS_PREFIX}{"decision":"UNKNOWN"}`,
     `${GUARDIAN_STATUS_PREFIX}{bad json}`,
-  ]) {
-    assert.equal(hasValidConversationProtocolStatus(malformed), false);
-    assert.equal(parseConversationProtocolStatus(malformed).decision, "UNSURE");
-  }
+  ];
 
-  assert.equal(hasValidConversationProtocolStatus(`${status("CONTINUE")}  \n`), true);
-  assert.equal(hasValidConversationProtocolStatus(`Rendered prose.${status("CONTINUE")}`), true);
+  for (const raw of malformed) {
+    assert.equal(inspectConversationStatusMarker(raw).health, "MALFORMED", raw);
+    assert.equal(hasValidConversationProtocolStatus(raw), false, raw);
+    assert.equal(parseConversationProtocolStatus(raw).decision, "UNSURE", raw);
+  }
 });
 
-test("the machine marker can be stripped without changing normal assistant text", () => {
+test("terminal status stripping preserves the answer body and never strips invalid markers", () => {
   const response = `Implemented the requested change.\n\n${status("COMPLETE")}`;
   assert.equal(stripConversationProtocolStatus(response), "Implemented the requested change.");
-  assert.equal(stripConversationProtocolStatus(`Flattened DOM.${status("COMPLETE")}`), "Flattened DOM.");
-  assert.equal(stripConversationProtocolStatus("Unmarked response."), "Unmarked response.");
   assert.equal(stripConversationProtocolStatus(status("COMPLETE")), "");
-});
-
-test("the one-time protocol prompt is readable, bounded, and explains future replies", () => {
-  assert.match(DEFAULT_CONVERSATION_PROTOCOL_PROMPT, /^\[Chat Turn Guardian — Conversation Status Protocol\]\n\nPurpose\n/);
-  assert.match(DEFAULT_CONVERSATION_PROTOCOL_PROMPT, /\n\nThis reply\n-/);
-  assert.match(DEFAULT_CONVERSATION_PROTOCOL_PROMPT, /\n\nFuture replies\n-/);
-  assert.match(DEFAULT_CONVERSATION_PROTOCOL_PROMPT, /\n\nValues\n-/);
-  assert.match(DEFAULT_CONVERSATION_PROTOCOL_PROMPT, /Remember the protocol for this conversation/i);
-  assert.match(DEFAULT_CONVERSATION_PROTOCOL_PROMPT, /Add nothing after it/i);
-  assert.match(DEFAULT_CONVERSATION_PROTOCOL_PROMPT, /must not change, restart, reframe, summarize, reprioritize, or continue/i);
-  assert.ok(DEFAULT_CONVERSATION_PROTOCOL_PROMPT.length <= 1_000);
-});
-
-test("the strict status selects only its dedicated automatic response", () => {
-  const expected = new Map([
-    ["CONTINUE", CONVERSATION_PROTOCOL_CONTINUE_RESPONSE],
-    ["HOLD_APPROVAL", undefined],
-    ["HOLD_DECISION", undefined],
-    ["HOLD_HUMAN_OPERATION", undefined],
-    ["COMPLETE", undefined],
-    ["PLATFORM_ERROR", CONVERSATION_PROTOCOL_RECOVERY_RESPONSE],
-    ["RATE_LIMIT", CONVERSATION_PROTOCOL_RECOVERY_RESPONSE],
-    ["UNSURE", CONVERSATION_PROTOCOL_UNSURE_RESPONSE],
-  ]);
-
-  for (const [decision, response] of expected) {
-    assert.equal(conversationProtocolDecision(status(decision)), decision);
-    assert.equal(conversationProtocolResponseText(decision), response);
-  }
-  assert.equal(conversationProtocolDecision("malformed"), undefined);
-});
-
-test("the default resume prompt remains contextual and preserves human-precedence boundaries", () => {
-  const text = DEFAULT_AUTOMATION_POLICY.defaults.continuationText;
-  assert.notEqual(text, "Continue.");
-  assert.match(text, /where you stopped/i);
-  assert.match(text, /approval, a decision, information, or an action from the human/i);
+  assert.equal(stripConversationProtocolStatus("Unmarked response."), "Unmarked response.");
+  const embedded = `Output: ${status("COMPLETE")}`;
+  assert.equal(stripConversationProtocolStatus(embedded), embedded);
 });

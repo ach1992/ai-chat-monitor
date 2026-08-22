@@ -1,307 +1,262 @@
 # Chat Turn Guardian — Project Specification
 
-Status: Accepted living specification; v1.0 baseline complete; Issue #51 shipped in v1.1.0; Issue #56 shipped in v1.2.0; Issue #57 shipped in v1.2.1
-Repository: `ach1992/chat-turn-guardian`  
-Primary target: ChatGPT Web on Chromium-based browsers
+## Product version
 
-## 1. Problem
+Current target: **v2.0.0**
 
-Long-running chats can stop at a turn boundary even when no genuine human decision, approval, external handoff, safety boundary, or platform blocker requires intervention. Repeatedly inspecting those stops and manually sending a small continuation instruction across several active conversations creates avoidable friction.
+v2 is a breaking product pivot from guarded automatic continuation to a strictly read-only ChatGPT conversation monitor and notifier.
 
-Chat Turn Guardian removes that turn-boundary friction without becoming a second project orchestrator and without changing the semantics of the agent, Skill, or workflow running inside the chat.
+## Product goal
 
-## 2. Product outcome
+Chat Turn Guardian helps a user observe selected long-running ChatGPT Web conversations without having to keep each tab in focus. It detects response/runtime state, resolves an optional semantic work state, and delivers useful notifications while preserving full human control of the conversation.
 
-Chat Turn Guardian is a standalone Chromium Manifest V3 extension that lets the user explicitly supervise selected ChatGPT conversations. For each managed conversation it observes response completion, decides conservatively whether another turn may safely be requested, and either:
+## Single purpose
 
-- automatically sends the configured continuation instruction after every local safety gate passes;
-- performs no action and reports that human attention is required or the result is uncertain; or
-- only notifies the user according to that conversation's notification policy.
+Guardian may observe supported ChatGPT pages and notify the user.
 
-The extension safely supervises multiple tabs/conversations concurrently with no cross-tab interference.
+Guardian must never:
 
-The product is intentionally modular. New notification channels, provider adapters, page adapters, and other bounded capabilities must be addable without coupling them to guarded-send authority or weakening the safety model.
+- write to the ChatGPT composer;
+- click or programmatically activate Send, Retry, Continue generating, Regenerate, Stop, confirmation, verification, or other ChatGPT conversation controls;
+- create or inject protocol bootstrap, self-check, status-recovery, continuation, or other user turns;
+- automatically continue a conversation;
+- use Telegram or AI-provider output as browser mutation authority;
+- bypass platform limits, authentication, verification, CAPTCHAs, approvals, confirmations, or safety controls.
 
-## 3. Core product boundary
+This invariant applies even when semantic state is `CONTINUE`.
 
-The chat's own agent/Skill/workflow remains responsible for **what work should happen**. Chat Turn Guardian is responsible only for **whether a finished turn appears to require genuine human involvement before another turn is requested**.
+## Supported environment
 
-It is not a project manager, GitHub orchestrator, approval authority, general browser agent, CAPTCHA/limit bypass, or autonomous replacement for the workflow running inside the chat.
+- Chromium Manifest V3 extension.
+- Chrome/Chromium 114+ baseline because the Side Panel API is used.
+- Supported ChatGPT origins:
+  - `https://chatgpt.com/*`
+  - `https://chat.openai.com/*`
+- Node.js 22+ for repository development/building.
 
-## 4. v1.0 product requirements
+## State model
 
-### 4.1 Per-chat opt-in and modes
+Guardian keeps runtime/page state separate from semantic conversation state.
 
-Only conversations explicitly selected by the user may be managed. Each managed conversation has one of these modes:
+### Page/runtime state
 
-- `OFF` — no supervision;
-- `OBSERVE` — observe/classify, never auto-send;
-- `AUTO` — classify and auto-continue only when every safety gate passes;
-- `NOTIFY_ONLY` — never auto-send; deliver configured notifications only.
+Representative states:
 
-The user can see managed conversations, control the current tab, change per-chat modes, and use a global Pause All control.
+- `GENERATING`
+- `IDLE`
+- `RETRY_AVAILABLE`
+- `PLATFORM_ERROR`
+- `NETWORK_ERROR`
+- `RATE_LIMIT`
+- `AUTH_REQUIRED`
+- `VERIFICATION_REQUIRED`
+- `CONVERSATION_FULL`
+- `UNKNOWN`
 
-### 4.2 Exact multi-tab and duplicate-conversation isolation
+Page state comes from normalized DOM/runtime observation. High-confidence blocker state is authoritative over semantic/provider evidence.
 
-Runtime action identity includes the exact browser tab/document/content-agent/page epoch/route/conversation/assistant-response/response-instance evidence needed to prevent stale or cross-tab action.
+### Semantic work state
 
-If the same conversation is open in multiple tabs, at most one copy may be `OWNER` for automatic control. Other copies are `MIRROR` and never auto-send. Takeover requires fresh valid observation.
+Supported terminal vocabulary:
 
-A decision produced for one tab/document/response may never be executed against another.
+- `CONTINUE`
+- `HOLD_APPROVAL`
+- `HOLD_DECISION`
+- `HOLD_HUMAN_OPERATION`
+- `COMPLETE`
+- `PLATFORM_ERROR`
+- `RATE_LIMIT`
+- `UNSURE`
 
-### 4.3 Configurable timing and continuation
+Meaning:
 
-Global defaults and per-chat overrides support:
+- `CONTINUE` — requested work remains and can proceed without human approval, a material human decision, missing human information/credentials, or a human-only operation. This only means a human may manually continue.
+- `HOLD_APPROVAL` — explicit human approval/authorization is required.
+- `HOLD_DECISION` — a material human decision is required.
+- `HOLD_HUMAN_OPERATION` — missing human information/credentials or a human-only operation is required.
+- `COMPLETE` — the requested outcome is actually complete and no further work remains for the current request.
+- `PLATFORM_ERROR` — platform/tool/runtime/service failure blocks progress.
+- `RATE_LIMIT` — usage/quota/rate limit blocks progress.
+- `UNSURE` — semantic state cannot be classified reliably.
 
-- settle delay;
-- continuation delay;
-- post-send cooldown;
-- configured continuation text;
-- notification triggers;
-- hard-fuse settings.
+## Optional machine-readable status protocol
 
-Pending timers are cancellable when user interaction, policy, ownership, navigation, response identity, or platform state changes.
+Canonical public record:
 
-### 4.4 Response-completion detection
+```text
+CHAT_TURN_GUARDIAN_STATUS={"decision":"<VALUE>"}
+```
 
-The ChatGPT page adapter uses bounded DOM/event observation rather than tight polling where practical. It determines generation state and stable assistant-response identity behind a narrow adapter boundary so ChatGPT DOM changes do not spread through the extension core.
+Rules:
 
-A transition to idle is not enough to invent a fresh assistant response. If exact response evidence is absent or ambiguous, Guardian does nothing automatically.
+- optional; Guardian must work without it;
+- exactly one terminal record when used;
+- final standalone line of the same assistant turn;
+- nothing after it;
+- outside Markdown code fences, inline code, JSON/code payloads, block quotes, tables, or other requested output containers;
+- omit it when a user requires an exact/exclusive output format that an extra line would invalidate.
 
-### 4.5 Conservative stop evaluation
+Legacy compatibility:
 
-Evaluation uses:
+```text
+CHAT_TURN_GUARDIAN_STATUS_V1={"decision":"<VALUE>"}
+```
 
-1. deterministic/high-confidence rules for obvious human/completion/platform boundaries;
-2. an optional AI classifier only where rules cannot safely decide.
+The legacy form remains readable during the compatibility window, but v2 UI/docs generate and recommend only the unversioned canonical form.
 
-Normalized decisions are:
+Multiple markers, conflicting marker forms, malformed JSON, unsupported decisions, or markers embedded in structured/code output are invalid and fall through safely.
 
-- `CONTINUE` — a needless turn boundary is sufficiently clear;
-- `HOLD` — a legitimate completion/human/platform/safety boundary exists;
-- `UNSURE` — evidence or confidence is insufficient.
+## Semantic resolution order
 
-Provider failure, malformed output, timeout, rate limit, missing credentials, or low confidence never degrades to `CONTINUE`. Provider output remains advisory and has no browser mutation authority.
+For each stable response/episode:
 
-### 4.6 Guarded auto-continue pipeline
+1. authoritative/high-confidence page/UI blocker evidence;
+2. valid terminal status marker;
+3. strong deterministic local rules;
+4. optional configured AI provider fallback;
+5. `UNKNOWN` / `UNSURE`.
 
-A `CONTINUE` decision is only a candidate. Immediately before mutation, the trusted content agent synchronously revalidates that:
+Provider fallback is advisory, bounded, secret-redacted, cached/deduplicated per response identity, and cannot cause page mutation.
 
-- exact tab/document/content-agent/page epoch/route/conversation/assistant-response identity is unchanged;
-- ChatGPT is not already generating;
-- the user has not typed, sent, edited, stopped, navigated, or otherwise taken control;
-- the composer is empty and safe to mutate;
-- no modal, confirmation, Retry/error, rate-limit, verification, CAPTCHA, or other blocking UI is active;
-- policy is still `AUTO`, ownership is still valid, and Pause All is not active;
-- the decision is current and not stale/expired;
-- reliability/stagnation/fuse state still permits the candidate.
+## Monitoring events
 
-After mutation, Guardian verifies the intended user turn/generation evidence. An ambiguous write freezes retry; blind retries are prohibited.
+Core events include:
 
-### 4.7 Human interaction always wins
+- response complete;
+- manual continuation available;
+- approval required;
+- material decision required;
+- human operation/input required;
+- task complete;
+- Retry available;
+- platform/network error;
+- rate limit;
+- authentication/verification required;
+- conversation limit reached;
+- semantic state unknown/provider failure;
+- generation stalled;
+- repeated exact assistant response where useful diagnostically.
 
-Relevant trusted human interaction invalidates pending automatic decisions for that conversation. Guardian never competes with the user for the composer and never treats automatic browser/platform focus changes as equivalent to deliberate user intent without the required evidence.
+Events are transition/episode based and deduplicated. A single response should produce one useful primary notification rather than overlapping spam.
 
-### 4.8 Loop and stagnation protection
+## Notification channels
 
-Progress-aware protection compares privacy-preserving signatures of recent verified auto-continued outcomes and HOLDs on repeated no-progress behavior. A separate configurable hard fuse is a final emergency boundary, not the primary progress detector.
+### Browser
 
-### 4.9 Side Panel and toolbar UX
+- configurable per event;
+- uses `chrome.notifications`;
+- may focus/open the known monitored tab when safely resolvable;
+- may suppress low-priority alerts while the exact chat is already focused when configured.
 
-The persistent Side Panel is the primary management/configuration/status surface. It provides:
+### Sound
 
-- current-tab ON/OFF and bounded reconnect;
-- multi-chat mode/policy management;
-- runtime/OWNER/MIRROR/decision state;
-- timing and notification configuration;
-- provider profiles/model catalog/readiness controls;
-- Telegram configuration and health;
-- bounded audit/reliability diagnostics;
-- Pause All;
-- a collapsed Privacy & Data disclosure at the bottom.
+- optional local channel;
+- configurable per event;
+- uses a Manifest V3-compatible offscreen extension context;
+- no repeated playback for the same deduplicated event episode.
 
-Clicking the extension toolbar action opens the Side Panel on supported ChatGPT pages through the supported Side Panel API. Unsupported hosts remain disabled/fail-closed.
+### Telegram
 
-### 4.10 Notifications
-
-Browser notifications support relevant Guardian events including response completion, HOLD/human attention, UNSURE, stagnation, provider error, and extension/platform error.
-
-Notification routing uses a generic channel boundary; delivery is observational and cannot change classification or chat authority.
-
-Telegram v1 is optional, outbound-only, and configured by the extension user. It supports:
-
-- enable/disable;
-- locally entered bot token and destination/Chat ID;
+- outbound notification-only;
+- user supplies bot token and destination;
+- bounded metadata by default, not full ChatGPT transcripts;
 - inherited or Telegram-specific event selection;
-- configured/enabled/health state;
-- safe Test notification;
-- bounded notification metadata.
+- sanitized delivery health;
+- no inbound remote control.
 
-Telegram v1 has no inbound commands, webhook/long-poll loop, remote AUTO/OFF control, approval answering, message injection, project orchestration, or browser mutation authority. Browser notifications continue independently.
+## Multi-tab behavior
 
-### 4.11 AI-provider architecture
+The same ChatGPT conversation may be open in multiple tabs. v2 uses conversation/response identity for notification/provider deduplication rather than v1 OWNER/MIRROR send authority.
 
-No local daemon, local LLM, backend, database, or companion service is required.
+Tab/document identity remains useful to reject stale observations and focus a known tab, but no tab owns send authority because send authority no longer exists.
 
-The provider layer is pluggable and supports:
+## Persistence and migration
 
-- OpenRouter as a first-class preset;
-- NaraRouter as a fixed compatible preset;
-- generic OpenAI-compatible HTTPS profiles (`baseUrl`, API key, model);
-- ordered provider fallback;
-- bounded model catalog/readiness flows.
+Monitoring policy schema version: `2`.
 
-The README documents currently useful OpenAI-compatible configurations such as OpenAI API, Gemini's compatibility endpoint, DeepSeek, Groq, xAI, and Together AI. Vendor model availability, quotas, compatibility, and pricing are external facts and are not product invariants.
+Migration from v1 policy:
 
-Native APIs that materially differ, such as Anthropic's Messages API, require a dedicated future adapter rather than pretending to be supported by the generic transport.
+- `OFF` -> monitoring disabled;
+- `OBSERVE`, `NOTIFY_ONLY`, or `AUTO` -> monitoring enabled;
+- compatible notification preferences preserved where practical;
+- continuation text, continuation delay, cooldown, hard auto-continue fuse, write journal, self-check/bootstrap state, and any pending send authority are discarded/deprecated;
+- service-worker restart must never restore old automatic-send authority.
 
-### 4.12 Context minimization, credentials, and privacy
+## Privacy and security
 
-Classifier context is minimized and bounded: at most 4 recent turns, 4,000 characters per turn, and 8,000 characters total after secret redaction/minimization.
+- ChatGPT content is untrusted input.
+- No page mutation authority exists anywhere in v2 runtime.
+- Full transcripts are not intentionally stored in monitoring history.
+- Provider input is bounded/minimized and secret-redacted.
+- Provider API keys and Telegram bot tokens stay in trusted extension storage.
+- Telegram receives bounded monitoring metadata by default.
+- Notification delivery failure cannot change semantic state or create browser-control authority.
+- Broad optional HTTPS host permission is used only for user-configured HTTPS provider origins.
 
-Provider API keys and Telegram bot tokens:
+## Side Panel requirements
 
-- are stored only in trusted extension storage;
-- never enter page/content scripts;
-- are never rendered back after storage;
-- are absent from ordinary status APIs, audit history, and logs;
-- are never committed or packaged as real credentials.
+The Side Panel provides:
 
-External transfers are purpose-bound: configured AI providers receive only bounded classification context, and Telegram receives bounded notification metadata rather than full ChatGPT messages by default.
+- Monitoring ON/OFF;
+- current page state;
+- current semantic state and source (`UI`, `STATUS_MARKER`, `RULE`, `PROVIDER`, `UNKNOWN`);
+- marker health (`Detected`, `Legacy`, `Missing`, `Malformed`);
+- Browser/Sound event configuration;
+- status protocol setup with copyable Custom Instructions and per-chat variants;
+- provider settings/readiness;
+- Telegram settings/health;
+- bounded recent monitoring events/diagnostics.
 
-### 4.13 Persistence and service-worker resilience
+The Side Panel must not expose AUTO-send, continuation text, send delay/cooldown, guarded-send, write-journal, or hard-fuse controls/claims.
 
-Durable user policy/configuration is separated from ephemeral runtime authority. Manifest V3 service-worker restart/suspension cannot replay old action authority: restored sessions require fresh content-agent/page evidence before automation becomes eligible again.
+## Status protocol setup UX
 
-## 5. Permanent safety invariants
+The Side Panel must explain that Guardian works without the status protocol.
 
-1. **Fail closed:** uncertainty/error/provider failure/platform blocker/storage uncertainty => no automatic send.
-2. **Exact identity:** a decision/action is valid only for its exact tab/document/content-agent/page epoch/route/conversation/assistant response/response instance.
-3. **OWNER/MIRROR isolation:** MIRROR never auto-sends.
-4. **Human precedence:** human interaction cancels or supersedes pending automation.
-5. **Final synchronous revalidation:** all mutation-critical evidence is rechecked immediately before page mutation.
-6. **Empty composer:** automatic continuation never overwrites user content.
-7. **No blind retry:** ambiguous write outcome freezes automatic retry until safely reconciled.
-8. **No safeguard bypass:** Guardian never evades limits, approvals, confirmations, verification, CAPTCHAs, or platform safety controls.
-9. **No approval fabrication:** real approval/material-decision/human-operation boundaries HOLD.
-10. **Minimal provider authority:** AI providers classify only; provider output cannot authorize DOM/tab/browser action by itself.
-11. **Credential isolation:** provider and notification credentials remain in trusted extension contexts and secret-free status/log/audit surfaces.
-12. **Notification isolation:** notification channels are observational only and can never authorize or retry ChatGPT mutation.
-13. **Extensible boundaries:** new channels/providers/adapters receive only the narrow authority their interface requires.
+Two copyable variants are supported:
 
-## 6. v1.0 supported environment
+1. **Custom Instructions / Personalization** — for compatible normal replies across chats.
+2. **One conversation only** — a message the user manually sends once near the start of a specific chat.
 
-- Chromium-family browser using Manifest V3 and the Side Panel API; current manifest minimum is Chrome/Chromium 114.
-- ChatGPT Web on the supported `chatgpt.com` and legacy `chat.openai.com` origins.
-- One browser profile/session at a time.
-- Normal operation requires the browser/page environment to be available; Guardian is not a remote server-side supervisor.
+Both variants explain enough decision semantics for a model to choose reliably and explicitly state the strict-format exception. Guardian never pastes or sends these instructions itself.
 
-Additional chat-site adapters may be added later but are not part of v1.0.
+## Development and release requirements
 
-## 7. v1.0 non-goals
+Required repository validation for a candidate:
 
-- replacing or running the project/engineering orchestration workflow inside the chat;
-- independently understanding GitHub/project state outside the conversation;
-- automatically moving review prompts/results between chats;
-- automatically creating new ChatGPT chats;
-- acting as a general autonomous browser agent;
-- Telegram/Discord remote control or inbound command handling;
-- requiring a local companion service/model;
-- bypassing ChatGPT/provider usage limits or platform safeguards;
-- treating consumer chat subscriptions or browser-session credentials as provider API credentials;
-- Chrome Web Store publication as proof of engineering completeness.
+- typecheck;
+- lint;
+- automated tests;
+- extension smoke test;
+- deterministic packaging;
+- ZIP layout/provenance verification;
+- exact candidate SHA identity in build metadata.
 
-Store **publishability** remains a standing engineering constraint even though actual Store submission/publication is a separate release action.
+A v2 test artifact is not a public release. Public publication requires explicit release/integration authorization after the exact candidate has passed required validation/review.
 
-## 8. Future extension points
+## v2 acceptance
 
-Later versions may add, through bounded interfaces and separate security/design review where needed:
+The v2 outcome is complete only when all of the following are true:
 
-- additional notification channels;
-- native provider adapters, including APIs that are not OpenAI-compatible;
-- additional supported chat-site adapters;
-- richer audit/export/diagnostics;
-- read-only remote status capabilities;
-- carefully authorized inbound/remote commands only after a separate threat/authorization design.
+- no runtime path writes to the ChatGPT composer or programmatically activates ChatGPT conversation controls;
+- no in-chat self-check/bootstrap/status-response/recovery message is generated or sent by Guardian;
+- stable response completion produces one deduplicated response episode;
+- reliable Retry/error/rate-limit/auth/verification/conversation-full states are surfaced observationally;
+- canonical status marker parses without creating another chat turn;
+- legacy `_V1` marker remains readable but is not generated/recommended;
+- marker parser rejects ambiguous/embedded/structured-output marker situations;
+- missing/malformed marker falls through safely to rules/provider/unknown;
+- provider failure cannot override known UI state or cause browser action;
+- Browser, Sound, and Telegram routing are independently configurable and deduplicated;
+- duplicate/background tabs do not duplicate provider classification or notification for the same response episode;
+- service-worker restart does not replay notification episodes excessively or restore send authority;
+- v1.2.5 settings migrate to monitoring-only behavior;
+- Side Panel contains no automatic continuation controls/claims;
+- README, Architecture, Privacy, Store readiness/listing, status protocol, and changelog describe v2 accurately;
+- automated regression coverage enforces the read-only protocol/runtime invariant and core monitoring transitions;
+- repository validation passes on the exact candidate SHA;
+- a deterministic test ZIP with provenance is available for user validation before public release.
 
-Future features must not weaken v1.0 safety invariants or silently expand guarded-send authority.
+## Historical note
 
-## 9. Distribution and Chrome Web Store readiness
-
-The codebase and release process remain suitable for later Chrome Web Store submission:
-
-- narrow and accurately described single purpose;
-- Manifest V3 with packaged/self-contained executable logic;
-- minimal persistent permissions and exact runtime permission grants where practical;
-- secure local credential handling and HTTPS external transports;
-- minimized purpose-bound data transfers and synchronized privacy disclosure;
-- production-quality icon/listing assets;
-- deterministic package/provenance and release validation.
-
-See [`STORE_READINESS.md`](STORE_READINESS.md) for the durable Store engineering/runbook constraints. Actual Developer Dashboard upload, submission, publication, visibility changes, or production listing edits require a current policy review and explicit human authorization.
-
-## 10. v1.0 acceptance
-
-v1.0 is feature-complete and release-ready when repository-required validation/review passes and the integrated product demonstrates the high-signal behaviors recorded in [`V1_VALIDATION.md`](V1_VALIDATION.md), including safe AUTO continuation, human-precedence races, OWNER/MIRROR isolation, restart recovery, provider failure behavior, browser notifications, toolbar/Side Panel behavior, and real outbound Telegram delivery.
-
-Rare platform states that can only occur naturally are not to be manufactured. Their fail-closed behavior remains covered by automated regressions and may collect additional live evidence opportunistically without keeping the completed v1.0 outcome artificially open.
-
-## 11. Product principle
-
-Chat Turn Guardian should make an existing high-quality chat workflow more continuous, not more autonomous than the workflow itself intended to be. When in doubt, preserve the conversation, preserve the user's control, and do nothing automatically.
-
-## 12. v1.1.0 outcome — in-chat self-check classification
-
-Issue #51 is the implemented product outcome after the completed v1.0 baseline.
-
-v1.1.0 changes the **normal ambiguous-stop classifier** from an external-provider-first dependency to an **in-chat self-check** performed in the same ChatGPT conversation:
-
-- local deterministic/high-confidence signals continue to handle obvious safe boundaries first;
-- for an eligible ambiguous stop/error episode, Guardian may send exactly one short self-check probe asking the current chat to classify why it stopped;
-- the reply must be compact and machine-readable and must distinguish continuation from approval, material-decision, human-operation, completion, platform-error, rate-limit, and uncertainty cases;
-- malformed, contradictory, stale, missing, or uncertain self-check output fails closed;
-- external AI providers remain optional fallback/diagnostic capability rather than a required normal-path dependency if the in-chat path proves reliable.
-
-A visible ChatGPT `Retry`, red delivery error, or `Message delivery timed out` state is **probe-eligible** only when the page still has a safe ordinary composer and all exact identity, ownership, human-precedence, stale-state, and write-safety guards pass. Guardian still never clicks `Retry` automatically and never blindly retries an ambiguous or failed probe write.
-
-Hard no-probe boundaries remain, including conversation/context exhaustion that explicitly requires a **new chat**, unavailable/unsafe composer state, authentication/account verification/CAPTCHA/permission/safety UI that requires human action, human takeover, or unprovable current episode identity. Automatic creation or migration to a new ChatGPT conversation is not authorized by this outcome.
-
-The default resume message remains simple and is:
-
-> Continue the work from where you stopped. If you need approval, a decision, information, or an action from the human, say so; otherwise keep going until the requested work is complete.
-
-The self-check probe is itself a new automatic mutation before the resume decision. It therefore requires explicit stop/self-check episode identity, final synchronous revalidation before each mutation, OWNER/MIRROR isolation, service-worker restart safety, no-blind-retry/ambiguous-write semantics, and loop/stagnation protection. Self-check output remains advisory data and cannot bypass local safety gates.
-
-Issue #51 is integrated and exact-head CI validated. This section describes the shipped v1.1.0 runtime behavior; live ChatGPT smoke evidence remains pending. See [`IN_CHAT_SELF_CHECK.md`](IN_CHAT_SELF_CHECK.md) for the bounded design and validation boundary.
-
-## 13. v1.2.0 outcome — status-first conversation protocol (Issue #56)
-
-v1.2.0 refines Issue #51 to avoid unnecessary control traffic:
-
-- a valid `CHAT_TURN_GUARDIAN_STATUS_V1={"decision":"..."}` record at the exact end of the latest assistant response is parsed directly;
-- deterministic hard HOLD remains authoritative, while an obvious deterministic continuation may avoid an unnecessary self-check when no marker exists;
-- only an eligible ambiguous response with no valid marker receives the guarded same-conversation self-check;
-- that structured self-check asks the chat to remember the terminal-status contract for future replies and classifies the immediately preceding work state in its activation response;
-- a missing or malformed activation status fails closed and cannot recursively trigger another self-check;
-- if the chat later omits the remembered marker on an ordinary response, one new bounded self-check may be sent for that exact missing-status episode;
-- valid marked continuation responses can continue across multiple turns without a self-check between them, subject to progress/stagnation and the hard fuse;
-- the write journal is durable negative authority so restart cannot blindly replay a prior mutation; it stores guarded-send metadata, not transcript text;
-- terminal marker syntax is removed before deterministic body classification and progress-signature calculation.
-
-This protocol does not claim account-level or cross-conversation model memory. It relies on the current conversation context, checks every response independently, and falls back safely when the contract is absent. All permanent identity, OWNER/MIRROR, human-precedence, empty-composer, final revalidation, no-blind-retry, platform-boundary, and advisory-output invariants remain unchanged.
-
-[`CONVERSATION_STATUS_PROTOCOL.md`](CONVERSATION_STATUS_PROTOCOL.md) is authoritative for the exact encoding, state order, fallback rule, and acceptance coverage. Section 12 remains the historical v1.1.0 outcome. GitHub PR, CI, and Release records own the immutable integration, validation, and delivery evidence for v1.2.0.
-
-## 14. v1.2.1 outcome — formatted protocol and status-specific replies (Issue #57)
-
-v1.2.1 preserves the v1.2.0 status-first contract while making its visible control traffic deterministic and decision-specific:
-
-- the one-time bootstrap has stable readable sections and explicitly cannot redirect or continue the existing task;
-- contenteditable composer insertion preserves its exact newline structure;
-- `CONTINUE` requests continued autonomous completion;
-- `PLATFORM_ERROR` and `RATE_LIMIT` request one blocker recheck and resume only if resolved;
-- `UNSURE` requests one fresh status classification;
-- human-approval, human-decision, human-operation, and completion statuses cause no automatic message;
-- recovery and uncertainty responses do not repeat within the same human-interaction epoch.
-
-All responses remain advisory candidates until the existing final guarded-send path revalidates exact conversation/response identity, ownership, human precedence, composer safety, policy, stagnation, and the hard fuse. GitHub PR, CI, and Release records own the immutable integration, validation, and delivery evidence for v1.2.1.
+v1.x implemented guarded automatic continuation and in-chat self-check behavior. Those capabilities are intentionally removed from the v2 product contract. Historical v1 documentation may remain only when clearly labeled as historical evidence and must not be presented as current behavior.

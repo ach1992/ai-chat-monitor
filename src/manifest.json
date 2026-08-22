@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Chat Turn Guardian",
-  "version": "1.2.5",
-  "description": "Safely supervises explicitly selected ChatGPT conversations without bypassing human or platform boundaries.",
+  "version": "2.0.0",
+  "description": "Monitors selected ChatGPT conversations and notifies you about completion, attention, and platform states without sending chat messages.",
   "minimum_chrome_version": "114",
-  "permissions": ["storage", "sidePanel", "notifications"],
+  "permissions": ["storage", "sidePanel", "notifications", "offscreen", "clipboardWrite"],
   "host_permissions": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
   "optional_host_permissions": ["https://*/*"],
   "icons": {
@@ -32,7 +32,7 @@
   "content_scripts": [
     {
       "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
-      "js": ["content/adapter.js", "content/send-verification.js", "content/index.js"],
+      "js": ["content/adapter.js", "content/index.js"],
       "run_at": "document_idle"
     }
   ]

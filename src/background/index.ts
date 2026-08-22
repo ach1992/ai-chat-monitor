@@ -4,10 +4,9 @@ import {
   isContentNavigation,
   isContentObservation,
   isContentUserInteraction,
-  isPanelAuditClear,
-  isPanelAutomationDefaultsUpdate,
-  isPanelAutomationPolicyUpdate,
-  isPanelEmergencyPauseUpdate,
+  isPanelHistoryClear,
+  isPanelMonitoringDefaultsUpdate,
+  isPanelMonitoringPolicyUpdate,
   isPanelOverviewRequest,
   isPanelProviderClassifierReadinessRequest,
   isPanelProviderModelCatalogRequest,
@@ -15,17 +14,17 @@ import {
   isPanelProviderProfileRemove,
   isPanelProviderProfileUpsert,
   isPanelStatusRequest,
-  type AutomationPolicyResponse,
   type ContentAgentAck,
   type ContentHello,
   type ContentNavigation,
   type ContentObservation,
   type ContentUserInteraction,
   type GuardianResponse,
+  type HistoryClearResponse,
   type ManagedChatStatus,
-  type PanelAutomationDefaultsUpdate,
-  type PanelAutomationPolicyUpdate,
-  type PanelEmergencyPauseUpdate,
+  type MonitoringPolicyResponse,
+  type PanelMonitoringDefaultsUpdate,
+  type PanelMonitoringPolicyUpdate,
   type PanelOverviewResponse,
   type PanelProviderClassifierReadinessRequest,
   type PanelProviderModelCatalogRequest,
@@ -41,6 +40,8 @@ import {
   type SessionMutationResult,
   type SessionRegistryState,
 } from "../core/session-registry.js";
+import { isPanelMonitoringChatsReset, type MonitoringChatsResetResponse } from "../monitoring/reset-protocol.js";
+import { MonitoringService } from "../monitoring/service.js";
 import { ProviderConfigurationError, redactProviderProfile } from "../providers/settings.js";
 import { testProviderClassifierReadiness } from "../providers/readiness.js";
 import { ProviderFailure, type ProviderSettingsState } from "../providers/types.js";
@@ -48,7 +49,6 @@ import {
   createEphemeralStorage,
   restrictDurableStorageToTrustedContexts,
 } from "../storage/index.js";
-import { AutomationService } from "./automation-service.js";
 
 const REGISTRY_KEY = "runtime";
 const registryStorage = createEphemeralStorage<SessionRegistryState>("session-registry");
@@ -56,7 +56,7 @@ let registry = new SessionRegistry();
 let mutationQueue: Promise<void> = Promise.resolve();
 
 const durableStorageReady = restrictDurableStorageToTrustedContexts();
-const automation = new AutomationService((tabId) => registry.getTab(tabId), durableStorageReady);
+const monitoring = new MonitoringService((tabId) => registry.getTab(tabId), durableStorageReady);
 const registryReady = Promise.all([
   durableStorageReady,
   registryStorage.get(REGISTRY_KEY),
@@ -72,7 +72,7 @@ async function requestContentAgentReconnect(tabId: number, documentId?: string):
       ...(documentId === undefined ? [] : [{ documentId }]),
     );
   } catch {
-    // Missing/stale tabs and documents are expected during restore/navigation; stay fail-closed.
+    // Missing/stale tabs and documents are expected during restore/navigation.
   }
 }
 
@@ -166,8 +166,7 @@ async function handleContentHello(message: ContentHello, sender: chrome.runtime.
       sentAt: message.sentAt,
     }));
     if (!result.accepted) return staleEvent(result.reason);
-    await automation.invalidateTab(identity.tabId, "Content-agent registration changed; fresh observation is required.");
-    await automation.handleSession(result.session);
+    await monitoring.handleSession(result.session);
     return acceptedAck(identity.tabId, identity.documentId, result);
   } catch {
     return protocolError("STORAGE_FAILURE", "Unable to persist content-agent registration.");
@@ -188,8 +187,7 @@ async function handleNavigation(message: ContentNavigation, sender: chrome.runti
       sentAt: message.sentAt,
     }));
     if (!result.accepted) return staleEvent(result.reason);
-    await automation.invalidateTab(identity.tabId, "Navigation changed the page identity; pending automation was cancelled.");
-    await automation.handleSession(result.session);
+    await monitoring.handleSession(result.session);
     return acceptedAck(identity.tabId, identity.documentId, result);
   } catch {
     return protocolError("STORAGE_FAILURE", "Unable to persist navigation state.");
@@ -209,7 +207,7 @@ async function handleObservation(message: ContentObservation, sender: chrome.run
       sentAt: message.sentAt,
     }));
     if (!result.accepted) return staleEvent(result.reason);
-    await automation.handleSession(result.session);
+    await monitoring.handleSession(result.session);
     return acceptedAck(identity.tabId, identity.documentId, result);
   } catch {
     return protocolError("STORAGE_FAILURE", "Unable to persist observation state.");
@@ -228,7 +226,7 @@ async function handleInteraction(message: ContentUserInteraction, sender: chrome
       sentAt: message.sentAt,
     }));
     if (!result.accepted) return staleEvent(result.reason);
-    await automation.handleHumanInteraction(result.session);
+    await monitoring.handleSession(result.session);
     return acceptedAck(identity.tabId, identity.documentId, result);
   } catch {
     return protocolError("STORAGE_FAILURE", "Unable to persist user-interaction state.");
@@ -236,13 +234,13 @@ async function handleInteraction(message: ContentUserInteraction, sender: chrome
 }
 
 async function handlePanelStatusRequest(tabId: number, sender: chrome.runtime.MessageSender): Promise<GuardianResponse> {
-  if (!trustedExtensionSender(sender)) return protocolError("INVALID_SENDER", "Only trusted extension pages may read managed-chat status.");
+  if (!trustedExtensionSender(sender)) return protocolError("INVALID_SENDER", "Only trusted extension pages may read monitored-chat status.");
   try {
     await registryReady;
     await mutationQueue;
-    await automation.ready();
+    await monitoring.ready();
     const session = registry.getTab(tabId);
-    const automationStatus = await automation.status(tabId);
+    const status = await monitoring.status(tabId);
     const response: PanelStatusResponse = {
       type: "background:status",
       protocolVersion: PROTOCOL_VERSION,
@@ -254,38 +252,45 @@ async function handlePanelStatusRequest(tabId: number, sender: chrome.runtime.Me
         controlEligibility: session.controlEligibility,
         lastSeenAt: session.lastSeenAt,
       }),
-      ...(automationStatus.policy === undefined ? {} : { automationPolicy: automationStatus.policy }),
-      ...(automationStatus.runtime === undefined ? {} : { automationRuntime: automationStatus.runtime }),
+      ...(status.policy === undefined ? {} : { monitoringPolicy: status.policy }),
+      ...(status.runtime === undefined ? {} : { monitoringRuntime: status.runtime }),
     };
     return response;
   } catch {
-    return protocolError("STORAGE_FAILURE", "Unable to read session/automation state.");
+    return protocolError("STORAGE_FAILURE", "Unable to read session/monitoring state.");
   }
 }
 
+function redactProviderSettings(settings: ProviderSettingsState): ProviderSettingsResponse["providers"] {
+  return {
+    profiles: settings.profiles.map(redactProviderProfile),
+    order: [...settings.order],
+  };
+}
+
 async function handleOverview(sender: chrome.runtime.MessageSender): Promise<GuardianResponse> {
-  if (!trustedExtensionSender(sender)) return protocolError("INVALID_SENDER", "Only trusted extension pages may read the management overview.");
+  if (!trustedExtensionSender(sender)) return protocolError("INVALID_SENDER", "Only trusted extension pages may read the monitoring overview.");
   try {
     await registryReady;
     await mutationQueue;
-    await automation.ready();
-    const policyState = automation.policySnapshot();
-    const providerSettings = await automation.providerSettings();
+    await monitoring.ready();
+    const policyState = monitoring.policySnapshot();
+    const providerSettings = await monitoring.providerSettings();
     const chats: ManagedChatStatus[] = [];
     for (const session of registry.list()) {
-      const status = await automation.status(session.tabId);
-      const overrides = session.conversationId === undefined
-        ? undefined
-        : policyState.chats.find((chat) => chat.conversationId === session.conversationId);
+      if (session.conversationId === undefined) continue;
+      const overrides = policyState.chats.find((chat) => chat.conversationId === session.conversationId);
+      if (overrides?.enabled !== true) continue;
+      const status = await monitoring.status(session.tabId);
       chats.push({
         tabId: session.tabId,
-        ...(session.conversationId === undefined ? {} : { conversationId: session.conversationId }),
+        conversationId: session.conversationId,
         routeKey: session.routeKey,
         controlEligibility: session.controlEligibility,
         lastSeenAt: session.lastSeenAt,
         ...(session.observation?.pageTitle === undefined ? {} : { pageTitle: session.observation.pageTitle }),
         ...(session.observation === undefined ? {} : { generation: session.observation.generation }),
-        ...(overrides === undefined ? {} : { overrides: structuredClone(overrides) }),
+        overrides: structuredClone(overrides),
         ...(status.policy === undefined ? {} : { policy: status.policy }),
         ...(status.runtime === undefined ? {} : { runtime: status.runtime }),
       });
@@ -294,33 +299,24 @@ async function handleOverview(sender: chrome.runtime.MessageSender): Promise<Gua
       type: "background:overview",
       protocolVersion: PROTOCOL_VERSION,
       policyRevision: policyState.revision,
-      emergencyPaused: policyState.emergencyPaused,
       defaults: policyState.defaults,
       chats,
       providers: redactProviderSettings(providerSettings),
-      audit: automation.auditHistory(80),
+      events: monitoring.history(80),
     };
     return response;
   } catch {
-    return protocolError("STORAGE_FAILURE", "Unable to read the management overview.");
+    return protocolError("STORAGE_FAILURE", "Unable to read the monitoring overview.");
   }
 }
 
-function policyResponse(tabId?: number): AutomationPolicyResponse {
-  const state = automation.policySnapshot();
+function monitoringPolicyResponse(tabId?: number): MonitoringPolicyResponse {
+  const state = monitoring.policySnapshot();
   return {
-    type: "background:automation-policy",
+    type: "background:monitoring-policy",
     protocolVersion: PROTOCOL_VERSION,
     revision: state.revision,
-    emergencyPaused: state.emergencyPaused,
     ...(tabId === undefined ? {} : { tabId }),
-  };
-}
-
-function redactProviderSettings(settings: ProviderSettingsState): ProviderSettingsResponse["providers"] {
-  return {
-    profiles: settings.profiles.map(redactProviderProfile),
-    order: [...settings.order],
   };
 }
 
@@ -332,54 +328,57 @@ function providerResponse(settings: ProviderSettingsState): ProviderSettingsResp
   };
 }
 
-async function handlePolicyUpdate(message: PanelAutomationPolicyUpdate, sender: chrome.runtime.MessageSender): Promise<GuardianResponse> {
-  if (!trustedExtensionSender(sender)) return protocolError("INVALID_SENDER", "Only trusted extension pages may change automation policy.");
+async function handleMonitoringPolicyUpdate(message: PanelMonitoringPolicyUpdate, sender: chrome.runtime.MessageSender): Promise<GuardianResponse> {
+  if (!trustedExtensionSender(sender)) return protocolError("INVALID_SENDER", "Only trusted extension pages may change monitoring policy.");
   try {
     await registryReady;
     await mutationQueue;
     const current = registry.getTab(message.tabId);
     if (current?.conversationId !== message.conversationId) {
-      return protocolError("INVALID_MESSAGE", "Tab conversation identity changed before the policy update.");
+      return protocolError("INVALID_MESSAGE", "Tab conversation identity changed before the monitoring update.");
     }
-    const policy = await automation.updateChat(message.tabId, message.conversationId, message.patch);
-    const status = await automation.status(message.tabId);
-    const response = policyResponse(message.tabId);
+    const policy = await monitoring.updateChat(message.tabId, message.conversationId, message.patch);
+    const status = await monitoring.status(message.tabId);
+    const response = monitoringPolicyResponse(message.tabId);
     response.policy = policy;
     if (status.runtime !== undefined) response.runtime = status.runtime;
     return response;
   } catch {
-    const current = registry.getTab(message.tabId);
-    if (current?.conversationId !== message.conversationId) {
-      return protocolError("INVALID_MESSAGE", "Tab conversation identity changed before the policy update.");
-    }
-    return protocolError("STORAGE_FAILURE", "Unable to persist chat automation policy.");
+    return protocolError("STORAGE_FAILURE", "Unable to persist chat monitoring policy.");
   }
 }
 
-async function handleDefaultsUpdate(message: PanelAutomationDefaultsUpdate, sender: chrome.runtime.MessageSender): Promise<GuardianResponse> {
-  if (!trustedExtensionSender(sender)) return protocolError("INVALID_SENDER", "Only trusted extension pages may change automation defaults.");
+async function handleMonitoringDefaultsUpdate(message: PanelMonitoringDefaultsUpdate, sender: chrome.runtime.MessageSender): Promise<GuardianResponse> {
+  if (!trustedExtensionSender(sender)) return protocolError("INVALID_SENDER", "Only trusted extension pages may change monitoring defaults.");
   try {
-    await automation.updateDefaults(message.patch);
-    return policyResponse();
+    await monitoring.updateDefaults(message.patch);
+    return monitoringPolicyResponse();
   } catch {
-    return protocolError("STORAGE_FAILURE", "Unable to persist automation defaults.");
+    return protocolError("STORAGE_FAILURE", "Unable to persist monitoring defaults.");
   }
 }
 
-async function handleEmergencyPauseUpdate(message: PanelEmergencyPauseUpdate, sender: chrome.runtime.MessageSender): Promise<GuardianResponse> {
-  if (!trustedExtensionSender(sender)) return protocolError("INVALID_SENDER", "Only trusted extension pages may change emergency pause.");
+async function handleMonitoringChatsReset(sender: chrome.runtime.MessageSender): Promise<GuardianResponse | MonitoringChatsResetResponse> {
+  if (!trustedExtensionSender(sender)) return protocolError("INVALID_SENDER", "Only trusted extension pages may reset monitored chats.");
   try {
-    await automation.setEmergencyPaused(message.paused);
-    return policyResponse();
+    await registryReady;
+    await mutationQueue;
+    const result = await monitoring.resetChats();
+    return {
+      type: "background:monitoring-chats-reset",
+      protocolVersion: PROTOCOL_VERSION,
+      revision: result.state.revision,
+      cleared: result.cleared,
+    };
   } catch {
-    return protocolError("STORAGE_FAILURE", "Unable to persist emergency-pause state.");
+    return protocolError("STORAGE_FAILURE", "Unable to reset monitored chats.");
   }
 }
 
 async function handleProviderProfileUpsert(message: PanelProviderProfileUpsert, sender: chrome.runtime.MessageSender): Promise<GuardianResponse> {
   if (!trustedExtensionSender(sender)) return protocolError("INVALID_SENDER", "Only trusted extension pages may change provider settings.");
   try {
-    const saved = await automation.upsertProviderProfile(message.profile, message.makePrimary ?? false);
+    const saved = await monitoring.upsertProviderProfile(message.profile, message.makePrimary ?? false);
     return providerResponse(saved);
   } catch (error) {
     if (error instanceof ProviderConfigurationError) return protocolError("INVALID_MESSAGE", error.message);
@@ -390,7 +389,7 @@ async function handleProviderProfileUpsert(message: PanelProviderProfileUpsert, 
 async function handleProviderModelCatalog(message: PanelProviderModelCatalogRequest, sender: chrome.runtime.MessageSender): Promise<GuardianResponse> {
   if (!trustedExtensionSender(sender)) return protocolError("INVALID_SENDER", "Only trusted extension pages may load provider models.");
   try {
-    const models = await automation.providerModelCatalog(message.spec);
+    const models = await monitoring.providerModelCatalog(message.spec);
     return {
       type: "background:provider-model-catalog",
       protocolVersion: PROTOCOL_VERSION,
@@ -411,7 +410,7 @@ async function handleProviderClassifierReadiness(
     return protocolError("INVALID_SENDER", "Only trusted extension pages may test provider classifier readiness.");
   }
   try {
-    const settings = await automation.providerSettings();
+    const settings = await monitoring.providerSettings();
     const profile = settings.profiles.find((candidate) => candidate.id === message.providerId);
     if (profile === undefined) return protocolError("INVALID_MESSAGE", "The selected provider profile is not configured.");
     return {
@@ -427,8 +426,7 @@ async function handleProviderClassifierReadiness(
 async function handleProviderProfileRemove(message: PanelProviderProfileRemove, sender: chrome.runtime.MessageSender): Promise<GuardianResponse> {
   if (!trustedExtensionSender(sender)) return protocolError("INVALID_SENDER", "Only trusted extension pages may change provider settings.");
   try {
-    const saved = await automation.removeProviderProfile(message.providerId);
-    return providerResponse(saved);
+    return providerResponse(await monitoring.removeProviderProfile(message.providerId));
   } catch {
     return protocolError("STORAGE_FAILURE", "Unable to remove provider profile.");
   }
@@ -437,20 +435,20 @@ async function handleProviderProfileRemove(message: PanelProviderProfileRemove, 
 async function handleProviderOrderUpdate(message: PanelProviderOrderUpdate, sender: chrome.runtime.MessageSender): Promise<GuardianResponse> {
   if (!trustedExtensionSender(sender)) return protocolError("INVALID_SENDER", "Only trusted extension pages may change provider settings.");
   try {
-    const saved = await automation.updateProviderOrder(message.order);
-    return providerResponse(saved);
+    return providerResponse(await monitoring.updateProviderOrder(message.order));
   } catch {
     return protocolError("STORAGE_FAILURE", "Unable to persist provider priority.");
   }
 }
 
-async function handleAuditClear(sender: chrome.runtime.MessageSender): Promise<GuardianResponse> {
-  if (!trustedExtensionSender(sender)) return protocolError("INVALID_SENDER", "Only trusted extension pages may clear audit history.");
+async function handleHistoryClear(sender: chrome.runtime.MessageSender): Promise<GuardianResponse> {
+  if (!trustedExtensionSender(sender)) return protocolError("INVALID_SENDER", "Only trusted extension pages may clear monitoring history.");
   try {
-    await automation.clearAuditHistory();
-    return { type: "background:audit-cleared", protocolVersion: PROTOCOL_VERSION };
+    await monitoring.clearHistory();
+    const response: HistoryClearResponse = { type: "background:history-cleared", protocolVersion: PROTOCOL_VERSION };
+    return response;
   } catch {
-    return protocolError("STORAGE_FAILURE", "Unable to clear audit history.");
+    return protocolError("STORAGE_FAILURE", "Unable to clear monitoring history.");
   }
 }
 
@@ -461,31 +459,36 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (isContentUserInteraction(message)) { void handleInteraction(message, sender).then(sendResponse); return true; }
   if (isPanelStatusRequest(message)) { void handlePanelStatusRequest(message.tabId, sender).then(sendResponse); return true; }
   if (isPanelOverviewRequest(message)) { void handleOverview(sender).then(sendResponse); return true; }
-  if (isPanelAutomationPolicyUpdate(message)) { void handlePolicyUpdate(message, sender).then(sendResponse); return true; }
-  if (isPanelAutomationDefaultsUpdate(message)) { void handleDefaultsUpdate(message, sender).then(sendResponse); return true; }
-  if (isPanelEmergencyPauseUpdate(message)) { void handleEmergencyPauseUpdate(message, sender).then(sendResponse); return true; }
+  if (isPanelMonitoringPolicyUpdate(message)) { void handleMonitoringPolicyUpdate(message, sender).then(sendResponse); return true; }
+  if (isPanelMonitoringDefaultsUpdate(message)) { void handleMonitoringDefaultsUpdate(message, sender).then(sendResponse); return true; }
+  if (isPanelMonitoringChatsReset(message)) { void handleMonitoringChatsReset(sender).then(sendResponse); return true; }
   if (isPanelProviderProfileUpsert(message)) { void handleProviderProfileUpsert(message, sender).then(sendResponse); return true; }
   if (isPanelProviderModelCatalogRequest(message)) { void handleProviderModelCatalog(message, sender).then(sendResponse); return true; }
   if (isPanelProviderClassifierReadinessRequest(message)) { void handleProviderClassifierReadiness(message, sender).then(sendResponse); return true; }
   if (isPanelProviderProfileRemove(message)) { void handleProviderProfileRemove(message, sender).then(sendResponse); return true; }
   if (isPanelProviderOrderUpdate(message)) { void handleProviderOrderUpdate(message, sender).then(sendResponse); return true; }
-  if (isPanelAuditClear(message)) { void handleAuditClear(sender).then(sendResponse); return true; }
+  if (isPanelHistoryClear(message)) { void handleHistoryClear(sender).then(sendResponse); return true; }
   return false;
 });
 
+chrome.notifications.onClicked.addListener((notificationId) => {
+  const event = monitoring.history(200).find((candidate) => candidate.id === notificationId);
+  if (event === undefined) return;
+  void chrome.tabs.get(event.tabId).then(async (tab) => {
+    if (tab.windowId !== undefined) {
+      try { await chrome.windows.update(tab.windowId, { focused: true }); } catch { /* stale window */ }
+    }
+    try { await chrome.tabs.update(event.tabId, { active: true }); } catch { /* stale tab */ }
+  }).catch(() => undefined);
+});
+
 chrome.tabs.onRemoved.addListener((tabId) => {
-  void Promise.allSettled([
-    mutateTabLifecycle(tabId, "remove"),
-    automation.invalidateTab(tabId, "Tab closed; pending automation was cancelled."),
-  ]);
+  void mutateTabLifecycle(tabId, "remove");
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status === "loading") {
-    void Promise.allSettled([
-      mutateTabLifecycle(tabId, "invalidate"),
-      automation.invalidateTab(tabId, "Top-level loading invalidated pending automation."),
-    ]);
+    void mutateTabLifecycle(tabId, "invalidate");
     return;
   }
   if (changeInfo.status === "complete") {

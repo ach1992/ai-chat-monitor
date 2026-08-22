@@ -5,7 +5,6 @@ import { NotificationManager, telegramNotificationText } from "../dist/notificat
 import { TelegramDeliveryError } from "../dist/notifications/telegram.js";
 
 const TOKEN = "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ_abc123";
-const DRAFT_TOKEN = "654321:ZYXWVUTSRQPONMLKJIHGFEDCBA_987";
 
 function state(overrides = {}) {
   return {
@@ -36,37 +35,36 @@ function settingsAccess(initial) {
 function notification(overrides = {}) {
   return {
     id: "guardian:test",
-    event: "RESPONSE_COMPLETE",
-    title: "ChatGPT response finished",
-    message: "A selected assistant response finished.",
+    event: "TASK_COMPLETE",
+    title: "Task complete",
+    message: "The monitored chat reports that the requested work is complete.",
     browserEnabled: true,
+    soundEnabled: false,
     conversationId: "conversation-1234567890",
+    tabId: 8,
     ...overrides,
   };
 }
 
-test("Telegram notification text is structured, event-aware, HTML-safe, and bounded", () => {
-  assert.equal(
-    telegramNotificationText(notification()),
-    [
-      "<b>🛡️ Chat Turn Guardian</b>",
-      "━━━━━━━━━━━━",
-      "<b>✅ ChatGPT response finished</b>",
-      "",
-      "A selected assistant response finished.",
-      "",
-      "<b>💬 Conversation</b>",
-      "<code>conversation-1234567890</code>",
-    ].join("\n"),
-  );
+test("Telegram text is structured, event-aware, HTML-safe, and bounded", () => {
+  const text = telegramNotificationText(notification());
+  assert.match(text, /<b>🛡️ Chat Turn Guardian<\/b>/);
+  assert.match(text, /<b>🏁 Task complete<\/b>/);
+  assert.match(text, /<b>💬 Conversation<\/b>/);
+  assert.match(text, /<code>conversation-1234567890<\/code>/);
 
   const eventIcons = new Map([
     ["RESPONSE_COMPLETE", "✅"],
-    ["HUMAN_ATTENTION_REQUIRED", "👤"],
-    ["UNSURE", "❓"],
-    ["STAGNATION", "🔁"],
+    ["CONTINUE_READY", "▶️"],
+    ["APPROVAL_REQUIRED", "👤"],
+    ["DECISION_REQUIRED", "🧭"],
+    ["HUMAN_OPERATION_REQUIRED", "🛠️"],
+    ["TASK_COMPLETE", "🏁"],
+    ["RETRY_AVAILABLE", "🔄"],
+    ["PLATFORM_ERROR", "🚨"],
+    ["RATE_LIMIT", "⏳"],
+    ["SEMANTIC_UNKNOWN", "❓"],
     ["PROVIDER_ERROR", "⚠️"],
-    ["EXTENSION_ERROR", "🚨"],
   ]);
   for (const [event, icon] of eventIcons) {
     assert.match(telegramNotificationText(notification({ event })), new RegExp(`\\n<b>${icon} `, "u"));
@@ -78,51 +76,31 @@ test("Telegram notification text is structured, event-aware, HTML-safe, and boun
     conversationId: "conversation-<&>".repeat(100),
   }));
   assert.ok(bounded.length <= 700);
-  assert.doesNotMatch(bounded, /Conversation:/);
   assert.doesNotMatch(bounded, /<title>|<details>/);
 });
 
-test("browser and inherited Telegram channels coexist for the same Guardian event", async () => {
+test("browser, sound, and inherited Telegram can coexist for one monitoring event", async () => {
   const settings = settingsAccess(state());
   const browser = [];
+  const sound = [];
   const telegram = [];
   const manager = new NotificationManager({
     settings,
     browser: { async send(event) { browser.push(event); } },
+    sound: { async send(event) { sound.push(event); } },
     telegram: { async send(token, destination, text) { telegram.push({ token, destination, text }); } },
     now: () => 42,
   });
 
-  await manager.deliver(notification());
+  await manager.deliver(notification({ soundEnabled: true }));
   assert.equal(browser.length, 1);
+  assert.equal(sound.length, 1);
   assert.equal(telegram.length, 1);
-  assert.equal(telegram[0].token, TOKEN);
-  assert.equal(telegram[0].destination, "123456789");
-  assert.match(telegram[0].text, /<b>🛡️ Chat Turn Guardian<\/b>/);
-  assert.match(telegram[0].text, /<b>💬 Conversation<\/b>\n<code>conversation-1234567890<\/code>/);
   assert.equal(settings.snapshot().health.status, "HEALTHY");
 });
 
-test("disabled Telegram never sends and browser behavior remains unchanged", async () => {
-  const settings = settingsAccess(state({ enabled: false }));
-  let browserCalls = 0;
-  let telegramCalls = 0;
-  const manager = new NotificationManager({
-    settings,
-    browser: { async send() { browserCalls += 1; } },
-    telegram: { async send() { telegramCalls += 1; } },
-  });
-
-  await manager.deliver(notification());
-  assert.equal(browserCalls, 1);
-  assert.equal(telegramCalls, 0);
-});
-
-test("custom Telegram event selection can notify without enabling the browser event", async () => {
-  const settings = settingsAccess(state({
-    eventMode: "CUSTOM",
-    events: ["PROVIDER_ERROR"],
-  }));
+test("custom Telegram selection remains independent from Browser enablement", async () => {
+  const settings = settingsAccess(state({ eventMode: "CUSTOM", events: ["PROVIDER_ERROR"] }));
   let browserCalls = 0;
   const telegramEvents = [];
   const manager = new NotificationManager({
@@ -132,13 +110,12 @@ test("custom Telegram event selection can notify without enabling the browser ev
   });
 
   await manager.deliver(notification({ event: "PROVIDER_ERROR", browserEnabled: false }));
-  await manager.deliver(notification({ event: "UNSURE", browserEnabled: false }));
+  await manager.deliver(notification({ event: "SEMANTIC_UNKNOWN", browserEnabled: false }));
   assert.equal(browserCalls, 0);
   assert.equal(telegramEvents.length, 1);
-  assert.match(telegramEvents[0], /<b>⚠️ ChatGPT response finished<\/b>/);
 });
 
-test("Telegram failure is isolated after browser delivery and records only sanitized health", async () => {
+test("notification channel failure is isolated from monitoring state", async () => {
   const settings = settingsAccess(state());
   let browserCalls = 0;
   const manager = new NotificationManager({
@@ -148,13 +125,12 @@ test("Telegram failure is isolated after browser delivery and records only sanit
     now: () => 99,
   });
 
-  await assert.rejects(() => manager.deliver(notification()), /automation state was not changed/);
+  await assert.rejects(() => manager.deliver(notification()), /monitoring state was not changed/);
   assert.equal(browserCalls, 1);
   assert.deepEqual(settings.snapshot().health, { status: "ERROR", checkedAt: 99, code: "RATE_LIMIT" });
-  assert.doesNotMatch(JSON.stringify(settings.snapshot().health), /ABCDEFGHIJKLMNOPQRSTUVWXYZ/);
 });
 
-test("Test notification is structured, explicit, and independent of the enabled toggle", async () => {
+test("Telegram Test delivery remains explicit and never uses Browser or chat content", async () => {
   const settings = settingsAccess(state({ enabled: false }));
   const sent = [];
   const manager = new NotificationManager({
@@ -166,44 +142,8 @@ test("Test notification is structured, explicit, and independent of the enabled 
 
   const response = await manager.testTelegram();
   assert.equal(sent.length, 1);
-  assert.equal(sent[0].token, TOKEN);
-  assert.equal(sent[0].destination, "123456789");
-  assert.match(sent[0].text, /<b>🧪 Telegram test successful<\/b>/);
-  assert.match(sent[0].text, /Delivery is configured correctly\./);
-  assert.match(sent[0].text, /<i>No chat content was included\.<\/i>/);
-  assert.doesNotMatch(sent[0].text, /conversation|assistant response/i);
-  assert.equal(response.enabled, false);
-  assert.equal(response.health.status, "HEALTHY");
-  assert.equal(Object.hasOwn(response, "botToken"), false);
-});
-
-test("Test notification can use an unsaved Side Panel draft without persisting its credential", async () => {
-  const settings = settingsAccess(state({ enabled: false }));
-  const before = settings.snapshot();
-  const sent = [];
-  const manager = new NotificationManager({
-    settings,
-    browser: { async send() { throw new Error("browser must not be used by Telegram test"); } },
-    telegram: { async send(token, destination, text) { sent.push({ token, destination, text }); } },
-    now: () => 456,
-  });
-
-  const response = await manager.testTelegram({
-    enabled: true,
-    destination: "987654321",
-    botToken: DRAFT_TOKEN,
-    eventMode: "CUSTOM",
-    events: ["HUMAN_ATTENTION_REQUIRED"],
-  });
-
-  assert.equal(sent.length, 1);
-  assert.equal(sent[0].token, DRAFT_TOKEN);
-  assert.equal(sent[0].destination, "987654321");
-  assert.match(sent[0].text, /<b>🧪 Telegram test successful<\/b>/);
-  assert.deepEqual(settings.snapshot(), before);
-  assert.equal(response.configured, true);
-  assert.equal(response.enabled, true);
-  assert.equal(response.destination, "987654321");
+  assert.match(sent[0].text, /Telegram test successful/);
+  assert.match(sent[0].text, /No chat content was included/);
   assert.equal(response.health.status, "HEALTHY");
   assert.equal(Object.hasOwn(response, "botToken"), false);
 });

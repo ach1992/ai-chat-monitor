@@ -7,12 +7,24 @@ import type {
 } from "../notifications/types.js";
 
 const EVENTS: ReadonlyArray<{ value: GuardianNotificationEvent; label: string }> = [
-  { value: "RESPONSE_COMPLETE", label: "Assistant response completed" },
-  { value: "HUMAN_ATTENTION_REQUIRED", label: "HOLD / human attention required" },
-  { value: "UNSURE", label: "UNSURE" },
-  { value: "STAGNATION", label: "Stagnation" },
+  { value: "RESPONSE_COMPLETE", label: "Response completed" },
+  { value: "CONTINUE_READY", label: "Manual continuation available" },
+  { value: "APPROVAL_REQUIRED", label: "Approval required" },
+  { value: "DECISION_REQUIRED", label: "Material decision required" },
+  { value: "HUMAN_OPERATION_REQUIRED", label: "Human action / input required" },
+  { value: "TASK_COMPLETE", label: "Task complete" },
+  { value: "RETRY_AVAILABLE", label: "Retry available" },
+  { value: "PLATFORM_ERROR", label: "Platform error" },
+  { value: "NETWORK_ERROR", label: "Network error" },
+  { value: "RATE_LIMIT", label: "Rate limit" },
+  { value: "AUTH_REQUIRED", label: "Authentication required" },
+  { value: "VERIFICATION_REQUIRED", label: "Verification required" },
+  { value: "CONVERSATION_FULL", label: "Conversation limit reached" },
+  { value: "SEMANTIC_UNKNOWN", label: "Semantic state unknown" },
   { value: "PROVIDER_ERROR", label: "Provider error" },
-  { value: "EXTENSION_ERROR", label: "Extension / platform error" },
+  { value: "GENERATION_STALLED", label: "Generation stalled" },
+  { value: "REPEATED_RESPONSE", label: "Repeated response" },
+  { value: "EXTENSION_ERROR", label: "Extension error" },
 ];
 
 type TelegramErrorCode =
@@ -21,6 +33,9 @@ type TelegramErrorCode =
   | "PERMISSION_REQUIRED"
   | "DELIVERY_FAILED"
   | "STORAGE_FAILURE";
+
+type OperationTone = "working" | "success" | "error" | "warning";
+type ButtonActionState = "working" | "success" | "error";
 
 interface TelegramResponse {
   type: "background:telegram-settings" | "background:telegram-test-result" | "background:telegram-error";
@@ -56,7 +71,7 @@ function relocatePrivacyDisclosure(): void {
   if (existing instanceof HTMLDetailsElement) {
     details = existing;
   } else {
-    details = e("details", "panel-section disclosure privacy-disclosure");
+    details = e("details", "panel-section disclosure privacy-disclosure accent-slate");
     details.setAttribute("aria-labelledby", "privacy-disclosure-heading");
     const heading = existing.querySelector<HTMLElement>(".section-heading");
     const summary = e("summary", "section-heading");
@@ -92,7 +107,7 @@ function buildSection(): {
   save: HTMLButtonElement;
   status: HTMLElement;
 } {
-  const root = e("details", "panel-section disclosure");
+  const root = e("details", "panel-section disclosure accent-blue");
   const summary = e("summary", "section-heading");
   const title = e("div");
   title.append(e("p", "eyebrow", "Notifications"), e("h2", undefined, "Telegram"));
@@ -112,7 +127,7 @@ function buildSection(): {
   stateRow.append(configured, enabledState, health);
   root.append(stateRow);
 
-  const status = e("p", "meta telegram-operation-status");
+  const status = e("p", "operation-status telegram-operation-status");
   status.setAttribute("aria-live", "polite");
   root.append(status);
 
@@ -147,7 +162,7 @@ function buildSection(): {
   const eventMode = e("select");
   const inherit = e("option");
   inherit.value = "INHERIT";
-  inherit.textContent = "Inherit Guardian notification events";
+  inherit.textContent = "Inherit Browser notification events";
   const custom = e("option");
   custom.value = "CUSTOM";
   custom.textContent = "Use Telegram-specific event selection";
@@ -170,17 +185,13 @@ function buildSection(): {
   customEvents.append(grid);
 
   const help = e("div", "wide override-note");
-  help.textContent = "Setup: create a bot with @BotFather, start/contact the bot or add it to the destination so it can send there, then enter the token and Chat ID here. The token stays in trusted extension storage. Telegram v1 receives only bounded Guardian notification metadata (event title/reason and a bounded conversation identifier when available); it never sends full ChatGPT messages and accepts no inbound commands.";
+  help.textContent = "Setup: create a bot with @BotFather, start/contact the bot or add it to the destination so it can send there, then enter the token and Chat ID here. The token stays in trusted extension storage. Telegram receives only bounded Guardian notification metadata by default; it never sends full ChatGPT messages and accepts no inbound commands.";
 
   const actions = e("div", "wide form-actions telegram-actions");
-  actions.style.gap = "0.5rem";
-  actions.style.flexWrap = "wrap";
   const test = e("button", "secondary", "Test notification");
   test.type = "button";
-  test.style.flex = "1 1 8rem";
   const save = e("button", undefined, "Save Telegram settings");
   save.type = "submit";
-  save.style.flex = "1 1 10rem";
   actions.append(test, save);
 
   form.append(enabledLabel, destinationLabel, tokenLabel, modeLabel, customEvents, help, actions);
@@ -198,8 +209,23 @@ relocatePrivacyDisclosure();
 let busy = false;
 let dirty = false;
 
-function setStatus(message: string): void {
+function setStatus(message: string, tone?: OperationTone): void {
   ui.status.textContent = message;
+  if (tone === undefined) delete ui.status.dataset.tone;
+  else ui.status.dataset.tone = tone;
+}
+
+function setButtonState(button: HTMLButtonElement, state: ButtonActionState | undefined, label?: string): void {
+  if (state === undefined) delete button.dataset.actionState;
+  else button.dataset.actionState = state;
+  if (label !== undefined) button.textContent = label;
+}
+
+function flashButton(button: HTMLButtonElement, state: Exclude<ButtonActionState, "working">, label: string, restoreLabel: string): void {
+  setButtonState(button, state, label);
+  window.setTimeout(() => {
+    if (button.dataset.actionState === state) setButtonState(button, undefined, restoreLabel);
+  }, 1_600);
 }
 
 function setBusy(value: boolean): void {
@@ -221,7 +247,7 @@ function renderBadges(settings: RedactedTelegramSettings): void {
   ui.enabledState.textContent = settings.enabled ? "Enabled" : "Disabled";
   ui.enabledState.dataset.tone = settings.enabled ? "ok" : "warn";
   ui.health.textContent = healthText(settings);
-  ui.health.dataset.tone = settings.health.status === "HEALTHY" ? "ok" : settings.health.status === "ERROR" ? "warn" : "";
+  ui.health.dataset.tone = settings.health.status === "HEALTHY" ? "ok" : settings.health.status === "ERROR" ? "danger" : "muted";
 }
 
 function renderForm(settings: RedactedTelegramSettings): void {
@@ -258,60 +284,60 @@ function collectMutation(): TelegramSettingsMutation {
 
 async function send(request: object): Promise<RedactedTelegramSettings> {
   const response = await chrome.runtime.sendMessage<TelegramResponse>(request);
+  if (response.protocolVersion !== PROTOCOL_VERSION) throw new TelegramPanelError("Telegram response protocol mismatch.");
   if (response.type === "background:telegram-error") {
     throw new TelegramPanelError(response.message ?? "Telegram operation failed.", response.code);
   }
-  if (response.telegram === undefined) throw new TelegramPanelError("Guardian returned an unexpected Telegram response.");
+  if (response.telegram === undefined) throw new TelegramPanelError("Telegram response was incomplete.");
   return response.telegram;
 }
 
-async function requestTelegramPermission(): Promise<boolean> {
+async function requestPermissionIfNeeded(): Promise<boolean> {
+  const hasPermission = await chrome.permissions.contains({ origins: [TELEGRAM_ORIGIN_PATTERN] });
+  if (hasPermission) return true;
   return chrome.permissions.request({ origins: [TELEGRAM_ORIGIN_PATTERN] });
 }
 
-async function refresh(allowWhileBusy = false): Promise<void> {
-  if (busy && !allowWhileBusy) return;
+async function refresh(): Promise<void> {
+  if (busy) return;
   try {
     const settings = await send({ type: "panel:telegram-settings-request", protocolVersion: PROTOCOL_VERSION });
     render(settings, !dirty);
   } catch (error) {
-    setStatus(error instanceof Error ? error.message : "Telegram settings are unavailable.");
+    setStatus(error instanceof Error ? error.message : "Unable to load Telegram settings.", "error");
   }
 }
 
-function operationError(error: unknown, fallback: string): string {
-  if (error instanceof TelegramPanelError && error.code !== undefined) return `${error.message} (${error.code})`;
-  return error instanceof Error ? error.message : fallback;
+for (const field of [ui.enabled, ui.destination, ui.token, ui.eventMode, ...ui.eventInputs]) {
+  field.addEventListener("input", () => { dirty = true; });
+  field.addEventListener("change", () => {
+    dirty = true;
+    ui.customEvents.disabled = ui.eventMode.value !== "CUSTOM";
+  });
 }
-
-ui.form.addEventListener("input", () => {
-  dirty = true;
-});
-
-ui.form.addEventListener("change", () => {
-  dirty = true;
-});
-
-ui.eventMode.addEventListener("change", () => {
-  ui.customEvents.disabled = ui.eventMode.value !== "CUSTOM";
-});
 
 ui.form.addEventListener("submit", (event) => {
   event.preventDefault();
   if (busy) return;
-  const mutation = collectMutation();
-  setBusy(true);
-  setStatus("Saving Telegram settings...");
   void (async () => {
+    setBusy(true);
+    setButtonState(ui.save, "working", "Saving…");
+    setStatus("Saving Telegram settings…", "working");
     try {
-      if (mutation.enabled && !await requestTelegramPermission()) {
-        throw new TelegramPanelError("Telegram host access was not granted; settings were not enabled.", "PERMISSION_REQUIRED");
+      if (ui.enabled.checked && !await requestPermissionIfNeeded()) {
+        throw new TelegramPanelError("Telegram host permission was not granted.", "PERMISSION_REQUIRED");
       }
-      const settings = await send({ type: "panel:telegram-settings-update", protocolVersion: PROTOCOL_VERSION, settings: mutation });
+      const settings = await send({
+        type: "panel:telegram-settings-update",
+        protocolVersion: PROTOCOL_VERSION,
+        settings: collectMutation(),
+      });
       render(settings, true);
-      setStatus("Telegram settings saved. Stored bot token remains hidden.");
+      setStatus("Telegram settings saved.", "success");
+      flashButton(ui.save, "success", "Saved ✓", "Save Telegram settings");
     } catch (error) {
-      setStatus(operationError(error, "Telegram settings could not be saved."));
+      setStatus(error instanceof Error ? error.message : "Unable to save Telegram settings.", "error");
+      flashButton(ui.save, "error", "Save failed", "Save Telegram settings");
     } finally {
       setBusy(false);
     }
@@ -320,35 +346,30 @@ ui.form.addEventListener("submit", (event) => {
 
 ui.test.addEventListener("click", () => {
   if (busy) return;
-  const mutation = collectMutation();
-  const testingDraft = dirty;
-  setBusy(true);
-  setStatus("Sending a bounded Telegram test notification from the current form...");
   void (async () => {
+    setBusy(true);
+    setButtonState(ui.test, "working", "Sending…");
+    setStatus("Sending Telegram test notification…", "working");
     try {
-      if (!await requestTelegramPermission()) {
-        throw new TelegramPanelError("Telegram host access was not granted.", "PERMISSION_REQUIRED");
+      if (!await requestPermissionIfNeeded()) {
+        throw new TelegramPanelError("Telegram host permission was not granted.", "PERMISSION_REQUIRED");
       }
-      await send({
+      const settings = await send({
         type: "panel:telegram-test-notification",
         protocolVersion: PROTOCOL_VERSION,
-        settings: mutation,
+        settings: collectMutation(),
       });
-      await refresh(true);
-      setStatus(testingDraft
-        ? "Telegram test notification delivered from the current form. Save settings to keep these values."
-        : "Telegram test notification delivered successfully.");
+      render(settings, false);
+      setStatus("Telegram test notification delivered.", "success");
+      flashButton(ui.test, "success", "Delivered ✓", "Test notification");
     } catch (error) {
-      await refresh(true);
-      setStatus(operationError(error, "Telegram test delivery failed."));
+      setStatus(error instanceof Error ? error.message : "Telegram test notification failed.", "error");
+      flashButton(ui.test, "error", "Test failed", "Test notification");
     } finally {
       setBusy(false);
     }
   })();
 });
 
-document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) void refresh();
-});
-
 void refresh();
+window.setInterval(() => { void refresh(); }, 15_000);

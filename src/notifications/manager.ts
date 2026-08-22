@@ -5,6 +5,7 @@ import {
   resolveTelegramSettingsMutation,
   type TelegramConfigurationIdentity,
 } from "./settings.js";
+import { SoundNotificationChannel } from "./sound.js";
 import {
   TelegramBotApiTransport,
   TelegramDeliveryError,
@@ -19,7 +20,7 @@ import type {
   TelegramSettingsState,
 } from "./types.js";
 
-const NOTIFICATION_ICON = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAACmklEQVR4nO3byVEjQQAF0c94ACfGAvDfmvGA27jAHAgCNGqhXqpry0wH1NH/aYno0sPj88t7DNuv1hdgbRMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBVOrv25/Wl7CYACr0OX6PCARwcv+P3hsCAZzYrbF7QiCAk7o3ci8IBHBCa8ftAYEACrd11NYIBFCwvWO2RCCAQh0dsRUCARSoxHhPv18LXMn2BHCwkcdPBHCo0cdPBLC7GcZPBLCrWcZPBLC5mcZPBLCp2cZPBLC6GcdPBLCqWcdPBHC3mcdPBPBjs4+fCOBmhPETASxGGT8RwFWk8RMBXEQbP+kYQO3n48Txk04B1D5HTx0/6RBA7XP05PGTzgDUPkdPHz/pCEDtc/SO/1EXAGqfo3f8r5oDqH2O3vEvawqg9jl6x7+uGYDa72THX64ZgBI3s+ZvhxnHTxp/BdRA4Pg/1/xH4JkIHP9+zQEk5yBw/HV1ASApi8Dx1/fw+Pzy3voivtf6//IJZ/yko0+Az1rf/NavX7vuACTtRqCNn3QKIKk/BnH8pGMASb1RqOMnnQNIzh+HPH4yAIDkvJHo4yeDAEjKj+X4Hw0DICk3muN/NRSA5Ph4jn/ZcACS/SM6/nVDAki2j+n4yw0LIFk/quPfrruHQXtbeojk8PebBoDta+ivADueAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOD9A59V1Pv7P/C7AAAAAElFTkSuQmCC";
+const NOTIFICATION_ICON = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAACmklEQVR4nO3byVEjQQAF0c94ACfGAvDfmvGA27jAHAgCNGqhXqpry0wH1NH/aYno0sPj88t7DNuv1hdgbRMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBVOrv25/Wl7CYACr0OX6PCARwcv+P3hsCAZzYrbF7QiCAk7o3ci8IBHBCa8ftAYEACrd11NYIBFCwvWO2RCCAQh0dsRUCARSoxHhPv18LXMn2BHCwkcdPBHCo0cdPBLC7GcZPBLCrWcZPBLC5mcZPBLCp2cZPBLC6GcdPBLCqWcdPBHC3mcdPBPBjs4+fCOBmhPETASxGGT8RwFWk8RMBXEQbP+kYQO3n48Txk04B1D5HTx0/6RBA7XP05PGTzgDUPkdPHz/pCEDtc/SO/1EXAGqfo3f8r5oDqH2O3vEvawqg9jl6x7+uGYDa72THX64ZgBI3s+ZvhxnHTxp/BdRA4Pg/1/xH4JkIHP9+zQEk5yBw/HV1ASApi8Dx1/fw+Pzy3voivtf6//IJZ/yko0+Az1rf/NavX7vuACTtRqCNn3QKIKk/BnH8pGMASb1RqOMnnQNIzh+HPH4yAIDkvJHo4yeDAEjKj+X4Hw0DICk3muN/NRSA5Ph4jn/ZcACS/SM6/nVDAki2j+n4yw0LIFk/quPfrruHQXtbeojk8PebBoDta+ivADueAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOD9A59V1Pv7P/C7AAAAAElFTkSuQmCC";
 const MAX_TELEGRAM_MESSAGE_LENGTH = 700;
 const TELEGRAM_DIVIDER = "━━━━━━━━━━━━";
 const MAX_TELEGRAM_TITLE_HTML_LENGTH = 140;
@@ -28,10 +29,22 @@ const MAX_TELEGRAM_CONVERSATION_HTML_LENGTH = 120;
 
 const TELEGRAM_EVENT_ICON: Record<GuardianNotification["event"], string> = {
   RESPONSE_COMPLETE: "✅",
-  HUMAN_ATTENTION_REQUIRED: "👤",
-  UNSURE: "❓",
-  STAGNATION: "🔁",
+  CONTINUE_READY: "▶️",
+  APPROVAL_REQUIRED: "👤",
+  DECISION_REQUIRED: "🧭",
+  HUMAN_OPERATION_REQUIRED: "🛠️",
+  TASK_COMPLETE: "🏁",
+  RETRY_AVAILABLE: "🔄",
+  PLATFORM_ERROR: "🚨",
+  NETWORK_ERROR: "🌐",
+  RATE_LIMIT: "⏳",
+  AUTH_REQUIRED: "🔐",
+  VERIFICATION_REQUIRED: "🛡️",
+  CONVERSATION_FULL: "📚",
+  SEMANTIC_UNKNOWN: "❓",
   PROVIDER_ERROR: "⚠️",
+  GENERATION_STALLED: "⏸️",
+  REPEATED_RESPONSE: "🔁",
   EXTENSION_ERROR: "🚨",
 };
 
@@ -48,6 +61,7 @@ export interface NotificationManagerOptions {
   settings: TelegramSettingsAccess;
   telegram: TelegramTransport;
   browser: NotificationChannel;
+  sound?: NotificationChannel;
   now?: () => number;
 }
 
@@ -164,12 +178,14 @@ export class NotificationManager {
   readonly #settings: TelegramSettingsAccess;
   readonly #telegram: TelegramTransport;
   readonly #browser: NotificationChannel;
+  readonly #sound: NotificationChannel | undefined;
   readonly #now: () => number;
 
   constructor(options: NotificationManagerOptions) {
     this.#settings = options.settings;
     this.#telegram = options.telegram;
     this.#browser = options.browser;
+    this.#sound = options.sound;
     this.#now = options.now ?? (() => Date.now());
   }
 
@@ -185,19 +201,15 @@ export class NotificationManager {
     let failed = false;
 
     if (notification.browserEnabled) {
-      try {
-        await this.#browser.send(notification);
-      } catch {
-        failed = true;
-      }
+      try { await this.#browser.send(notification); } catch { failed = true; }
+    }
+
+    if (notification.soundEnabled === true && this.#sound !== undefined) {
+      try { await this.#sound.send(notification); } catch { failed = true; }
     }
 
     let settings: TelegramSettingsState | undefined;
-    try {
-      settings = await this.#settings.load();
-    } catch {
-      failed = true;
-    }
+    try { settings = await this.#settings.load(); } catch { failed = true; }
 
     if (settings !== undefined && telegramSelected(settings, notification) && configured(settings)) {
       const identity = configurationIdentity(settings);
@@ -211,7 +223,7 @@ export class NotificationManager {
       }
     }
 
-    if (failed) throw new Error("One or more notification channels failed; automation state was not changed.");
+    if (failed) throw new Error("One or more notification channels failed; monitoring state was not changed.");
   }
 
   async testTelegram(mutation?: TelegramSettingsMutation): Promise<RedactedTelegramSettings> {
@@ -226,11 +238,7 @@ export class NotificationManager {
     const identity = configurationIdentity(settings);
     const shouldPersistHealth = sameConfiguration(stored, settings);
     try {
-      await this.#telegram.send(
-        settings.botToken,
-        settings.destination,
-        telegramTestNotificationText(),
-      );
+      await this.#telegram.send(settings.botToken, settings.destination, telegramTestNotificationText());
       const health: TelegramHealth = { status: "HEALTHY", checkedAt: this.#now() };
       if (shouldPersistHealth) {
         const persisted = await this.#saveHealth(health, identity);
@@ -253,7 +261,6 @@ export class NotificationManager {
     try {
       return await this.#settings.updateHealth(health, expectedConfiguration);
     } catch {
-      // Health persistence is observational and must not change delivery or chat automation authority.
       return undefined;
     }
   }
@@ -267,6 +274,7 @@ export function defaultNotificationManager(): NotificationManager {
       settings: new TelegramSettingsStore(),
       telegram: new TelegramBotApiTransport(),
       browser: { send: browserNotification },
+      sound: new SoundNotificationChannel(),
     });
   }
   return defaultManager;

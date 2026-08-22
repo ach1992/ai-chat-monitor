@@ -10,6 +10,14 @@ export type ConversationProtocolDecision =
   | "RATE_LIMIT"
   | "UNSURE";
 
+export type ConversationStatusMarkerHealth = "DETECTED" | "LEGACY" | "MISSING" | "MALFORMED";
+
+export interface ConversationStatusMarkerResult {
+  health: ConversationStatusMarkerHealth;
+  decision?: ConversationProtocolDecision;
+  prefix?: typeof GUARDIAN_STATUS_PREFIX | typeof LEGACY_GUARDIAN_STATUS_PREFIX;
+}
+
 interface ConversationProtocolStatus { decision: ConversationProtocolDecision; }
 
 const ALLOWED_DECISIONS = new Set<ConversationProtocolDecision>([
@@ -23,43 +31,12 @@ const ALLOWED_DECISIONS = new Set<ConversationProtocolDecision>([
   "UNSURE",
 ]);
 
-export const CONVERSATION_PROTOCOL_VERSION = 1;
-export const GUARDIAN_STATUS_PREFIX = "CHAT_TURN_GUARDIAN_STATUS_V1=";
+export const GUARDIAN_STATUS_PREFIX = "CHAT_TURN_GUARDIAN_STATUS=";
+export const LEGACY_GUARDIAN_STATUS_PREFIX = "CHAT_TURN_GUARDIAN_STATUS_V1=";
 
-export const CONVERSATION_PROTOCOL_CONTINUE_RESPONSE =
-  "All right. Continue and complete the project. Do not stop unless you genuinely need human approval, a material decision, missing information or credentials, or a human-only action.";
-export const CONVERSATION_PROTOCOL_RECOVERY_RESPONSE =
-  "Check again to see whether the blocker has been resolved. If it has, continue and complete the project. Do not stop unless you genuinely need human approval, a material decision, missing information or credentials, or a human-only action.";
-export const CONVERSATION_PROTOCOL_UNSURE_RESPONSE =
-  "Check the work state again and return the status record once more.";
-
-export const DEFAULT_CONVERSATION_PROTOCOL_PROMPT = [
-  "[Chat Turn Guardian — Conversation Status Protocol]",
-  "",
-  "Purpose",
-  "This protocol must not change, restart, reframe, summarize, reprioritize, or continue the current task or project.",
-  "",
-  "This reply",
-  "- Remember the protocol for this conversation.",
-  "- Classify the work state immediately before this message.",
-  "- Reply with exactly one line and nothing else:",
-  'CHAT_TURN_GUARDIAN_STATUS_V1={"decision":"<VALUE>"}',
-  "",
-  "Future replies",
-  "- Answer normally without changing the project's direction, scope, priority, or plan.",
-  "- End with exactly one status record in the same format.",
-  "- Add nothing after it.",
-  "",
-  "Values",
-  "- CONTINUE — Work remains and can proceed autonomously.",
-  "- HOLD_APPROVAL — Human approval is required.",
-  "- HOLD_DECISION — A material human decision is required.",
-  "- HOLD_HUMAN_OPERATION — Human input, credentials, or action is required.",
-  "- COMPLETE — No work remains.",
-  "- PLATFORM_ERROR — The platform blocks progress.",
-  "- RATE_LIMIT — A rate limit blocks progress.",
-  "- UNSURE — The state is unclear.",
-].join("\n");
+function normalizeLines(raw: string): string[] {
+  return raw.replace(/\r\n?/g, "\n").trimEnd().split("\n");
+}
 
 function parseStatusJson(raw: string): ConversationProtocolStatus | undefined {
   const match = /^\{\s*"decision"\s*:\s*"([A-Z_]+)"\s*\}$/.exec(raw);
@@ -68,74 +45,109 @@ function parseStatusJson(raw: string): ConversationProtocolStatus | undefined {
   return { decision: decision as ConversationProtocolDecision };
 }
 
-function trailingStatus(raw: string): ConversationProtocolStatus | undefined {
+function markerOccurrences(raw: string): Array<{ prefix: string; index: number }> {
+  const occurrences: Array<{ prefix: string; index: number }> = [];
+  for (const prefix of [GUARDIAN_STATUS_PREFIX, LEGACY_GUARDIAN_STATUS_PREFIX] as const) {
+    let offset = 0;
+    while (offset < raw.length) {
+      const index = raw.indexOf(prefix, offset);
+      if (index < 0) break;
+      occurrences.push({ prefix, index });
+      offset = index + prefix.length;
+    }
+  }
+  return occurrences.sort((left, right) => left.index - right.index);
+}
+
+function markerAppearsInsideOpenFence(lines: string[], markerLineIndex: number): boolean {
+  let openFence: { char: "`" | "~"; length: number } | undefined;
+
+  for (let index = 0; index < markerLineIndex; index += 1) {
+    const line = lines[index] ?? "";
+    const match = /^\s*(`{3,}|~{3,})/.exec(line);
+    const token = match?.[1];
+    if (token === undefined) continue;
+
+    const char = token[0] as "`" | "~";
+    if (openFence === undefined) {
+      openFence = { char, length: token.length };
+      continue;
+    }
+
+    if (char === openFence.char && token.length >= openFence.length) openFence = undefined;
+  }
+
+  return openFence !== undefined;
+}
+
+export function inspectConversationStatusMarker(raw: string): ConversationStatusMarkerResult {
   const normalized = raw.replace(/\r\n?/g, "\n").trimEnd();
-  const markerCount = normalized.split(GUARDIAN_STATUS_PREFIX).length - 1;
-  if (markerCount !== 1) return undefined;
-  const markerIndex = normalized.lastIndexOf(GUARDIAN_STATUS_PREFIX);
-  const prefixText = normalized.slice(0, markerIndex);
-  const fenceCount = prefixText.match(/```/g)?.length ?? 0;
-  if (fenceCount % 2 !== 0) return undefined;
-  const json = normalized.slice(markerIndex + GUARDIAN_STATUS_PREFIX.length).trim();
-  return parseStatusJson(json);
+  if (normalized.length === 0) return { health: "MISSING" };
+
+  const occurrences = markerOccurrences(normalized);
+  if (occurrences.length === 0) return { health: "MISSING" };
+  if (occurrences.length !== 1) return { health: "MALFORMED" };
+
+  const lines = normalizeLines(normalized);
+  const terminalLine = lines.at(-1)?.trim() ?? "";
+  const occurrence = occurrences[0];
+  if (occurrence === undefined) return { health: "MALFORMED" };
+  const prefix = occurrence.prefix === GUARDIAN_STATUS_PREFIX
+    ? GUARDIAN_STATUS_PREFIX
+    : LEGACY_GUARDIAN_STATUS_PREFIX;
+
+  if (!terminalLine.startsWith(prefix)) return { health: "MALFORMED" };
+  const markerLineIndex = lines.length - 1;
+  if (markerAppearsInsideOpenFence(lines, markerLineIndex)) return { health: "MALFORMED" };
+
+  const status = parseStatusJson(terminalLine.slice(prefix.length).trim());
+  if (status === undefined) return { health: "MALFORMED" };
+
+  return {
+    health: prefix === GUARDIAN_STATUS_PREFIX ? "DETECTED" : "LEGACY",
+    decision: status.decision,
+    prefix,
+  };
 }
 
 export function conversationProtocolDecision(raw: string): ConversationProtocolDecision | undefined {
-  return trailingStatus(raw)?.decision;
-}
-
-export function conversationProtocolResponseText(
-  decision: ConversationProtocolDecision,
-): string | undefined {
-  switch (decision) {
-    case "CONTINUE":
-      return CONVERSATION_PROTOCOL_CONTINUE_RESPONSE;
-    case "PLATFORM_ERROR":
-    case "RATE_LIMIT":
-      return CONVERSATION_PROTOCOL_RECOVERY_RESPONSE;
-    case "UNSURE":
-      return CONVERSATION_PROTOCOL_UNSURE_RESPONSE;
-    default:
-      return undefined;
-  }
-}
-
-export function isRecoverableConversationProtocolClassification(
-  classification: ClassificationResult,
-): boolean {
-  return (
-    classification.source === "CONVERSATION_PROTOCOL" &&
-    classification.decision === "HOLD" &&
-    (classification.reasonCode === "PLATFORM_ERROR" || classification.reasonCode === "RATE_LIMIT")
-  );
+  return inspectConversationStatusMarker(raw).decision;
 }
 
 export function hasValidConversationProtocolStatus(raw: string): boolean {
-  return trailingStatus(raw) !== undefined;
+  const health = inspectConversationStatusMarker(raw).health;
+  return health === "DETECTED" || health === "LEGACY";
 }
 
 export function stripConversationProtocolStatus(raw: string): string {
-  if (trailingStatus(raw) === undefined) return raw;
-  const normalized = raw.replace(/\r\n?/g, "\n").trimEnd();
-  const markerIndex = normalized.lastIndexOf(GUARDIAN_STATUS_PREFIX);
-  return normalized.slice(0, markerIndex).trimEnd();
+  const marker = inspectConversationStatusMarker(raw);
+  if (marker.health !== "DETECTED" && marker.health !== "LEGACY") return raw;
+  const lines = normalizeLines(raw);
+  lines.pop();
+  return lines.join("\n").trimEnd();
 }
 
 export function parseConversationProtocolStatus(raw: string): ClassificationResult {
-  const response = trailingStatus(raw);
-  if (response === undefined || response.decision === "UNSURE") {
+  const marker = inspectConversationStatusMarker(raw);
+  if ((marker.health !== "DETECTED" && marker.health !== "LEGACY") || marker.decision === undefined || marker.decision === "UNSURE") {
     return {
       decision: "UNSURE",
       reasonCode: "AMBIGUOUS",
-      reason: "The conversation protocol status was missing, malformed, duplicated, or uncertain.",
+      reason: marker.health === "MISSING"
+        ? "No standalone terminal Guardian status marker was present."
+        : "The terminal Guardian status marker was malformed, ambiguous, or uncertain.",
       source: "CONVERSATION_PROTOCOL",
     };
   }
 
-  const reason = boundedReason("The assistant supplied a valid terminal conversation status.");
+  const reason = boundedReason(
+    marker.health === "LEGACY"
+      ? "The assistant supplied a valid legacy terminal Guardian status marker."
+      : "The assistant supplied a valid terminal Guardian status marker.",
+  );
   const common = { source: "CONVERSATION_PROTOCOL" as const, confidence: 1 };
 
-  switch (response.decision) {
+  switch (marker.decision) {
     case "CONTINUE":
       return { decision: "CONTINUE", reasonCode: "NEEDLESS_TURN_BOUNDARY", reason, ...common };
     case "HOLD_APPROVAL":
@@ -154,7 +166,7 @@ export function parseConversationProtocolStatus(raw: string): ClassificationResu
       return {
         decision: "UNSURE",
         reasonCode: "AMBIGUOUS",
-        reason: "The conversation protocol status was uncertain.",
+        reason: "The Guardian status marker could not be resolved.",
         source: "CONVERSATION_PROTOCOL",
       };
   }

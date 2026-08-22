@@ -1,9 +1,21 @@
 export type GuardianNotificationEvent =
   | "RESPONSE_COMPLETE"
-  | "HUMAN_ATTENTION_REQUIRED"
-  | "UNSURE"
-  | "STAGNATION"
+  | "CONTINUE_READY"
+  | "APPROVAL_REQUIRED"
+  | "DECISION_REQUIRED"
+  | "HUMAN_OPERATION_REQUIRED"
+  | "TASK_COMPLETE"
+  | "RETRY_AVAILABLE"
+  | "PLATFORM_ERROR"
+  | "NETWORK_ERROR"
+  | "RATE_LIMIT"
+  | "AUTH_REQUIRED"
+  | "VERIFICATION_REQUIRED"
+  | "CONVERSATION_FULL"
+  | "SEMANTIC_UNKNOWN"
   | "PROVIDER_ERROR"
+  | "GENERATION_STALLED"
+  | "REPEATED_RESPONSE"
   | "EXTENSION_ERROR";
 
 export interface GuardianNotification {
@@ -12,7 +24,10 @@ export interface GuardianNotification {
   title: string;
   message: string;
   browserEnabled: boolean;
+  soundEnabled?: boolean;
+  telegramInheritedEnabled?: boolean;
   conversationId?: string;
+  tabId?: number;
 }
 
 export interface NotificationChannel {

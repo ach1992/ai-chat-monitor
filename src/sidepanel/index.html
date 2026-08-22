@@ -9,136 +9,155 @@
   <body>
     <main class="shell">
       <header class="hero">
-        <div>
-          <p class="eyebrow">Chat supervision</p>
+        <div class="hero-copy">
+          <p class="eyebrow">Read-only chat monitor</p>
           <h1>Chat Turn Guardian</h1>
-          <p class="lede">Supervise selected ChatGPT conversations while preserving human control.</p>
+          <p class="lede">See what each monitored ChatGPT conversation is doing and get notified when it finishes, needs attention, or hits a platform problem.</p>
         </div>
         <div class="hero-actions">
-          <button type="button" class="secondary" data-refresh>Refresh status</button>
-          <button type="button" class="danger" data-pause-all>Pause All</button>
+          <button type="button" class="secondary compact-action" data-refresh>Refresh</button>
         </div>
       </header>
 
-      <section class="panel-section privacy-disclosure" aria-labelledby="privacy-disclosure-heading">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">Privacy &amp; data</p>
-            <h2 id="privacy-disclosure-heading">What Guardian processes</h2>
-          </div>
+      <section class="status-card" data-summary-card data-tone="info" aria-live="polite" aria-atomic="true">
+        <div class="status-card-icon" aria-hidden="true">●</div>
+        <div class="status-card-copy">
+          <strong data-status>Loading monitored chats…</strong>
+          <span data-details>Reading current ChatGPT state.</span>
         </div>
-        <p class="section-note">
-          Guardian reads page state and recent visible chat content on supported ChatGPT pages only to supervise selected conversations. Full chat transcripts are not stored. If you configure an AI provider, Guardian sends a minimized, secret-redacted recent context directly to that provider for classification. If you enable Telegram, Guardian sends only bounded notification metadata to Telegram; Telegram v1 never sends full ChatGPT messages or accepts remote-control commands.
-          <a href="https://github.com/ach1992/chat-turn-guardian/blob/main/PRIVACY.md" target="_blank" rel="noopener noreferrer">Read the privacy policy.</a>
-        </p>
       </section>
 
-      <section class="status-card" aria-live="polite" aria-atomic="true">
-        <strong data-status>Loading managed chats…</strong>
-        <span data-details>Reading the extension service worker.</span>
-      </section>
-
-      <section class="panel-section current-tab-section" aria-labelledby="current-tab-heading">
+      <section class="panel-section accent-info current-tab-section" aria-labelledby="current-tab-heading">
         <div class="section-heading">
           <div>
             <p class="eyebrow">Current tab</p>
-            <h2 id="current-tab-heading">Guardian for this tab</h2>
+            <h2 id="current-tab-heading">Monitor this chat</h2>
           </div>
         </div>
-        <p class="section-note">Use one ON/OFF control for the active ChatGPT tab. Guardian reconnects a stale supported tab as part of turning it on.</p>
+        <p class="section-note">Guardian only observes this ChatGPT page. It never writes to the composer or activates ChatGPT controls.</p>
         <div data-current-tab-live class="empty-state" aria-live="polite">Checking the active tab…</div>
-        <div data-current-tab class="current-tab-legacy" hidden></div>
       </section>
 
-      <details class="panel-section disclosure" aria-labelledby="chats-heading">
+      <details class="panel-section disclosure accent-violet" open aria-labelledby="status-protocol-heading">
         <summary class="section-heading">
           <div>
-            <p class="eyebrow">Advanced per-chat controls</p>
-            <h2 id="chats-heading">Open ChatGPT chats</h2>
+            <p class="eyebrow">Optional semantic status</p>
+            <h2 id="status-protocol-heading">Status protocol</h2>
+          </div>
+        </summary>
+        <p class="section-note">
+          Optional, but recommended for better semantic detection. Guardian still works when the marker is missing and falls back safely.
+        </p>
+        <div class="meta-row protocol-health-row">
+          <span class="badge" data-marker-health data-tone="muted">Not detected yet</span>
+        </div>
+
+        <div class="protocol-copy-grid">
+          <section class="protocol-box protocol-recommended">
+            <div class="protocol-box-head">
+              <div>
+                <p class="eyebrow">Account-wide</p>
+                <h3>Custom Instructions / Personalization</h3>
+              </div>
+              <span class="badge" data-tone="info">Recommended</span>
+            </div>
+            <p class="section-note">Best when you want compatible status metadata across normal chats. Strict-format replies may omit the marker.</p>
+            <button type="button" data-copy-custom>Copy Custom Instructions</button>
+            <details class="protocol-preview">
+              <summary>Preview instruction</summary>
+              <textarea data-custom-instructions readonly rows="8" spellcheck="false" aria-label="Custom Instructions protocol text"></textarea>
+            </details>
+          </section>
+
+          <section class="protocol-box">
+            <div class="protocol-box-head">
+              <div>
+                <p class="eyebrow">One chat</p>
+                <h3>Conversation start instruction</h3>
+              </div>
+              <span class="badge" data-tone="muted">Alternative</span>
+            </div>
+            <p class="section-note">Send this manually once near the start of one conversation when you do not want to change account-wide instructions.</p>
+            <button type="button" class="secondary" data-copy-chat>Copy chat instruction</button>
+            <details class="protocol-preview">
+              <summary>Preview instruction</summary>
+              <textarea data-chat-instruction readonly rows="8" spellcheck="false" aria-label="Per-chat protocol instruction"></textarea>
+            </details>
+          </section>
+        </div>
+        <p class="operation-status" data-copy-status aria-live="polite"></p>
+      </details>
+
+      <details class="panel-section disclosure accent-blue" aria-labelledby="notifications-heading">
+        <summary class="section-heading">
+          <div>
+            <p class="eyebrow">Browser &amp; sound</p>
+            <h2 id="notifications-heading">Notification defaults</h2>
+          </div>
+        </summary>
+        <p class="section-note">Choose which monitoring events create a Browser notification or play a local sound. Telegram can inherit Browser events or use its own selection.</p>
+        <form data-defaults-form class="form-grid">
+          <fieldset class="wide compact-fieldset">
+            <legend>Browser notifications</legend>
+            <div data-browser-events class="check-grid"></div>
+          </fieldset>
+          <fieldset class="wide compact-fieldset">
+            <legend>Local sound</legend>
+            <div data-sound-events class="check-grid"></div>
+          </fieldset>
+          <label>
+            <span>Generation stalled after (seconds)</span>
+            <input name="stallThresholdSeconds" type="number" min="30" max="3600" step="30" required />
+          </label>
+          <label class="checkbox-row">
+            <input name="suppressLowPriorityWhileFocused" type="checkbox" />
+            <span>Suppress low-priority alerts while this exact chat is focused</span>
+          </label>
+          <div class="wide form-actions">
+            <button type="submit" data-save-defaults>Save notification defaults</button>
+          </div>
+        </form>
+      </details>
+
+      <details class="panel-section disclosure accent-green" open aria-labelledby="chats-heading">
+        <summary class="section-heading">
+          <div>
+            <p class="eyebrow">Managed conversations</p>
+            <h2 id="chats-heading">Monitored ChatGPT chats</h2>
           </div>
           <span class="count-pill" data-chat-count>0</span>
         </summary>
-        <p class="section-note">Choose OBSERVE, AUTO, or NOTIFY_ONLY per conversation, adjust timing, and inspect OWNER/MIRROR isolation.</p>
+        <p class="section-note">Only chats with monitoring enabled are shown here. Turn monitoring on from Current tab to add a chat.</p>
+        <div class="section-toolbar">
+          <button type="button" class="secondary danger-outline small" data-reset-chats>Reset monitored chats</button>
+          <span class="operation-status compact-status" data-reset-status aria-live="polite"></span>
+        </div>
         <div data-chat-list class="chat-list"></div>
       </details>
 
-      <details class="panel-section disclosure" aria-labelledby="defaults-heading">
+      <details class="panel-section disclosure accent-amber" aria-labelledby="events-heading">
         <summary class="section-heading">
           <div>
-            <p class="eyebrow">Global policy</p>
-            <h2 id="defaults-heading">Defaults</h2>
+            <p class="eyebrow">Diagnostics</p>
+            <h2 id="events-heading">Recent monitoring events</h2>
           </div>
         </summary>
-        <form data-defaults-form class="form-grid">
-          <label>
-            <span>Settle delay (ms)</span>
-            <input name="settleDelayMs" type="number" min="0" max="60000" step="100" required />
-          </label>
-          <label>
-            <span>Continue delay (ms)</span>
-            <input name="continueDelayMs" type="number" min="0" max="60000" step="100" required />
-          </label>
-          <label>
-            <span>Cooldown (ms)</span>
-            <input name="cooldownMs" type="number" min="0" max="300000" step="100" required />
-          </label>
-          <label class="wide">
-            <span>Continuation text</span>
-            <input name="continuationText" type="text" maxlength="200" required />
-          </label>
-          <fieldset class="wide compact-fieldset">
-            <legend>Default notifications</legend>
-            <div data-default-notifications class="check-grid"></div>
-          </fieldset>
-          <div class="wide form-actions">
-            <button type="submit">Save defaults</button>
-          </div>
-        </form>
+        <div class="section-toolbar">
+          <button type="button" class="secondary small" data-history-clear>Clear event history</button>
+          <span class="operation-status compact-status" data-history-status aria-live="polite"></span>
+        </div>
+        <p class="section-note">This bounded timeline stores monitoring metadata, not full chat transcripts or credentials.</p>
+        <div data-event-list class="audit-list"></div>
       </details>
 
-      <details class="panel-section disclosure" aria-labelledby="reliability-heading">
+      <details class="panel-section disclosure accent-slate" aria-labelledby="providers-heading">
         <summary class="section-heading">
           <div>
-            <p class="eyebrow">Reliability</p>
-            <h2 id="reliability-heading">Loop protection &amp; audit</h2>
+            <p class="eyebrow">Optional fallback</p>
+            <h2 id="providers-heading">AI classifier providers</h2>
           </div>
         </summary>
-        <div class="secondary-section-actions">
-          <button type="button" class="secondary small" data-reliability-refresh>Refresh reliability</button>
-        </div>
-        <p class="section-note">Progress-aware stagnation protection runs before the separate hard safety fuse. Audit history is bounded and excludes full chat text and provider secrets.</p>
-        <form data-fuse-default-form class="form-grid">
-          <label class="wide">
-            <span>Global hard fuse (verified auto-continues)</span>
-            <input name="hardFuseMaxAutoContinues" type="number" min="5" max="500" step="1" required />
-          </label>
-          <div class="wide form-actions">
-            <button type="submit">Save hard fuse</button>
-          </div>
-        </form>
-        <div>
-          <p class="eyebrow">Per-chat hard fuse</p>
-          <div data-fuse-chat-list class="reliability-list"></div>
-        </div>
-        <div class="section-heading audit-heading">
-          <div>
-            <p class="eyebrow">Recent decisions</p>
-            <h3>Audit history</h3>
-          </div>
-          <button type="button" class="secondary small" data-audit-clear>Clear history</button>
-        </div>
-        <div data-audit-list class="audit-list"></div>
-        <p class="meta" data-reliability-status aria-live="polite"></p>
-      </details>
-
-      <details class="panel-section disclosure" aria-labelledby="providers-heading">
-        <summary class="section-heading">
-          <div>
-            <p class="eyebrow">AI classifier</p>
-            <h2 id="providers-heading">Providers</h2>
-          </div>
-        </summary>
-        <p class="section-note">Profiles are editable in place. Stored API keys stay in trusted extension storage and are never rendered back into this panel. When classification is needed, Guardian sends at most 4 recent turns and 8,000 characters after secret redaction directly to the selected HTTPS provider. Provider output remains advisory only.</p>
+        <p class="section-note">Providers are used only when page/UI evidence, a valid status marker, and strong local rules cannot resolve the semantic state. Context remains bounded and secret-redacted. Provider output can never control the ChatGPT page.</p>
 
         <div data-provider-manager-v2 class="provider-manager">
           <div class="section-heading provider-manager-heading">
@@ -182,26 +201,9 @@
             <div class="wide model-field">
               <label for="provider-model-v2">Model</label>
               <div class="model-combobox">
-                <input
-                  id="provider-model-v2"
-                  data-provider-model-v2
-                  type="text"
-                  maxlength="200"
-                  autocomplete="off"
-                  role="combobox"
-                  aria-autocomplete="list"
-                  aria-controls="provider-model-catalog-v2"
-                  aria-expanded="false"
-                  required
-                />
+                <input id="provider-model-v2" data-provider-model-v2 type="text" maxlength="200" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="provider-model-catalog-v2" aria-expanded="false" required />
                 <div class="model-catalog-field" data-provider-model-catalog-field-v2 hidden>
-                  <select
-                    id="provider-model-catalog-v2"
-                    data-provider-model-list-v2
-                    class="model-catalog-list"
-                    size="6"
-                    aria-label="Matching loaded model suggestions"
-                  ></select>
+                  <select id="provider-model-catalog-v2" data-provider-model-list-v2 class="model-catalog-list" size="6" aria-label="Matching loaded model suggestions"></select>
                 </div>
               </div>
             </div>
@@ -225,54 +227,27 @@
               <button type="submit">Save provider</button>
             </div>
           </form>
-          <p class="meta provider-status" data-provider-status-v2 aria-live="polite"></p>
-        </div>
-
-        <div hidden aria-hidden="true">
-          <div data-provider-list class="provider-list"></div>
-          <form data-provider-form class="form-grid provider-form">
-            <label>
-              <span>Provider type</span>
-              <select name="kind">
-                <option value="OPENROUTER">OpenRouter</option>
-                <option value="OPENAI_COMPATIBLE">OpenAI-compatible</option>
-              </select>
-            </label>
-            <label>
-              <span>Profile ID</span>
-              <input name="id" type="text" maxlength="64" pattern="(?:[A-Za-z0-9_]|-)+" required />
-            </label>
-            <label class="wide">
-              <span>Model</span>
-              <input name="model" type="text" maxlength="200" required />
-            </label>
-            <label class="wide" data-base-url-field hidden>
-              <span>Base URL</span>
-              <input name="baseUrl" type="url" placeholder="https://api.example.com/v1" />
-            </label>
-            <label class="wide">
-              <span>API key</span>
-              <input name="apiKey" type="password" maxlength="4096" autocomplete="off" required />
-            </label>
-            <label class="checkbox-row wide">
-              <input name="makePrimary" type="checkbox" />
-              <span>Make this the primary provider</span>
-            </label>
-            <div class="wide form-actions">
-              <button type="submit">Save provider</button>
-            </div>
-          </form>
+          <p class="operation-status provider-status" data-provider-status-v2 aria-live="polite"></p>
         </div>
       </details>
 
-      <footer class="footer-note">
-        `AUTO` only sends the configured continuation after the local safety gates and exact-state revalidation pass.
-      </footer>
+      <section class="panel-section privacy-disclosure accent-slate" aria-labelledby="privacy-disclosure-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Privacy &amp; data</p>
+            <h2 id="privacy-disclosure-heading">What Guardian processes</h2>
+          </div>
+        </div>
+        <p class="section-note">
+          Guardian reads page state and bounded recent visible chat content on supported ChatGPT pages to classify monitored conversations. Full transcripts are not stored. Optional providers receive only minimized, secret-redacted context when fallback classification is needed. Telegram receives bounded notification metadata by default. Guardian never writes to ChatGPT.
+          <a href="https://github.com/ach1992/chat-turn-guardian/blob/main/PRIVACY.md" target="_blank" rel="noopener noreferrer">Read the privacy policy.</a>
+        </p>
+      </section>
+
+      <footer class="footer-note">Read-only by design: Guardian observes and notifies; it never sends, retries, or continues ChatGPT turns.</footer>
     </main>
 
     <script type="module" src="./index.js"></script>
-    <script type="module" src="./reliability.js"></script>
-    <script type="module" src="./current-tab-ui.js"></script>
     <script type="module" src="./provider-ui.js"></script>
     <script type="module" src="./telegram-ui.js"></script>
   </body>
