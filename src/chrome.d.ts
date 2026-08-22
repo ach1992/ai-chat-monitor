@@ -24,6 +24,7 @@ declare namespace chrome {
   namespace tabs {
     interface Tab {
       id?: number;
+      windowId?: number;
       active?: boolean;
       title?: string;
       url?: string;
@@ -82,6 +83,15 @@ declare namespace chrome {
     ): Promise<TResponse>;
   }
 
+  namespace windows {
+    interface Window {
+      id?: number;
+      focused?: boolean;
+    }
+
+    function update(windowId: number, updateInfo: { focused?: boolean }): Promise<Window>;
+  }
+
   namespace sidePanel {
     interface PanelOptions {
       tabId?: number;
@@ -117,11 +127,30 @@ declare namespace chrome {
       priority?: number;
     }
 
+    interface ClickedEvent {
+      addListener(callback: (notificationId: string) => void): void;
+    }
+
+    const onClicked: ClickedEvent;
+
     function create(
       notificationId: string,
       options: NotificationOptions,
       callback?: (notificationId: string) => void,
     ): void;
+  }
+
+  namespace offscreen {
+    type Reason = "AUDIO_PLAYBACK";
+
+    interface CreateParameters {
+      url: string;
+      reasons: Reason[];
+      justification: string;
+    }
+
+    function createDocument(parameters: CreateParameters): Promise<void>;
+    function closeDocument(): Promise<void>;
   }
 
   namespace storage {
