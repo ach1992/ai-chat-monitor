@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { AutomationService } from "../dist/background/automation-service.js";
+import { MonitoringService } from "../dist/monitoring/service.js";
 
 function memoryArea() {
   const values = {};
@@ -44,7 +44,7 @@ test("provider mutations serialize, blank-key edits retain the stored secret, an
   const removedOrigins = [];
   installChrome(removedOrigins);
 
-  const service = new AutomationService(() => undefined, Promise.resolve());
+  const service = new MonitoringService(() => undefined, Promise.resolve());
   await service.ready();
 
   await Promise.all([
@@ -128,7 +128,7 @@ test("provider mutations serialize, blank-key edits retain the stored secret, an
 test("catalog failure with a retained secret does not mutate or expose the saved profile", async () => {
   const removedOrigins = [];
   installChrome(removedOrigins);
-  const service = new AutomationService(() => undefined, Promise.resolve());
+  const service = new MonitoringService(() => undefined, Promise.resolve());
   await service.ready();
   await service.upsertProviderProfile({
     kind: "NARAROUTER",
