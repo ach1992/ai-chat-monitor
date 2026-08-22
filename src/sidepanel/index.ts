@@ -1,5 +1,12 @@
 import { MONITORING_EVENTS } from "../monitoring/policy.js";
-import type { MonitoringEventType, MonitoringRuntimeStatus } from "../monitoring/types.js";
+import type {
+  MonitoringEvent,
+  MonitoringEventType,
+  MonitoringPageState,
+  MonitoringRuntimeStatus,
+  SemanticStatusSource,
+} from "../monitoring/types.js";
+import type { ConversationProtocolDecision, ConversationStatusMarkerHealth } from "../classification/conversation-protocol.js";
 import {
   PROTOCOL_VERSION,
   type GuardianResponse,
@@ -13,6 +20,7 @@ import {
 } from "../shared/protocol.js";
 
 const SUPPORTED_ORIGINS = new Set(["https://chatgpt.com", "https://chat.openai.com"]);
+const RESET_CONFIRM_WINDOW_MS = 6_000;
 
 const EVENT_LABELS: Readonly<Record<MonitoringEventType, string>> = {
   RESPONSE_COMPLETE: "Response completed",
@@ -75,8 +83,19 @@ Choose <VALUE> from the actual work state after the answer:
 
 Never mark CONTINUE when a real human gate exists. Keep the status record outside code fences, inline code, JSON/code payloads, block quotes, tables, or other requested output containers, and put nothing after it. If I explicitly request an exact/strict/format-exclusive output where the extra line would invalidate the output, omit the status line for that reply.`;
 
-function q<T extends Element>(selector: string): T {
-  const element = document.querySelector<T>(selector);
+type UiTone = "info" | "ok" | "warn" | "danger" | "violet" | "muted";
+type OperationTone = "working" | "success" | "error" | "warning";
+type ButtonActionState = "working" | "success" | "error";
+
+interface MonitoringChatsResetResponse {
+  type: "background:monitoring-chats-reset";
+  protocolVersion: typeof PROTOCOL_VERSION;
+  revision: number;
+  cleared: number;
+}
+
+function q<T extends Element>(selector: string, root: ParentNode = document): T {
+  const element = root.querySelector<T>(selector);
   if (element === null) throw new Error(`Side Panel is missing required element: ${selector}`);
   return element;
 }
@@ -88,13 +107,17 @@ function e<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, te
   return element;
 }
 
+const summaryCard = q<HTMLElement>("[data-summary-card]");
 const statusElement = q<HTMLElement>("[data-status]");
 const detailsElement = q<HTMLElement>("[data-details]");
 const refreshButton = q<HTMLButtonElement>("[data-refresh]");
 const currentTabElement = q<HTMLElement>("[data-current-tab-live]");
 const chatList = q<HTMLElement>("[data-chat-list]");
 const chatCount = q<HTMLElement>("[data-chat-count]");
+const resetChatsButton = q<HTMLButtonElement>("[data-reset-chats]");
+const resetStatus = q<HTMLElement>("[data-reset-status]");
 const defaultsForm = q<HTMLFormElement>("[data-defaults-form]");
+const defaultsSaveButton = q<HTMLButtonElement>("[data-save-defaults]", defaultsForm);
 const browserEventsRoot = q<HTMLElement>("[data-browser-events]");
 const soundEventsRoot = q<HTMLElement>("[data-sound-events]");
 const markerHealth = q<HTMLElement>("[data-marker-health]");
@@ -116,6 +139,97 @@ const browserInputs = new Map<MonitoringEventType, HTMLInputElement>();
 const soundInputs = new Map<MonitoringEventType, HTMLInputElement>();
 let latestOverview: PanelOverviewResponse | undefined;
 let refreshInFlight = false;
+let resetConfirmUntil = 0;
+let resetConfirmTimer: number | undefined;
+
+function setOperationStatus(element: HTMLElement, message: string, tone?: OperationTone): void {
+  element.textContent = message;
+  if (tone === undefined) delete element.dataset.tone;
+  else element.dataset.tone = tone;
+}
+
+function setButtonState(button: HTMLButtonElement, state: ButtonActionState | undefined, label?: string): void {
+  if (state === undefined) delete button.dataset.actionState;
+  else button.dataset.actionState = state;
+  if (label !== undefined) button.textContent = label;
+}
+
+function flashButton(button: HTMLButtonElement, state: Exclude<ButtonActionState, "working">, label: string, restoreLabel: string): void {
+  setButtonState(button, state, label);
+  window.setTimeout(() => {
+    if (button.dataset.actionState === state) setButtonState(button, undefined, restoreLabel);
+  }, 1_600);
+}
+
+function badge(text: string, tone: UiTone): HTMLElement {
+  const element = e("span", "badge", text);
+  element.dataset.tone = tone;
+  return element;
+}
+
+function humanizeToken(value: string): string {
+  return value.toLowerCase().replaceAll("_", " ").replace(/^./, (first) => first.toUpperCase());
+}
+
+function pageTone(state: MonitoringPageState): UiTone {
+  if (state === "PLATFORM_ERROR" || state === "NETWORK_ERROR" || state === "RATE_LIMIT" || state === "AUTH_REQUIRED" || state === "VERIFICATION_REQUIRED" || state === "CONVERSATION_FULL") return "danger";
+  if (state === "RETRY_AVAILABLE") return "warn";
+  if (state === "GENERATING") return "info";
+  if (state === "IDLE") return "ok";
+  return "muted";
+}
+
+function semanticTone(decision: ConversationProtocolDecision | undefined): UiTone {
+  if (decision === "COMPLETE") return "ok";
+  if (decision === "CONTINUE") return "info";
+  if (decision === "HOLD_APPROVAL" || decision === "HOLD_DECISION" || decision === "HOLD_HUMAN_OPERATION" || decision === "UNSURE") return "warn";
+  if (decision === "PLATFORM_ERROR" || decision === "RATE_LIMIT") return "danger";
+  return "muted";
+}
+
+function sourceTone(source: SemanticStatusSource | undefined): UiTone {
+  if (source === "STATUS_MARKER") return "violet";
+  if (source === "UI") return "info";
+  if (source === "RULE") return "ok";
+  if (source === "PROVIDER") return "violet";
+  return "muted";
+}
+
+function markerTone(health: ConversationStatusMarkerHealth | undefined): UiTone {
+  if (health === "DETECTED") return "ok";
+  if (health === "LEGACY") return "violet";
+  if (health === "MALFORMED") return "danger";
+  return "muted";
+}
+
+function eventTone(event: MonitoringEventType): UiTone {
+  if (["PLATFORM_ERROR", "NETWORK_ERROR", "RATE_LIMIT", "AUTH_REQUIRED", "VERIFICATION_REQUIRED", "CONVERSATION_FULL", "PROVIDER_ERROR"].includes(event)) return "danger";
+  if (["APPROVAL_REQUIRED", "DECISION_REQUIRED", "HUMAN_OPERATION_REQUIRED", "RETRY_AVAILABLE", "SEMANTIC_UNKNOWN", "GENERATION_STALLED", "REPEATED_RESPONSE"].includes(event)) return "warn";
+  if (event === "TASK_COMPLETE") return "ok";
+  return "info";
+}
+
+function renderRuntime(runtime: MonitoringRuntimeStatus | undefined): HTMLElement {
+  const row = e("div", "runtime-summary");
+  if (runtime === undefined) {
+    row.append(badge("Waiting for observation", "muted"));
+    return row;
+  }
+  row.append(badge(humanizeToken(runtime.pageState), pageTone(runtime.pageState)));
+  row.append(badge(runtime.semanticDecision === undefined ? "Semantic unknown" : humanizeToken(runtime.semanticDecision), semanticTone(runtime.semanticDecision)));
+  row.append(badge(`Source: ${humanizeToken(runtime.semanticSource)}`, sourceTone(runtime.semanticSource)));
+  return row;
+}
+
+function markerHealthText(runtime: MonitoringRuntimeStatus | undefined): string {
+  switch (runtime?.markerHealth) {
+    case "DETECTED": return "Marker detected";
+    case "LEGACY": return "Legacy marker";
+    case "MALFORMED": return "Malformed — fallback active";
+    case "MISSING": return "Missing — fallback active";
+    default: return "Not observed yet";
+  }
+}
 
 function buildEventChecks(root: HTMLElement, target: Map<MonitoringEventType, HTMLInputElement>): void {
   root.replaceChildren();
@@ -178,20 +292,14 @@ async function setMonitoring(tabId: number, conversationId: string, enabled: boo
   if (response.type !== "background:monitoring-policy") throw new Error("Unexpected monitoring update response.");
 }
 
-function stateText(runtime: MonitoringRuntimeStatus | undefined): string {
-  if (runtime === undefined) return "Waiting for fresh observation";
-  const semantic = runtime.semanticDecision === undefined ? "Unknown semantic state" : runtime.semanticDecision;
-  return `${runtime.pageState} · ${semantic} · ${runtime.semanticSource}`;
-}
-
-function markerHealthText(runtime: MonitoringRuntimeStatus | undefined): string {
-  switch (runtime?.markerHealth) {
-    case "DETECTED": return "Status marker: Detected";
-    case "LEGACY": return "Status marker: Legacy marker detected";
-    case "MALFORMED": return "Status marker: Malformed — fallback is active";
-    case "MISSING": return "Status marker: Missing — fallback is active";
-    default: return "Status marker: Not observed yet";
-  }
+async function resetMonitoredChats(): Promise<MonitoringChatsResetResponse> {
+  const response = await chrome.runtime.sendMessage<GuardianResponse | MonitoringChatsResetResponse>({
+    type: "panel:monitoring-chats-reset",
+    protocolVersion: PROTOCOL_VERSION,
+  });
+  if (response.type === "background:error") throw new Error(response.message);
+  if (response.type !== "background:monitoring-chats-reset") throw new Error("Unexpected monitored-chat reset response.");
+  return response;
 }
 
 function renderCurrentStatus(status: PanelStatusResponse | undefined, tab: chrome.tabs.Tab | undefined): void {
@@ -199,46 +307,61 @@ function renderCurrentStatus(status: PanelStatusResponse | undefined, tab: chrom
   if (tab?.id === undefined || !isSupportedUrl(tab.url)) {
     currentTabElement.className = "empty-state";
     currentTabElement.textContent = "Open a ChatGPT conversation in the active tab to monitor it.";
-    markerHealth.textContent = "Not detected yet";
+    markerHealth.textContent = "Not observed yet";
+    markerHealth.dataset.tone = "muted";
     return;
   }
   if (status === undefined || !status.connected || status.conversationId === undefined) {
     currentTabElement.className = "empty-state";
-    currentTabElement.textContent = "The ChatGPT content observer is reconnecting. Open a saved conversation if this is a new-chat page.";
+    currentTabElement.textContent = "The ChatGPT observer is reconnecting. Open a saved conversation if this is a new-chat page.";
     markerHealth.textContent = "Not observed yet";
+    markerHealth.dataset.tone = "muted";
     return;
   }
 
-  currentTabElement.className = "chat-card";
+  const enabled = status.monitoringPolicy?.enabled ?? false;
+  currentTabElement.className = "current-card current-card-primary";
+  currentTabElement.dataset.enabled = String(enabled);
+
   const heading = e("div", "section-heading");
-  const title = e("div");
-  title.append(
-    e("strong", undefined, tab.title ?? "ChatGPT conversation"),
-    e("p", "meta", stateText(status.monitoringRuntime)),
-  );
-  const toggle = e("button", status.monitoringPolicy?.enabled ? "danger small" : "small", status.monitoringPolicy?.enabled ? "Monitoring ON" : "Monitoring OFF");
+  const title = e("div", "title-block");
+  title.append(e("strong", undefined, tab.title ?? "ChatGPT conversation"), renderRuntime(status.monitoringRuntime));
+
+  const toggle = e("button", enabled ? "danger-outline small" : "small", enabled ? "Turn monitoring off" : "Turn monitoring on");
   toggle.type = "button";
   toggle.addEventListener("click", () => {
+    const original = toggle.textContent ?? "Update monitoring";
     toggle.disabled = true;
-    void setMonitoring(tab.id as number, status.conversationId as string, !(status.monitoringPolicy?.enabled ?? false))
-      .then(() => refreshAll())
-      .catch((error) => { detailsElement.textContent = error instanceof Error ? error.message : "Monitoring update failed."; })
-      .finally(() => { toggle.disabled = false; });
+    setButtonState(toggle, "working", "Updating…");
+    void setMonitoring(tab.id as number, status.conversationId as string, !enabled)
+      .then(async () => {
+        setButtonState(toggle, "success", !enabled ? "Monitoring on ✓" : "Monitoring off ✓");
+        await refreshAll();
+      })
+      .catch((error) => {
+        setButtonState(toggle, "error", "Update failed");
+        detailsElement.textContent = error instanceof Error ? error.message : "Monitoring update failed.";
+        summaryCard.dataset.tone = "danger";
+      })
+      .finally(() => {
+        toggle.disabled = false;
+        window.setTimeout(() => {
+          if (toggle.isConnected) setButtonState(toggle, undefined, original);
+        }, 1_200);
+      });
   });
+
   heading.append(title, toggle);
   currentTabElement.append(heading);
   markerHealth.textContent = markerHealthText(status.monitoringRuntime);
-  markerHealth.dataset.tone = status.monitoringRuntime?.markerHealth === "DETECTED" ? "ok" : "";
+  markerHealth.dataset.tone = markerTone(status.monitoringRuntime?.markerHealth);
 }
 
 function renderChatCard(chat: ManagedChatStatus): HTMLElement {
   const card = e("article", "chat-card");
   const heading = e("div", "section-heading");
-  const title = e("div");
-  title.append(
-    e("strong", undefined, chat.pageTitle ?? chat.conversationId ?? `Tab ${chat.tabId}`),
-    e("p", "meta", stateText(chat.runtime)),
-  );
+  const title = e("div", "title-block");
+  title.append(e("strong", undefined, chat.pageTitle ?? chat.conversationId ?? `Tab ${chat.tabId}`), renderRuntime(chat.runtime));
   heading.append(title);
   card.append(heading);
 
@@ -248,52 +371,65 @@ function renderChatCard(chat: ManagedChatStatus): HTMLElement {
   }
 
   const meta = e("div", "meta-row");
-  const enabled = e("span", "badge", chat.policy?.enabled ? "Monitoring ON" : "Monitoring OFF");
-  enabled.dataset.tone = chat.policy?.enabled ? "ok" : "";
-  const marker = e("span", "badge", markerHealthText(chat.runtime).replace("Status marker: ", ""));
-  meta.append(enabled, marker);
+  meta.append(badge("Monitoring ON", "ok"));
+  meta.append(badge(markerHealthText(chat.runtime), markerTone(chat.runtime?.markerHealth)));
   card.append(meta);
 
-  const actions = e("div", "form-actions");
-  const toggle = e("button", chat.policy?.enabled ? "danger small" : "small", chat.policy?.enabled ? "Turn monitoring off" : "Turn monitoring on");
+  const actions = e("div", "chat-actions");
+  const toggle = e("button", "danger-outline small", "Turn monitoring off");
   toggle.type = "button";
   toggle.addEventListener("click", () => {
     toggle.disabled = true;
-    void setMonitoring(chat.tabId, chat.conversationId as string, !(chat.policy?.enabled ?? false))
+    setButtonState(toggle, "working", "Turning off…");
+    void setMonitoring(chat.tabId, chat.conversationId as string, false)
       .then(() => refreshAll())
-      .catch((error) => { detailsElement.textContent = error instanceof Error ? error.message : "Monitoring update failed."; })
+      .catch((error) => {
+        setButtonState(toggle, "error", "Update failed");
+        detailsElement.textContent = error instanceof Error ? error.message : "Monitoring update failed.";
+        summaryCard.dataset.tone = "danger";
+      })
       .finally(() => { toggle.disabled = false; });
   });
+
   const focus = e("button", "secondary small", "Focus tab");
   focus.type = "button";
-  focus.addEventListener("click", () => { void chrome.tabs.update(chat.tabId, { active: true }); });
+  focus.addEventListener("click", () => {
+    setButtonState(focus, "working", "Opening…");
+    void chrome.tabs.update(chat.tabId, { active: true }).then(
+      () => flashButton(focus, "success", "Focused ✓", "Focus tab"),
+      () => flashButton(focus, "error", "Tab unavailable", "Focus tab"),
+    );
+  });
   actions.append(toggle, focus);
   card.append(actions);
   return card;
 }
 
+function renderEvent(event: MonitoringEvent): HTMLElement {
+  const item = e("article", "audit-item");
+  const row = e("div", "meta-row");
+  row.append(badge(EVENT_LABELS[event.type], eventTone(event.type)));
+  row.append(e("span", "meta", new Date(event.at).toLocaleString()));
+  item.append(row, e("p", "meta", `${humanizeToken(event.pageState)} · ${humanizeToken(event.semanticSource)}`), e("p", undefined, event.message));
+  return item;
+}
+
 function renderOverview(data: PanelOverviewResponse): void {
   latestOverview = data;
   chatCount.textContent = String(data.chats.length);
+  resetChatsButton.disabled = data.chats.length === 0;
   chatList.replaceChildren(...data.chats.map(renderChatCard));
-  if (data.chats.length === 0) chatList.append(e("div", "empty-state", "No open ChatGPT conversations are connected."));
+  if (data.chats.length === 0) {
+    chatList.append(e("div", "empty-state", "No monitored chats. Turn monitoring on from Current tab to add one."));
+  }
 
   for (const [event, input] of browserInputs) input.checked = data.defaults.browserEvents.includes(event);
   for (const [event, input] of soundInputs) input.checked = data.defaults.soundEvents.includes(event);
   stallThresholdInput.value = String(Math.round(data.defaults.stallThresholdMs / 1_000));
   suppressFocusedInput.checked = data.defaults.suppressLowPriorityWhileFocused;
 
-  eventList.replaceChildren();
   const events = [...data.events].reverse();
-  for (const event of events) {
-    const item = e("article", "audit-item");
-    item.append(
-      e("strong", undefined, EVENT_LABELS[event.type]),
-      e("p", "meta", `${new Date(event.at).toLocaleString()} · ${event.pageState} · ${event.semanticSource}`),
-      e("p", undefined, event.message),
-    );
-    eventList.append(item);
-  }
+  eventList.replaceChildren(...events.map(renderEvent));
   if (events.length === 0) eventList.append(e("div", "empty-state", "No monitoring events recorded yet."));
 }
 
@@ -305,25 +441,32 @@ async function copyText(text: string): Promise<void> {
   await navigator.clipboard.writeText(text);
 }
 
-copyCustom.addEventListener("click", () => {
-  void copyText(CUSTOM_INSTRUCTIONS).then(
-    () => { copyStatus.textContent = "Custom Instructions copied."; },
-    () => { copyStatus.textContent = "Copy failed. Select the text manually."; },
-  );
-});
+function handleCopy(button: HTMLButtonElement, text: string, successMessage: string): void {
+  const original = button.textContent ?? "Copy";
+  button.disabled = true;
+  setButtonState(button, "working", "Copying…");
+  void copyText(text).then(
+    () => {
+      flashButton(button, "success", "Copied ✓", original);
+      setOperationStatus(copyStatus, successMessage, "success");
+    },
+    () => {
+      flashButton(button, "error", "Copy failed", original);
+      setOperationStatus(copyStatus, "Copy failed. Open the preview and select the text manually.", "error");
+    },
+  ).finally(() => { button.disabled = false; });
+}
 
-copyChat.addEventListener("click", () => {
-  void copyText(CHAT_INSTRUCTION).then(
-    () => { copyStatus.textContent = "Per-chat instruction copied."; },
-    () => { copyStatus.textContent = "Copy failed. Select the text manually."; },
-  );
-});
+copyCustom.addEventListener("click", () => handleCopy(copyCustom, CUSTOM_INSTRUCTIONS, "Custom Instructions copied to clipboard."));
+copyChat.addEventListener("click", () => handleCopy(copyChat, CHAT_INSTRUCTION, "Per-chat instruction copied to clipboard."));
 
 defaultsForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const seconds = Number(stallThresholdInput.value);
   if (!Number.isFinite(seconds) || seconds < 30 || seconds > 3_600) {
     detailsElement.textContent = "Generation stall threshold must be between 30 and 3600 seconds.";
+    summaryCard.dataset.tone = "danger";
+    flashButton(defaultsSaveButton, "error", "Check value", "Save notification defaults");
     return;
   }
   const request: PanelMonitoringDefaultsUpdate = {
@@ -336,31 +479,81 @@ defaultsForm.addEventListener("submit", (event) => {
       suppressLowPriorityWhileFocused: suppressFocusedInput.checked,
     },
   };
-  void chrome.runtime.sendMessage<GuardianResponse>(request).then((response) => {
+  defaultsSaveButton.disabled = true;
+  setButtonState(defaultsSaveButton, "working", "Saving…");
+  void chrome.runtime.sendMessage<GuardianResponse>(request).then(async (response) => {
     if (response.type === "background:error") throw new Error(response.message);
-    detailsElement.textContent = "Monitoring defaults saved.";
-    return refreshAll();
+    detailsElement.textContent = "Notification defaults saved.";
+    summaryCard.dataset.tone = "ok";
+    flashButton(defaultsSaveButton, "success", "Saved ✓", "Save notification defaults");
+    await refreshAll();
   }).catch((error) => {
     detailsElement.textContent = error instanceof Error ? error.message : "Unable to save monitoring defaults.";
+    summaryCard.dataset.tone = "danger";
+    flashButton(defaultsSaveButton, "error", "Save failed", "Save notification defaults");
+  }).finally(() => { defaultsSaveButton.disabled = false; });
+});
+
+function cancelResetConfirmation(): void {
+  resetConfirmUntil = 0;
+  if (resetConfirmTimer !== undefined) window.clearTimeout(resetConfirmTimer);
+  resetConfirmTimer = undefined;
+  resetChatsButton.classList.remove("danger");
+  resetChatsButton.classList.add("secondary", "danger-outline");
+  setButtonState(resetChatsButton, undefined, "Reset monitored chats");
+}
+
+resetChatsButton.addEventListener("click", () => {
+  if (Date.now() > resetConfirmUntil) {
+    resetConfirmUntil = Date.now() + RESET_CONFIRM_WINDOW_MS;
+    resetChatsButton.classList.remove("secondary", "danger-outline");
+    resetChatsButton.classList.add("danger");
+    resetChatsButton.textContent = "Confirm reset";
+    setOperationStatus(resetStatus, "Click again within 6 seconds to remove all saved monitored chats. Other settings and event history stay unchanged.", "warning");
+    resetConfirmTimer = window.setTimeout(cancelResetConfirmation, RESET_CONFIRM_WINDOW_MS);
+    return;
+  }
+
+  if (resetConfirmTimer !== undefined) window.clearTimeout(resetConfirmTimer);
+  resetConfirmTimer = undefined;
+  resetConfirmUntil = 0;
+  resetChatsButton.disabled = true;
+  setButtonState(resetChatsButton, "working", "Resetting…");
+  setOperationStatus(resetStatus, "Removing saved monitored-chat policies…", "working");
+  void resetMonitoredChats().then(async (response) => {
+    setOperationStatus(resetStatus, `Reset complete. ${response.cleared} saved chat${response.cleared === 1 ? "" : "s"} removed.`, "success");
+    flashButton(resetChatsButton, "success", "Reset complete ✓", "Reset monitored chats");
+    await refreshAll();
+  }).catch((error) => {
+    setOperationStatus(resetStatus, error instanceof Error ? error.message : "Unable to reset monitored chats.", "error");
+    flashButton(resetChatsButton, "error", "Reset failed", "Reset monitored chats");
+  }).finally(() => {
+    resetChatsButton.disabled = latestOverview?.chats.length === 0;
+    window.setTimeout(cancelResetConfirmation, 1_700);
   });
 });
 
 historyClear.addEventListener("click", () => {
   historyClear.disabled = true;
-  void chrome.runtime.sendMessage<GuardianResponse>({ type: "panel:history-clear", protocolVersion: PROTOCOL_VERSION }).then((response) => {
+  setButtonState(historyClear, "working", "Clearing…");
+  setOperationStatus(historyStatus, "Clearing monitoring event history…", "working");
+  void chrome.runtime.sendMessage<GuardianResponse>({ type: "panel:history-clear", protocolVersion: PROTOCOL_VERSION }).then(async (response) => {
     if (response.type === "background:error") throw new Error(response.message);
     if (response.type !== "background:history-cleared") throw new Error("Unexpected history clear response.");
-    historyStatus.textContent = "Monitoring event history cleared.";
-    return refreshAll();
+    setOperationStatus(historyStatus, "Monitoring event history cleared.", "success");
+    flashButton(historyClear, "success", "Cleared ✓", "Clear event history");
+    await refreshAll();
   }).catch((error) => {
-    historyStatus.textContent = error instanceof Error ? error.message : "Unable to clear monitoring history.";
+    setOperationStatus(historyStatus, error instanceof Error ? error.message : "Unable to clear monitoring history.", "error");
+    flashButton(historyClear, "error", "Clear failed", "Clear event history");
   }).finally(() => { historyClear.disabled = false; });
 });
 
-async function refreshAll(): Promise<void> {
+async function refreshAll(manual = false): Promise<void> {
   if (refreshInFlight) return;
   refreshInFlight = true;
   refreshButton.disabled = true;
+  if (manual) setButtonState(refreshButton, "working", "Refreshing…");
   try {
     const tab = await activeTab();
     if (tab?.id !== undefined && isSupportedUrl(tab.url)) await reconnect(tab.id);
@@ -370,18 +563,24 @@ async function refreshAll(): Promise<void> {
     ]);
     renderOverview(data);
     renderCurrentStatus(tabStatus, tab);
-    const monitored = data.chats.filter((chat) => chat.policy?.enabled === true).length;
+    const monitored = data.chats.length;
     statusElement.textContent = `${monitored} monitored conversation${monitored === 1 ? "" : "s"}`;
-    detailsElement.textContent = "Guardian is observing only; it has no ChatGPT mutation path.";
+    detailsElement.textContent = monitored === 0
+      ? "Guardian is ready. Turn monitoring on from a ChatGPT tab to add it."
+      : "Guardian is observing only; it has no ChatGPT mutation path.";
+    summaryCard.dataset.tone = monitored > 0 ? "ok" : "info";
+    if (manual) flashButton(refreshButton, "success", "Refreshed ✓", "Refresh");
   } catch (error) {
     statusElement.textContent = "Monitoring status unavailable";
     detailsElement.textContent = error instanceof Error ? error.message : "Unable to read monitoring state.";
+    summaryCard.dataset.tone = "danger";
+    if (manual) flashButton(refreshButton, "error", "Refresh failed", "Refresh");
   } finally {
     refreshButton.disabled = false;
     refreshInFlight = false;
   }
 }
 
-refreshButton.addEventListener("click", () => { void refreshAll(); });
+refreshButton.addEventListener("click", () => { void refreshAll(true); });
 void refreshAll();
 window.setInterval(() => { void refreshAll(); }, 5_000);
