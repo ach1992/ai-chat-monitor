@@ -92,6 +92,10 @@ test("Side Panel exposes monitoring, compact protocol setup, notifications, prov
     "disclosure.panel-section",
     "disclosure[open] > summary",
     ":not(summary) + :not(summary)",
+    "current-card-primary > .section-heading",
+    "title-block { display: grid",
+    "chat-card .title-block > strong",
+    "unicode-bidi: plaintext",
     "@media (max-width: 430px)",
     "@media (max-width: 350px)",
   ]) {
@@ -107,6 +111,9 @@ test("Side Panel exposes monitoring, compact protocol setup, notifications, prov
   assert.match(styles, /\.disclosure\[open\]\s*>\s*summary\s*\{[^}]*margin-bottom:\s*var\(--space-3\)/s);
   assert.match(styles, /\.disclosure\[open\]\s*>\s*:not\(summary\)\s*\+\s*:not\(summary\)\s*\{[^}]*margin-top:\s*var\(--space-3\)/s);
   assert.match(styles, /\.chat-list[^\{]*\{[^}]*gap:\s*0\.72rem/s);
+  assert.match(styles, /\.title-block\s*\{[^}]*display:\s*grid[^}]*gap:\s*0\.55rem/s);
+  assert.match(styles, /\.current-card-primary\s*>\s*\.section-heading\s*>\s*button\s*\{[^}]*min-width:\s*8\.25rem/s);
+  assert.match(styles, /\.chat-card\s+\.title-block\s*>\s*strong\s*\{[^}]*border:\s*1px\s+solid\s+var\(--border\)/s);
 
   for (const messageType of [
     "panel:provider-model-catalog-request",
