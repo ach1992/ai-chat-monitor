@@ -2,9 +2,19 @@
 
 ## Product version
 
-Current target: **v2.0.0**
+Current released baseline: **v2.0.0**
 
 v2 is a breaking product pivot from guarded automatic continuation to a strictly read-only ChatGPT conversation monitor and notifier.
+
+Released baseline evidence:
+
+- GitHub Release: `v2.0.0`
+- Integrated `main`: `eb4e90a21cd578620bda855ce2e3ab37aee39027`
+- Release ZIP: `chat-turn-guardian-2.0.0.zip`
+- Packaged runtime files: `48`
+- Release ZIP SHA-256: `800d76293a867e3ba0c8780dfb932788b55bc9393f03112d2b73801f10c70c2f`
+
+Future development starts from the current `main` baseline and should treat the v2 read-only boundary below as the durable product contract unless an explicit new product decision changes it.
 
 ## Product goal
 
@@ -222,7 +232,7 @@ Both variants explain enough decision semantics for a model to choose reliably a
 
 ## Development and release requirements
 
-Required repository validation for a candidate:
+Every future candidate must retain repository-standard validation:
 
 - typecheck;
 - lint;
@@ -232,11 +242,11 @@ Required repository validation for a candidate:
 - ZIP layout/provenance verification;
 - exact candidate SHA identity in build metadata.
 
-A v2 test artifact is not a public release. Public publication requires explicit release/integration authorization after the exact candidate has passed required validation/review.
+A test artifact is not a public release. Any future version publication remains a separate release action after the exact candidate has passed the required validation/review/integration gates.
 
-## v2 acceptance
+## v2.0.0 acceptance baseline
 
-The v2 outcome is complete only when all of the following are true:
+The released v2.0.0 outcome satisfied the following acceptance requirements and they remain regression expectations for future development unless intentionally superseded:
 
 - no runtime path writes to the ChatGPT composer or programmatically activates ChatGPT conversation controls;
 - no in-chat self-check/bootstrap/status-response/recovery message is generated or sent by Guardian;
@@ -255,7 +265,8 @@ The v2 outcome is complete only when all of the following are true:
 - README, Architecture, Privacy, Store readiness/listing, status protocol, and changelog describe v2 accurately;
 - automated regression coverage enforces the read-only protocol/runtime invariant and core monitoring transitions;
 - repository validation passes on the exact candidate SHA;
-- a deterministic test ZIP with provenance is available for user validation before public release.
+- Owner live Chromium acceptance was completed before integration;
+- the deterministic release package was published with checksum/provenance and verified after publication.
 
 ## Historical note
 
