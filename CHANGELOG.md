@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.1 — 2026-08-23
+
+- Fixed Browser notifications in the v2 runtime by using the packaged extension icon through `chrome.runtime.getURL()` and the Promise-based `chrome.notifications.create()` API.
+- Added direct regression coverage for the real Browser notification wrapper, including exact notification options and delivery-failure propagation.
+- Completed live Chromium/Windows validation with real monitored events after the fix; Browser notifications now display as expected.
+- Preserved the v2 read-only contract, monitoring/classification behavior, Telegram/provider boundaries, event selection, and deduplication semantics.
+
+Tracking: [Issue #74](https://github.com/ach1992/chat-turn-guardian/issues/74), [PR #75](https://github.com/ach1992/chat-turn-guardian/pull/75), and [Release v2.0.1](https://github.com/ach1992/chat-turn-guardian/releases/tag/v2.0.1).
+
 ## 2.0.0 — 2026-08-22
 
 - Pivoted Chat Turn Guardian from guarded automatic continuation to a strictly read-only ChatGPT monitor/notifier.
