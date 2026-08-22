@@ -297,7 +297,7 @@ export class MonitoringService {
       ...(assistant.domMessageId === undefined ? {} : { domMessageId: assistant.domMessageId }),
     });
 
-    let eventType = pageEvent ?? eventForDecision(resolution.deision) ?? "RESPONSE_COMPLETE";
+    let eventType = pageEvent ?? eventForDecision(resolution.decision) ?? "RESPONSE_COMPLETE";
     if (resolution.classification?.reasonCode === "PROVIDER_FAILURE") eventType = "PROVIDER_ERROR";
     if (repeated && pageEvent === undefined) eventType = "REPEATED_RESPONSE";
 
