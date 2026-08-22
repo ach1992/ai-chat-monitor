@@ -20,7 +20,6 @@ import type {
   TelegramSettingsState,
 } from "./types.js";
 
-const NOTIFICATION_ICON = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAACmklEQVR4nO3byVEjQQAF0c94ACfGAvDfmvGA27jAHAgCNGqhXqpry0wH1NH/aYno0sPj88t7DNuv1hdgbRMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBwBMAPAHAEwA8AcATADwBVOrv25/Wl7CYACr0OX6PCARwcv+P3hsCAZzYrbF7QiCAk7o3ci8IBHBCa8ftAYEACrd11NYIBFCwvWO2RCCAQh0dsRUCARSoxHhPv18LXMn2BHCwkcdPBHCo0cdPBLC7GcZPBLCrWcZPBLC5mcZPBLCp2cZPBLC6GcdPBLCqWcdPBHC3mcdPBPBjs4+fCOBmhPETASxGGT8RwFWk8RMBXEQbP+kYQO3n48Txk04B1D5HTx0/6RBA7XP05PGTzgDUPkdPHz/pCEDtc/SO/1EXAGqfo3f8r5oDqH2O3vEvawqg9jl6x7+uGYDa72THX64ZgBI3s+ZvhxnHTxp/BdRA4Pg/1/xH4JkIHP9+zQEk5yBw/HV1ASApi8Dx1/fw+Pzy3voivtf6//IJZ/yko0+Az1rf/NavX7vuACTtRqCNn3QKIKk/BnH8pGMASb1RqOMnnQNIzh+HPH4yAIDkvJHo4yeDAEjKj+X4Hw0DICk3muN/NRSA5Ph4jn/ZcACS/SM6/nVDAki2j+n4yw0LIFk/quPfrruHQXtbeojk8PebBoDta+ivADueAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOAJAJ4A4AkAngDgCQCeAOD9A59V1Pv7P/C7AAAAAElFTkSuQmCC";
 const MAX_TELEGRAM_MESSAGE_LENGTH = 700;
 const TELEGRAM_DIVIDER = "━━━━━━━━━━━━";
 const MAX_TELEGRAM_TITLE_HTML_LENGTH = 140;
@@ -153,25 +152,16 @@ function telegramTestNotificationText(): string {
 }
 
 export async function browserNotification(notification: GuardianNotification): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    chrome.notifications.create(
-      notification.id,
-      {
-        type: "basic",
-        iconUrl: NOTIFICATION_ICON,
-        title: notification.title,
-        message: notification.message,
-        priority: 0,
-      },
-      () => {
-        if (chrome.runtime.lastError !== undefined) {
-          reject(new Error("Browser notification delivery failed."));
-          return;
-        }
-        resolve();
-      },
-    );
-  });
+  await chrome.notifications.create(
+    notification.id,
+    {
+      type: "basic",
+      iconUrl: chrome.runtime.getURL("assets/icon-128.png"),
+      title: notification.title,
+      message: notification.message,
+      priority: 0,
+    },
+  );
 }
 
 export class NotificationManager {
