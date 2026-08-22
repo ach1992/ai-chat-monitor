@@ -34,6 +34,9 @@ type TelegramErrorCode =
   | "DELIVERY_FAILED"
   | "STORAGE_FAILURE";
 
+type OperationTone = "working" | "success" | "error" | "warning";
+type ButtonActionState = "working" | "success" | "error";
+
 interface TelegramResponse {
   type: "background:telegram-settings" | "background:telegram-test-result" | "background:telegram-error";
   protocolVersion: typeof PROTOCOL_VERSION;
@@ -68,7 +71,7 @@ function relocatePrivacyDisclosure(): void {
   if (existing instanceof HTMLDetailsElement) {
     details = existing;
   } else {
-    details = e("details", "panel-section disclosure privacy-disclosure");
+    details = e("details", "panel-section disclosure privacy-disclosure accent-slate");
     details.setAttribute("aria-labelledby", "privacy-disclosure-heading");
     const heading = existing.querySelector<HTMLElement>(".section-heading");
     const summary = e("summary", "section-heading");
@@ -104,7 +107,7 @@ function buildSection(): {
   save: HTMLButtonElement;
   status: HTMLElement;
 } {
-  const root = e("details", "panel-section disclosure");
+  const root = e("details", "panel-section disclosure accent-blue");
   const summary = e("summary", "section-heading");
   const title = e("div");
   title.append(e("p", "eyebrow", "Notifications"), e("h2", undefined, "Telegram"));
@@ -124,7 +127,7 @@ function buildSection(): {
   stateRow.append(configured, enabledState, health);
   root.append(stateRow);
 
-  const status = e("p", "meta telegram-operation-status");
+  const status = e("p", "operation-status telegram-operation-status");
   status.setAttribute("aria-live", "polite");
   root.append(status);
 
@@ -185,14 +188,10 @@ function buildSection(): {
   help.textContent = "Setup: create a bot with @BotFather, start/contact the bot or add it to the destination so it can send there, then enter the token and Chat ID here. The token stays in trusted extension storage. Telegram receives only bounded Guardian notification metadata by default; it never sends full ChatGPT messages and accepts no inbound commands.";
 
   const actions = e("div", "wide form-actions telegram-actions");
-  actions.style.gap = "0.5rem";
-  actions.style.flexWrap = "wrap";
   const test = e("button", "secondary", "Test notification");
   test.type = "button";
-  test.style.flex = "1 1 8rem";
   const save = e("button", undefined, "Save Telegram settings");
   save.type = "submit";
-  save.style.flex = "1 1 10rem";
   actions.append(test, save);
 
   form.append(enabledLabel, destinationLabel, tokenLabel, modeLabel, customEvents, help, actions);
@@ -210,8 +209,23 @@ relocatePrivacyDisclosure();
 let busy = false;
 let dirty = false;
 
-function setStatus(message: string): void {
+function setStatus(message: string, tone?: OperationTone): void {
   ui.status.textContent = message;
+  if (tone === undefined) delete ui.status.dataset.tone;
+  else ui.status.dataset.tone = tone;
+}
+
+function setButtonState(button: HTMLButtonElement, state: ButtonActionState | undefined, label?: string): void {
+  if (state === undefined) delete button.dataset.actionState;
+  else button.dataset.actionState = state;
+  if (label !== undefined) button.textContent = label;
+}
+
+function flashButton(button: HTMLButtonElement, state: Exclude<ButtonActionState, "working">, label: string, restoreLabel: string): void {
+  setButtonState(button, state, label);
+  window.setTimeout(() => {
+    if (button.dataset.actionState === state) setButtonState(button, undefined, restoreLabel);
+  }, 1_600);
 }
 
 function setBusy(value: boolean): void {
@@ -233,7 +247,7 @@ function renderBadges(settings: RedactedTelegramSettings): void {
   ui.enabledState.textContent = settings.enabled ? "Enabled" : "Disabled";
   ui.enabledState.dataset.tone = settings.enabled ? "ok" : "warn";
   ui.health.textContent = healthText(settings);
-  ui.health.dataset.tone = settings.health.status === "HEALTHY" ? "ok" : settings.health.status === "ERROR" ? "warn" : "";
+  ui.health.dataset.tone = settings.health.status === "HEALTHY" ? "ok" : settings.health.status === "ERROR" ? "danger" : "muted";
 }
 
 function renderForm(settings: RedactedTelegramSettings): void {
@@ -290,7 +304,7 @@ async function refresh(): Promise<void> {
     const settings = await send({ type: "panel:telegram-settings-request", protocolVersion: PROTOCOL_VERSION });
     render(settings, !dirty);
   } catch (error) {
-    setStatus(error instanceof Error ? error.message : "Unable to load Telegram settings.");
+    setStatus(error instanceof Error ? error.message : "Unable to load Telegram settings.", "error");
   }
 }
 
@@ -307,6 +321,8 @@ ui.form.addEventListener("submit", (event) => {
   if (busy) return;
   void (async () => {
     setBusy(true);
+    setButtonState(ui.save, "working", "Saving…");
+    setStatus("Saving Telegram settings…", "working");
     try {
       if (ui.enabled.checked && !await requestPermissionIfNeeded()) {
         throw new TelegramPanelError("Telegram host permission was not granted.", "PERMISSION_REQUIRED");
@@ -317,9 +333,11 @@ ui.form.addEventListener("submit", (event) => {
         settings: collectMutation(),
       });
       render(settings, true);
-      setStatus("Telegram settings saved.");
+      setStatus("Telegram settings saved.", "success");
+      flashButton(ui.save, "success", "Saved ✓", "Save Telegram settings");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Unable to save Telegram settings.");
+      setStatus(error instanceof Error ? error.message : "Unable to save Telegram settings.", "error");
+      flashButton(ui.save, "error", "Save failed", "Save Telegram settings");
     } finally {
       setBusy(false);
     }
@@ -330,6 +348,8 @@ ui.test.addEventListener("click", () => {
   if (busy) return;
   void (async () => {
     setBusy(true);
+    setButtonState(ui.test, "working", "Sending…");
+    setStatus("Sending Telegram test notification…", "working");
     try {
       if (!await requestPermissionIfNeeded()) {
         throw new TelegramPanelError("Telegram host permission was not granted.", "PERMISSION_REQUIRED");
@@ -340,9 +360,11 @@ ui.test.addEventListener("click", () => {
         settings: collectMutation(),
       });
       render(settings, false);
-      setStatus("Telegram test notification delivered.");
+      setStatus("Telegram test notification delivered.", "success");
+      flashButton(ui.test, "success", "Delivered ✓", "Test notification");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Telegram test notification failed.");
+      setStatus(error instanceof Error ? error.message : "Telegram test notification failed.", "error");
+      flashButton(ui.test, "error", "Test failed", "Test notification");
     } finally {
       setBusy(false);
     }
