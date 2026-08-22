@@ -1,22 +1,20 @@
-# Conversation terminal-status protocol
+# Chat Turn Guardian Status Protocol
 
-Status: Shipped in v1.2.0 for [Issue #56](https://github.com/ach1992/chat-turn-guardian/issues/56) and refined in v1.2.1 for [Issue #57](https://github.com/ach1992/chat-turn-guardian/issues/57). This contract supersedes the repeated per-stop reply shape from Issue #51 while retaining its guarded in-chat fallback.
+## Purpose
 
-## Goal
+The status protocol is optional metadata that helps the read-only Guardian classify the semantic state of a ChatGPT conversation without creating another chat turn.
 
-Avoid unnecessary control turns. When the latest assistant response already ends with a valid machine-readable status, Guardian decides directly from that status. Only an ambiguous response without a valid status receives a bounded same-conversation self-check.
+Guardian must continue to work when the marker is absent, malformed, omitted for a strict output format, or ignored by the model.
 
-The self-check also asks the current chat to remember the protocol for the rest of that conversation. This is conversation-context behavior, not a claim about account-level OpenAI memory. If a later response omits the marker, Guardian may send one new self-check for that exact missing-status episode.
+## Canonical marker
 
-## Terminal record
-
-Normal future replies remain human-readable and end with exactly one final line:
+Use exactly:
 
 ```text
-CHAT_TURN_GUARDIAN_STATUS_V1={"decision":"CONTINUE"}
+CHAT_TURN_GUARDIAN_STATUS={"decision":"<VALUE>"}
 ```
 
-The only accepted decisions are:
+Supported values:
 
 - `CONTINUE`
 - `HOLD_APPROVAL`
@@ -27,74 +25,116 @@ The only accepted decisions are:
 - `RATE_LIMIT`
 - `UNSURE`
 
-Parsing is strict. The marker must occur exactly once as the terminal suffix, contain one JSON object with exactly one `decision` member, use the exact case-sensitive vocabulary, and have no text after the JSON other than whitespace. Bare JSON, duplicate JSON members, Markdown fence wrappers, duplicate markers, extra keys, unknown decisions, trailing prose, or malformed JSON are not valid terminal records.
+The public marker name is intentionally version-neutral so future protocol revisions do not require users to rewrite persistent instructions.
 
-ChatGPT's rendered DOM may flatten adjacent block elements in `textContent`. The content adapter therefore prefers rendered `innerText` boundaries, and the parser also accepts the unique marker as a flattened terminal suffix. A marker rendered inside a detected `pre`/`code` block is annotated as non-terminal and rejected.
+## Decision semantics
 
-## Decision order
+- `CONTINUE` — requested work remains and can proceed without human approval, a material human decision, missing human-provided information/credentials, or a human-only operation.
+- `HOLD_APPROVAL` — explicit human approval or authorization is required.
+- `HOLD_DECISION` — a material choice should be made by the human rather than selected autonomously.
+- `HOLD_HUMAN_OPERATION` — missing human information/credentials or an action only the human can perform is required.
+- `COMPLETE` — the requested outcome is actually complete and no further work remains for the current request.
+- `PLATFORM_ERROR` — a platform/tool/runtime/service failure blocks progress.
+- `RATE_LIMIT` — a usage/quota/rate limit blocks progress.
+- `UNSURE` — the model cannot reliably classify the current state.
+
+The status must reflect the actual work state after producing the answer. Do not use `COMPLETE` just because one intermediate step finished, and do not use `CONTINUE` when a real human gate is required.
+
+## Placement rules
+
+When appropriate, the status record must be:
+
+- exactly one record;
+- the final standalone line of the same assistant response;
+- visually/structurally separate from the answer body;
+- outside Markdown code fences, inline code, JSON/code payloads, block quotes, tables, or other requested output containers;
+- followed by no text.
+
+Example:
 
 ```text
-stable latest assistant response
-  -> exact identity / OWNER / composer / human-precedence / UI gates
-  -> strip a valid terminal record from the human-readable body
-  -> deterministic hard HOLD on the body wins
-  -> valid terminal record?
-       yes -> map status locally; do not self-check
-       no  -> deterministic obvious CONTINUE available?
-                yes -> use it; do not self-check
-                no  -> AUTO and eligible?
-                         yes -> send one guarded protocol self-check
-                         no  -> provider/UNSURE according to mode
-  -> response to that self-check has a valid terminal record?
-       yes -> map it
-       no  -> UNSURE/HOLD; never self-check the self-check response
-  -> map the terminal decision to its exact local response policy
-       CONTINUE                         -> send the autonomous continuation response
-       PLATFORM_ERROR / RATE_LIMIT      -> send one recovery/recheck response
-       UNSURE                           -> send one reclassification response
-       HOLD_* / COMPLETE                -> send nothing
-  -> every permitted response still passes final identity, policy, ownership,
-     human, write, stagnation, and hard-fuse guards before one send
+The requested implementation is complete and validated.
+
+CHAT_TURN_GUARDIAN_STATUS={"decision":"COMPLETE"}
 ```
 
-A terminal `CONTINUE` is advisory data, not mutation authority. A local deterministic HOLD, unsafe UI, stale identity, human activity, non-owner tab, ambiguous prior write, stagnation, or fuse boundary still blocks the send.
+The marker is **not** a separate second assistant turn.
 
-## Self-check/bootstrap message
+## Strict-output exception
 
-The fallback is a structured, readable activation message with `Purpose`, `This reply`, `Future replies`, and `Values` sections. It explicitly says that the protocol must not change, restart, reframe, summarize, reprioritize, or continue the current task or project. For its immediate reply, the chat remembers the conversation-local contract, classifies the work state before the activation message, and returns only the terminal record. For later replies, it answers normally without changing project direction, scope, priority, or plan, then appends the record.
+If the user explicitly asks for an exact, strict, or format-exclusive output where an extra line would invalidate the requested result, omit the marker for that reply.
 
-The content adapter constructs contenteditable composer text with text nodes and explicit `br` boundaries. The message therefore retains the same line and section layout seen in this document instead of collapsing into a visually disordered paragraph.
+Examples include an exact JSON payload, a code-only response, or another machine-consumed format that forbids extra text.
 
-The prompt is bounded to the existing 1,000-character guarded-send limit.
+Missing marker is a valid fallback condition. Guardian must not treat omission as failure or create a recovery/self-check turn.
 
-## Status-specific response policy
+## Invalid examples
 
-The protocol decision selects a fixed response; it does not reuse one generic configurable continuation string for every state.
+Inside a code fence:
 
-| Terminal decision | Guardian response |
-|---|---|
-| `CONTINUE` | `All right. Continue and complete the project. Do not stop unless you genuinely need human approval, a material decision, missing information or credentials, or a human-only action.` |
-| `PLATFORM_ERROR` or `RATE_LIMIT` | `Check again to see whether the blocker has been resolved. If it has, continue and complete the project. Do not stop unless you genuinely need human approval, a material decision, missing information or credentials, or a human-only action.` |
-| `UNSURE` | `Check the work state again and return the status record once more.` |
-| `HOLD_APPROVAL`, `HOLD_DECISION`, `HOLD_HUMAN_OPERATION`, or `COMPLETE` | No message. |
+````text
+```json
+CHAT_TURN_GUARDIAN_STATUS={"decision":"CONTINUE"}
+```
+````
 
-Recovery and uncertainty responses are recorded as durable `STATUS_RESPONSE` writes and are emitted at most once until a later human-interaction epoch. A marked `CONTINUE` may continue again only after the chat produces a new assistant response and every progress/stagnation/fuse guard still passes.
+Inside a block quote:
 
-## Loop and restart safety
+```text
+> CHAT_TURN_GUARDIAN_STATUS={"decision":"CONTINUE"}
+```
 
-- A verified self-check turn is recorded with its exact conversation, response, prompt text, protocol version, and decision identity.
-- If the response to that self-check omits or corrupts the marker, the episode becomes `UNSURE`; it cannot recursively create another self-check.
-- A valid `UNSURE`, `PLATFORM_ERROR`, or `RATE_LIMIT` status can produce only its single fixed response for the current human-interaction epoch; the same response is not replayed repeatedly.
-- A later ordinary response without a marker is a new episode and may receive one fallback self-check.
-- The guarded-write journal is durable negative authority. It compacts records made obsolete by a fresh human-interaction epoch and has a hard 4,096-record capacity that fails closed before storage quota exhaustion. Service-worker/browser restart cannot blindly replay a retained reserved, ambiguous, or verified write against the same assistant response.
-- Protocol bootstrap records do not count as verified auto-continuations for the hard fuse.
-- Progress signatures exclude the terminal marker so status syntax cannot create fake progress.
-- Human interaction cancels pending authority for the currently observed response. A later stable response to a new human turn can be evaluated from its own terminal marker.
+Inside a table:
 
-## Recoverable platform errors
+```text
+| CHAT_TURN_GUARDIAN_STATUS={"decision":"CONTINUE"} |
+```
 
-A visible Retry/red delivery error may receive the bounded protocol bootstrap or a status-specific recovery response only when the normal composer is usable and all exact identity and human-precedence guards pass. Guardian never clicks `Retry`. Conversation-full/new-chat-required, authentication, CAPTCHA, verification, confirmation, unsafe composer, permission, or platform safety boundaries remain hard no-send states.
+With trailing content:
 
-## Acceptance coverage
+```text
+CHAT_TURN_GUARDIAN_STATUS={"decision":"CONTINUE"}
+more text
+```
 
-Automated coverage includes exact multiline bootstrap insertion, direct marker parsing without self-check, every decision-to-response mapping, no-send HOLD/completion states, missing/malformed/duplicate/non-terminal markers, one bounded fallback, no recursive fallback, once-per-human-epoch recovery/uncertainty responses, activation continuation, repeated marked continuation, deterministic HOLD precedence, deterministic obvious continuation without wasted self-check, human-turn freshness, recoverable/hard error separation, durable journal restore, marker-free progress signatures, OWNER/MIRROR isolation, stale-state cancellation, ambiguous-write freeze, stagnation, and hard fuse behavior.
+Multiple markers, conflicting canonical/legacy markers, malformed JSON, unsupported values, or extra fields are also invalid.
+
+## Legacy compatibility
+
+v2 continues to read the shipped v1 marker:
+
+```text
+CHAT_TURN_GUARDIAN_STATUS_V1={"decision":"<VALUE>"}
+```
+
+This is compatibility input only. v2 Side Panel and current documentation generate/recommend only `CHAT_TURN_GUARDIAN_STATUS`.
+
+## Side Panel setup methods
+
+Guardian exposes two copyable instruction variants.
+
+### Custom Instructions / Personalization
+
+Use when the user wants compatible normal replies across chats. The text explains all decision values, placement rules, the strict-output exception, and that the marker is optional.
+
+### One conversation only
+
+Use when the user prefers not to change account-wide Custom Instructions. The user manually sends the copied instruction once near the start of that conversation.
+
+Guardian never pastes or sends either instruction into ChatGPT.
+
+## Resolution precedence
+
+A valid marker is not the highest authority. Guardian resolves state in this order:
+
+1. high-confidence page/UI blocker evidence;
+2. valid terminal marker;
+3. deterministic local rules;
+4. optional provider fallback;
+5. unknown/unsure.
+
+A contradictory marker cannot override a reliable rate-limit, auth, verification, Retry/error, or other authoritative page state.
+
+## Security property
+
+The protocol is observational metadata only. No status value, including `CONTINUE`, authorizes Guardian to write to the ChatGPT composer or activate ChatGPT controls.
