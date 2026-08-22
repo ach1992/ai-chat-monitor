@@ -84,13 +84,23 @@ test("Side Panel exposes monitoring, compact protocol setup, notifications, prov
     "--amber:",
     "--red:",
     "--violet:",
+    "--space-1:",
+    "--space-4:",
     "chat-actions",
     "protocol-preview",
+    "telegram-operation-status",
     "@media (max-width: 430px)",
     "@media (max-width: 350px)",
   ]) {
-    assert.ok(styles.includes(token), `Expected responsive/color UX token: ${token}`);
+    assert.ok(styles.includes(token), `Expected responsive/color/spacing UX token: ${token}`);
   }
+  assert.doesNotMatch(
+    styles,
+    /\.protocol-health-row\s*\{[^}]*margin-top:\s*-/s,
+    "Protocol marker health must not use negative vertical spacing",
+  );
+  assert.match(styles, /\.panel-section\s*\{[^}]*gap:\s*0\.78rem/s);
+  assert.match(styles, /\.chat-list[^\{]*\{[^}]*gap:\s*0\.72rem/s);
 
   for (const messageType of [
     "panel:provider-model-catalog-request",
