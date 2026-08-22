@@ -77,6 +77,12 @@ test("Side Panel exposes monitoring, compact protocol setup, notifications, prov
   assert.match(script, /outside Markdown code fences/i);
   assert.match(script, /Do not use CONTINUE when a real human gate is required/i);
 
+  assert.match(script, /let notificationDefaultsDirty = false/);
+  assert.match(script, /defaultsForm\.addEventListener\("input", \(\) => \{ notificationDefaultsDirty = true; \}\)/);
+  assert.match(script, /defaultsForm\.addEventListener\("change", \(\) => \{ notificationDefaultsDirty = true; \}\)/);
+  assert.match(script, /if \(!notificationDefaultsDirty\) \{[\s\S]*browserInputs[\s\S]*soundInputs[\s\S]*stallThresholdInput[\s\S]*suppressFocusedInput/s);
+  assert.match(script, /notificationDefaultsDirty = false;[\s\S]*Notification defaults saved/);
+
   for (const token of [
     "data-action-state",
     "badge[data-tone=",
