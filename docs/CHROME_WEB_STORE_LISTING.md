@@ -1,10 +1,10 @@
-# Chrome Web Store Listing — Chat Turn Guardian v2.0.0
+# Chrome Web Store Listing — AI Chat Monitor v3.0.0
 
-> Draft Chrome Web Store listing copy for the released v2.0.0 product baseline. GitHub Release `v2.0.0` is published, but the extension has not been submitted to or published in the Chrome Web Store.
+> Draft Chrome Web Store listing copy for the v3.0.0 release candidate. The extension has not been submitted to or published in the Chrome Web Store.
 
 ## Name
 
-Chat Turn Guardian
+AI Chat Monitor
 
 ## Short description
 
@@ -12,19 +12,18 @@ Monitor selected ChatGPT conversations and get Browser, sound, or Telegram alert
 
 ## Detailed description
 
-Chat Turn Guardian is a read-only ChatGPT conversation monitor for Chromium browsers.
+AI Chat Monitor is a read-only ChatGPT conversation monitor for Chromium browsers.
 
-Use it to keep track of selected ChatGPT conversations while working in other tabs. Guardian can observe response completion, generation state, Retry/error/rate-limit/auth/verification/conversation-limit conditions, and an optional semantic work status. It can then notify you through Browser notifications, optional local sound, or outbound Telegram alerts.
+Use it to keep track of selected ChatGPT conversations while working in other tabs. AI Chat Monitor can observe response completion, generation state, Retry/error/rate-limit/auth/verification/conversation-limit conditions, and an optional semantic work status. It can then notify you through Browser notifications, optional local sound, or outbound Telegram alerts.
 
-Guardian does **not** write to the ChatGPT composer, click ChatGPT conversation controls, automatically continue chats, or create self-check/recovery turns.
+AI Chat Monitor does **not** write to the ChatGPT composer, click ChatGPT conversation controls, automatically continue chats, or create self-check/recovery turns.
 
 ### Main features
 
 - Monitoring ON/OFF per selected conversation.
 - Response and platform/runtime state observation.
 - Optional terminal semantic status protocol:
-  `CHAT_TURN_GUARDIAN_STATUS={"decision":"..."}`.
-- Backward-compatible reading of the old `_V1` marker without recommending it for new setup.
+  `AI_CHAT_MONITOR_STATUS={"decision":"..."}`.
 - Conservative deterministic classification plus optional AI-provider fallback.
 - Browser notifications with event selection.
 - Optional local sound with event selection.
@@ -35,7 +34,7 @@ Guardian does **not** write to the ChatGPT composer, click ChatGPT conversation 
 
 ### Privacy and control
 
-Guardian is read-only with respect to ChatGPT. Full chat transcripts are not intentionally stored in monitoring history. Optional provider fallback receives bounded/minimized, secret-redacted recent context only when local evidence is insufficient. Telegram receives bounded notification metadata by default, not full ChatGPT messages.
+AI Chat Monitor is read-only with respect to ChatGPT. Full chat transcripts are not intentionally stored in monitoring history. Optional provider fallback receives bounded/minimized, secret-redacted recent context only when local evidence is insufficient. Telegram receives bounded notification metadata by default, not full ChatGPT messages.
 
 No inbound Telegram remote control is provided.
 
@@ -51,7 +50,7 @@ The extension's single purpose is to monitor user-selected ChatGPT Web conversat
 - **`offscreen`** — plays optional local notification sound in a Manifest V3-compatible extension context.
 - **`clipboardWrite`** — copies the user-selected status-protocol setup text from explicit Side Panel Copy buttons. It is never used to paste into ChatGPT.
 - **Persistent host access: `https://chatgpt.com/*`, `https://chat.openai.com/*`** — reads supported ChatGPT page/runtime state for conversations the user chooses to monitor.
-- **Optional host envelope: `https://*/*`** — allows runtime grant of the exact HTTPS origin for a user-configured OpenAI-compatible provider that cannot be known at install time. Guardian does not require arbitrary HTTPS access for normal ChatGPT observation.
+- **Optional host envelope: `https://*/*`** — allows runtime grant of the exact HTTPS origin for a user-configured OpenAI-compatible provider that cannot be known at install time. AI Chat Monitor does not require arbitrary HTTPS access for normal ChatGPT observation.
 
 Telegram Bot API access is requested only when the user configures Telegram.
 
@@ -76,4 +75,4 @@ Repository promotional assets:
 - `store-assets/small-promo-440x280.png` — 440x280
 - `store-assets/marquee-1400x560.png` — 1400x560
 
-Before Store submission, screenshots and final Dashboard/listing declarations must be captured/reviewed against the exact submission build. The current released GitHub baseline is `v2.0.0` at `eb4e90a21cd578620bda855ce2e3ab37aee39027`; a later Store submission must revalidate its own exact source/package identity if development has moved on.
+Before Store submission, screenshots and final Dashboard/listing declarations must be captured/reviewed against the exact submission build. A future Store submission must revalidate its own exact source and package identity before upload.

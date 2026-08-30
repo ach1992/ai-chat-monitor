@@ -29,13 +29,16 @@ jobs:
       - run: npm run package
       - name: Verify release ZIP
         run: |
-          unzip -t artifacts/chat-turn-guardian-*.zip
-          test "$(unzip -Z1 artifacts/chat-turn-guardian-*.zip | grep -c '^manifest.json$')" -eq 1
-          test "$(unzip -Z1 artifacts/chat-turn-guardian-*.zip | grep -Ec '\.(ts|map)$|(^|/)\.env($|\.)')" -eq 0
+          unzip -t artifacts/ai-chat-monitor-*.zip
+          test "$(unzip -Z1 artifacts/ai-chat-monitor-*.zip | grep -c '^manifest.json$')" -eq 1
+          test "$(unzip -Z1 artifacts/ai-chat-monitor-*.zip | grep -Ec '\.(ts|map)$|(^|/)\.env($|\.)')" -eq 0
           node -e 'const fs = require("node:fs"); const info = JSON.parse(fs.readFileSync("artifacts/build-info.json", "utf8")); if (info.sourceSha !== process.env.VALIDATION_SHA) { console.error(`build-info sourceSha mismatch: ${info.sourceSha} != ${process.env.VALIDATION_SHA}`); process.exit(1); }'
+          test "$(node -p 'require("./package.json").name')" = "ai-chat-monitor"
+          grep -R -q "AI_CHAT_MONITOR_STATUS=" dist
+          if grep -R -I -E "Chat Turn Guardian|chat-turn-guardian|CHAT_TURN_GUARDIAN_STATUS" dist; then exit 1; fi
       - uses: actions/upload-artifact@v4
         with:
-          name: chat-turn-guardian-${{ env.VALIDATION_SHA }}
+          name: ai-chat-monitor-${{ env.VALIDATION_SHA }}
           path: artifacts/
           if-no-files-found: error
           retention-days: 14

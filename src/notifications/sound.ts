@@ -31,7 +31,7 @@ async function ensureOffscreenDocument(): Promise<void> {
   offscreenReady = chrome.offscreen.createDocument({
     url: "offscreen/audio.html",
     reasons: ["AUDIO_PLAYBACK"],
-    justification: "Play user-enabled local Chat Turn Guardian notification sounds.",
+    justification: "Play user-enabled local AI Chat Monitor notification sounds.",
   }).catch(() => undefined);
   await offscreenReady;
 }

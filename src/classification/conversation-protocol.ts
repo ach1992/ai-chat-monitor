@@ -10,12 +10,12 @@ export type ConversationProtocolDecision =
   | "RATE_LIMIT"
   | "UNSURE";
 
-export type ConversationStatusMarkerHealth = "DETECTED" | "LEGACY" | "MISSING" | "MALFORMED";
+export type ConversationStatusMarkerHealth = "DETECTED" | "MISSING" | "MALFORMED";
 
 export interface ConversationStatusMarkerResult {
   health: ConversationStatusMarkerHealth;
   decision?: ConversationProtocolDecision;
-  prefix?: typeof GUARDIAN_STATUS_PREFIX | typeof LEGACY_GUARDIAN_STATUS_PREFIX;
+  prefix?: typeof AI_CHAT_MONITOR_STATUS_PREFIX;
 }
 
 interface ConversationProtocolStatus { decision: ConversationProtocolDecision; }
@@ -31,8 +31,7 @@ const ALLOWED_DECISIONS = new Set<ConversationProtocolDecision>([
   "UNSURE",
 ]);
 
-export const GUARDIAN_STATUS_PREFIX = "CHAT_TURN_GUARDIAN_STATUS=";
-export const LEGACY_GUARDIAN_STATUS_PREFIX = "CHAT_TURN_GUARDIAN_STATUS_V1=";
+export const AI_CHAT_MONITOR_STATUS_PREFIX = "AI_CHAT_MONITOR_STATUS=";
 
 function normalizeLines(raw: string): string[] {
   return raw.replace(/\r\n?/g, "\n").trimEnd().split("\n");
@@ -45,18 +44,16 @@ function parseStatusJson(raw: string): ConversationProtocolStatus | undefined {
   return { decision: decision as ConversationProtocolDecision };
 }
 
-function markerOccurrences(raw: string): Array<{ prefix: string; index: number }> {
-  const occurrences: Array<{ prefix: string; index: number }> = [];
-  for (const prefix of [GUARDIAN_STATUS_PREFIX, LEGACY_GUARDIAN_STATUS_PREFIX] as const) {
-    let offset = 0;
-    while (offset < raw.length) {
-      const index = raw.indexOf(prefix, offset);
-      if (index < 0) break;
-      occurrences.push({ prefix, index });
-      offset = index + prefix.length;
-    }
+function markerOccurrences(raw: string): number[] {
+  const occurrences: number[] = [];
+  let offset = 0;
+  while (offset < raw.length) {
+    const index = raw.indexOf(AI_CHAT_MONITOR_STATUS_PREFIX, offset);
+    if (index < 0) break;
+    occurrences.push(index);
+    offset = index + AI_CHAT_MONITOR_STATUS_PREFIX.length;
   }
-  return occurrences.sort((left, right) => left.index - right.index);
+  return occurrences;
 }
 
 function markerAppearsInsideOpenFence(lines: string[], markerLineIndex: number): boolean {
@@ -90,23 +87,18 @@ export function inspectConversationStatusMarker(raw: string): ConversationStatus
 
   const lines = normalizeLines(normalized);
   const terminalLine = lines.at(-1)?.trim() ?? "";
-  const occurrence = occurrences[0];
-  if (occurrence === undefined) return { health: "MALFORMED" };
-  const prefix = occurrence.prefix === GUARDIAN_STATUS_PREFIX
-    ? GUARDIAN_STATUS_PREFIX
-    : LEGACY_GUARDIAN_STATUS_PREFIX;
+  if (!terminalLine.startsWith(AI_CHAT_MONITOR_STATUS_PREFIX)) return { health: "MALFORMED" };
 
-  if (!terminalLine.startsWith(prefix)) return { health: "MALFORMED" };
   const markerLineIndex = lines.length - 1;
   if (markerAppearsInsideOpenFence(lines, markerLineIndex)) return { health: "MALFORMED" };
 
-  const status = parseStatusJson(terminalLine.slice(prefix.length).trim());
+  const status = parseStatusJson(terminalLine.slice(AI_CHAT_MONITOR_STATUS_PREFIX.length).trim());
   if (status === undefined) return { health: "MALFORMED" };
 
   return {
-    health: prefix === GUARDIAN_STATUS_PREFIX ? "DETECTED" : "LEGACY",
+    health: "DETECTED",
     decision: status.decision,
-    prefix,
+    prefix: AI_CHAT_MONITOR_STATUS_PREFIX,
   };
 }
 
@@ -115,13 +107,12 @@ export function conversationProtocolDecision(raw: string): ConversationProtocolD
 }
 
 export function hasValidConversationProtocolStatus(raw: string): boolean {
-  const health = inspectConversationStatusMarker(raw).health;
-  return health === "DETECTED" || health === "LEGACY";
+  return inspectConversationStatusMarker(raw).health === "DETECTED";
 }
 
 export function stripConversationProtocolStatus(raw: string): string {
   const marker = inspectConversationStatusMarker(raw);
-  if (marker.health !== "DETECTED" && marker.health !== "LEGACY") return raw;
+  if (marker.health !== "DETECTED") return raw;
   const lines = normalizeLines(raw);
   lines.pop();
   return lines.join("\n").trimEnd();
@@ -129,22 +120,18 @@ export function stripConversationProtocolStatus(raw: string): string {
 
 export function parseConversationProtocolStatus(raw: string): ClassificationResult {
   const marker = inspectConversationStatusMarker(raw);
-  if ((marker.health !== "DETECTED" && marker.health !== "LEGACY") || marker.decision === undefined || marker.decision === "UNSURE") {
+  if (marker.health !== "DETECTED" || marker.decision === undefined || marker.decision === "UNSURE") {
     return {
       decision: "UNSURE",
       reasonCode: "AMBIGUOUS",
       reason: marker.health === "MISSING"
-        ? "No standalone terminal Guardian status marker was present."
-        : "The terminal Guardian status marker was malformed, ambiguous, or uncertain.",
+        ? "No standalone terminal AI Chat Monitor status marker was present."
+        : "The terminal AI Chat Monitor status marker was malformed, ambiguous, or uncertain.",
       source: "CONVERSATION_PROTOCOL",
     };
   }
 
-  const reason = boundedReason(
-    marker.health === "LEGACY"
-      ? "The assistant supplied a valid legacy terminal Guardian status marker."
-      : "The assistant supplied a valid terminal Guardian status marker.",
-  );
+  const reason = boundedReason("The assistant supplied a valid terminal AI Chat Monitor status marker.");
   const common = { source: "CONVERSATION_PROTOCOL" as const, confidence: 1 };
 
   switch (marker.decision) {
@@ -166,7 +153,7 @@ export function parseConversationProtocolStatus(raw: string): ClassificationResu
       return {
         decision: "UNSURE",
         reasonCode: "AMBIGUOUS",
-        reason: "The Guardian status marker could not be resolved.",
+        reason: "The AI Chat Monitor status marker could not be resolved.",
         source: "CONVERSATION_PROTOCOL",
       };
   }

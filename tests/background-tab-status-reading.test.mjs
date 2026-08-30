@@ -4,8 +4,8 @@ import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 import { webcrypto } from "node:crypto";
 
-const CANONICAL_STATUS = 'CHAT_TURN_GUARDIAN_STATUS={"decision":"HOLD_HUMAN_OPERATION"}';
-const LEGACY_STATUS = 'CHAT_TURN_GUARDIAN_STATUS_V1={"decision":"HOLD_HUMAN_OPERATION"}';
+const CANONICAL_STATUS = 'AI_CHAT_MONITOR_STATUS={"decision":"HOLD_HUMAN_OPERATION"}';
+const RETIRED_STATUS = 'CHAT_TURN_GUARDIAN_STATUS={"decision":"HOLD_HUMAN_OPERATION"}';
 
 class FakeNode {
   static DOCUMENT_POSITION_DISCONNECTED = 1;
@@ -103,16 +103,16 @@ test("background-safe structural reading recovers canonical terminal status", as
   assert.equal(result.latestAssistant.domMessageId, "assistant-bg");
 });
 
-test("background-safe structural reading retains legacy marker compatibility", async () => {
+test("retired marker does not trigger background structural recovery", async () => {
   const GuardianContent = await loadAdapter();
-  const adapter = new GuardianContent.BrowserChatGPTAdapter(makeDom(LEGACY_STATUS), { pathname: "/c/chat-bg" });
+  const adapter = new GuardianContent.BrowserChatGPTAdapter(makeDom(RETIRED_STATUS), { pathname: "/c/chat-bg" });
   const result = await adapter.observe(123);
-  assert.equal(result.latestAssistant.normalizedText, `Finished.\n${LEGACY_STATUS}`);
+  assert.equal(result.latestAssistant.normalizedText, "stale rendered assistant text");
 });
 
 test("status structurally rendered inside code is marked non-terminal for the parser", async () => {
   const GuardianContent = await loadAdapter();
   const adapter = new GuardianContent.BrowserChatGPTAdapter(makeDom(CANONICAL_STATUS, { code: true }), { pathname: "/c/chat-bg" });
   const result = await adapter.observe(123);
-  assert.match(result.latestAssistant.normalizedText, /Guardian status rendered inside a code block\]$/);
+  assert.match(result.latestAssistant.normalizedText, /AI Chat Monitor status rendered inside a code block\]$/);
 });

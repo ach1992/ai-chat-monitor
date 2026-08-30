@@ -132,7 +132,7 @@ test("OpenRouter preset uses the fixed compatible base URL without hardcoded mod
     id: "router",
     apiKey: "router-secret-key",
     model: "user-selected/model",
-    siteTitle: "Chat Turn Guardian",
+    siteTitle: "AI Chat Monitor",
   });
   const redacted = redactProviderProfile(profile);
   assert.equal(redacted.endpoint, OPENROUTER_BASE_URL);

@@ -43,7 +43,10 @@ test("manifest and public release metadata stay aligned with the implemented per
   const manifest = JSON.parse(manifestText);
 
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.name, "Chat Turn Guardian");
+  assert.equal(packageJson.name, "ai-chat-monitor");
+  assert.equal(packageLock.name, "ai-chat-monitor");
+  assert.equal(packageLock.packages[""].name, "ai-chat-monitor");
+  assert.equal(manifest.name, "AI Chat Monitor");
   assert.equal(manifest.version, packageJson.version);
   assert.equal(packageLock.version, packageJson.version);
   assert.equal(packageLock.packages[""].version, packageJson.version);
@@ -83,9 +86,16 @@ test("Side Panel prominently discloses read-only provider and Telegram data hand
   assert.match(html, /Full transcripts are not stored/);
   assert.match(html, /minimized, secret-redacted context/);
   assert.match(html, /Telegram receives bounded notification metadata by default/);
-  assert.match(html, /Guardian never writes to ChatGPT/);
-  assert.match(html, /github\.com\/ach1992\/chat-turn-guardian\/blob\/main\/PRIVACY\.md/);
+  assert.match(html, /AI Chat Monitor never writes to ChatGPT/);
+  assert.match(html, /github\.com\/ach1992\/ai-chat-monitor\/blob\/main\/PRIVACY\.md/);
   assert.match(telegramUi, /never sends full ChatGPT messages and accepts no inbound commands/);
+});
+
+test("packaged runtime exposes only the AI Chat Monitor product identity", async () => {
+  for (const file of await executableFiles(resolve(repoRoot, "dist"))) {
+    const content = await readFile(file, "utf8");
+    assert.doesNotMatch(content, /Chat Turn Guardian|chat-turn-guardian|CHAT_TURN_GUARDIAN_STATUS/);
+  }
 });
 
 test("packaged extension contains no obvious remotely hosted executable code patterns", async () => {

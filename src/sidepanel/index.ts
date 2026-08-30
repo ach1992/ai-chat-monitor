@@ -42,12 +42,12 @@ const EVENT_LABELS: Readonly<Record<MonitoringEventType, string>> = {
   REPEATED_RESPONSE: "Repeated response",
 };
 
-const CUSTOM_INSTRUCTIONS = `Chat Turn Guardian — optional status protocol
+const CUSTOM_INSTRUCTIONS = `AI Chat Monitor — optional status protocol
 
 This status is metadata for a read-only monitoring extension. It must not change, continue, restart, summarize, or reframe the user's task.
 
 For normal replies, first answer the user normally. After the answer is complete, add one blank line and then exactly one standalone final line in this format:
-CHAT_TURN_GUARDIAN_STATUS={"decision":"<VALUE>"}
+AI_CHAT_MONITOR_STATUS={"decision":"<VALUE>"}
 
 Choose <VALUE> from the actual work state after producing the answer:
 - CONTINUE — Requested work remains and can proceed autonomously without human approval, a material human decision, missing human-provided information/credentials, or a human-only operation.
@@ -66,10 +66,10 @@ Rules:
 - Put no text after the status record.
 - If the user explicitly requires an exact, strict, or format-exclusive output where an extra status line would invalidate the requested output, omit the status line for that reply. The monitoring extension is designed to work without it.`;
 
-const CHAT_INSTRUCTION = `For this conversation, use the following optional Chat Turn Guardian status protocol. It is metadata for a read-only monitor and must not change the task itself.
+const CHAT_INSTRUCTION = `For this conversation, use the following optional AI Chat Monitor status protocol. It is metadata for a read-only monitor and must not change the task itself.
 
 For normal replies, answer normally first. Then add one blank line and exactly one standalone final line:
-CHAT_TURN_GUARDIAN_STATUS={"decision":"<VALUE>"}
+AI_CHAT_MONITOR_STATUS={"decision":"<VALUE>"}
 
 Choose <VALUE> from the actual work state after the answer:
 - CONTINUE — Work remains and can proceed autonomously without human approval, a material decision, missing human-provided information/credentials, or a human-only operation.
@@ -198,7 +198,6 @@ function sourceTone(source: SemanticStatusSource | undefined): UiTone {
 
 function markerTone(health: ConversationStatusMarkerHealth | undefined): UiTone {
   if (health === "DETECTED") return "ok";
-  if (health === "LEGACY") return "violet";
   if (health === "MALFORMED") return "danger";
   return "muted";
 }
@@ -225,7 +224,6 @@ function renderRuntime(runtime: MonitoringRuntimeStatus | undefined): HTMLElemen
 function markerHealthText(runtime: MonitoringRuntimeStatus | undefined): string {
   switch (runtime?.markerHealth) {
     case "DETECTED": return "Marker detected";
-    case "LEGACY": return "Legacy marker";
     case "MALFORMED": return "Malformed — fallback active";
     case "MISSING": return "Missing — fallback active";
     default: return "Not observed yet";
@@ -573,8 +571,8 @@ async function refreshAll(manual = false): Promise<void> {
     const monitored = data.chats.length;
     statusElement.textContent = `${monitored} monitored conversation${monitored === 1 ? "" : "s"}`;
     detailsElement.textContent = monitored === 0
-      ? "Guardian is ready. Turn monitoring on from a ChatGPT tab to add it."
-      : "Guardian is observing only; it has no ChatGPT mutation path.";
+      ? "AI Chat Monitor is ready. Turn monitoring on from a ChatGPT tab to add it."
+      : "AI Chat Monitor is observing only; it has no ChatGPT mutation path.";
     summaryCard.dataset.tone = monitored > 0 ? "ok" : "info";
     if (manual) flashButton(refreshButton, "success", "Refreshed ✓", "Refresh");
   } catch (error) {

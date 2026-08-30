@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Chat Turn Guardian</title>
+    <title>AI Chat Monitor</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -11,7 +11,7 @@
       <header class="hero">
         <div class="hero-copy">
           <p class="eyebrow">Read-only chat monitor</p>
-          <h1>Chat Turn Guardian</h1>
+          <h1>AI Chat Monitor</h1>
           <p class="lede">See what each monitored ChatGPT conversation is doing and get notified when it finishes, needs attention, or hits a platform problem.</p>
         </div>
         <div class="hero-actions">
@@ -34,7 +34,7 @@
             <h2 id="current-tab-heading">Monitor this chat</h2>
           </div>
         </div>
-        <p class="section-note">Guardian only observes this ChatGPT page. It never writes to the composer or activates ChatGPT controls.</p>
+        <p class="section-note">AI Chat Monitor only observes this ChatGPT page. It never writes to the composer or activates ChatGPT controls.</p>
         <div data-current-tab-live class="empty-state" aria-live="polite">Checking the active tab…</div>
       </section>
 
@@ -46,7 +46,7 @@
           </div>
         </summary>
         <p class="section-note">
-          Optional, but recommended for better semantic detection. Guardian still works when the marker is missing and falls back safely.
+          Optional, but recommended for better semantic detection. AI Chat Monitor still works when the marker is missing and falls back safely.
         </p>
         <div class="meta-row protocol-health-row">
           <span class="badge" data-marker-health data-tone="muted">Not detected yet</span>
@@ -235,16 +235,16 @@
         <div class="section-heading">
           <div>
             <p class="eyebrow">Privacy &amp; data</p>
-            <h2 id="privacy-disclosure-heading">What Guardian processes</h2>
+            <h2 id="privacy-disclosure-heading">What AI Chat Monitor processes</h2>
           </div>
         </div>
         <p class="section-note">
-          Guardian reads page state and bounded recent visible chat content on supported ChatGPT pages to classify monitored conversations. Full transcripts are not stored. Optional providers receive only minimized, secret-redacted context when fallback classification is needed. Telegram receives bounded notification metadata by default. Guardian never writes to ChatGPT.
-          <a href="https://github.com/ach1992/chat-turn-guardian/blob/main/PRIVACY.md" target="_blank" rel="noopener noreferrer">Read the privacy policy.</a>
+          AI Chat Monitor reads page state and bounded recent visible chat content on supported ChatGPT pages to classify monitored conversations. Full transcripts are not stored. Optional providers receive only minimized, secret-redacted context when fallback classification is needed. Telegram receives bounded notification metadata by default. AI Chat Monitor never writes to ChatGPT.
+          <a href="https://github.com/ach1992/ai-chat-monitor/blob/main/PRIVACY.md" target="_blank" rel="noopener noreferrer">Read the privacy policy.</a>
         </p>
       </section>
 
-      <footer class="footer-note">Read-only by design: Guardian observes and notifies; it never sends, retries, or continues ChatGPT turns.</footer>
+      <footer class="footer-note">Read-only by design: AI Chat Monitor observes and notifies; it never sends, retries, or continues ChatGPT turns.</footer>
     </main>
 
     <script type="module" src="./index.js"></script>

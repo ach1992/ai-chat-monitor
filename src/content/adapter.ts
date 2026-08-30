@@ -39,10 +39,7 @@ namespace GuardianContent {
 
   const MAX_NORMALIZED_RESPONSE_CHARS = 12_000;
   const MAX_PAGE_TITLE_CHARS = 300;
-  const STATUS_PREFIXES = [
-    "CHAT_TURN_GUARDIAN_STATUS=",
-    "CHAT_TURN_GUARDIAN_STATUS_V1=",
-  ] as const;
+  const STATUS_PREFIX = "AI_CHAT_MONITOR_STATUS=";
   const ASSISTANT_SELECTORS = ['[data-message-author-role="assistant"]', 'article[data-turn="assistant"]'] as const;
   const USER_SELECTORS = ['[data-message-author-role="user"]', 'article[data-turn="user"]'] as const;
   const TURN_SELECTOR = '[data-testid^="conversation-turn-"]';
@@ -169,7 +166,7 @@ namespace GuardianContent {
   }
 
   function containsStatusPrefix(value: string): boolean {
-    return STATUS_PREFIXES.some((prefix) => value.includes(prefix));
+    return value.includes(STATUS_PREFIX);
   }
 
   function elementText(element: Element): string {
@@ -191,7 +188,7 @@ namespace GuardianContent {
         const markerIsInCode = [...querySelectorAll.call(element, "pre, code")].some((code) =>
           containsStatusPrefix(code.textContent ?? ""),
         );
-        if (markerIsInCode) return `${selected}\n[Guardian status rendered inside a code block]`;
+        if (markerIsInCode) return `${selected}\n[AI Chat Monitor status rendered inside a code block]`;
       } catch {
         // Keep the observed text; parser ambiguity still fails safely.
       }

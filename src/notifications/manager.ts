@@ -126,7 +126,7 @@ export function telegramNotificationText(notification: GuardianNotification): st
       MAX_TELEGRAM_CONVERSATION_HTML_LENGTH,
     );
   const sections = [
-    "<b>🛡️ Chat Turn Guardian</b>",
+    "<b>🛡️ AI Chat Monitor</b>",
     TELEGRAM_DIVIDER,
     `<b>${TELEGRAM_EVENT_ICON[notification.event]} ${title}</b>`,
     ...(message.length === 0 ? [] : ["", message]),
@@ -137,12 +137,12 @@ export function telegramNotificationText(notification: GuardianNotification): st
   const text = sections.join("\n");
   return text.length <= MAX_TELEGRAM_MESSAGE_LENGTH
     ? text
-    : "<b>🛡️ Chat Turn Guardian</b>\n🚨 Notification formatting exceeded its safe bound.";
+    : "<b>🛡️ AI Chat Monitor</b>\n🚨 Notification formatting exceeded its safe bound.";
 }
 
 function telegramTestNotificationText(): string {
   return [
-    "<b>🛡️ Chat Turn Guardian</b>",
+    "<b>🛡️ AI Chat Monitor</b>",
     TELEGRAM_DIVIDER,
     "<b>🧪 Telegram test successful</b>",
     "",

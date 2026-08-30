@@ -27,7 +27,7 @@ function jsonResponse(body, status = 200) {
 
 test("Telegram notification HTML emphasizes event and conversation identity", () => {
   const text = telegramNotificationText(notification());
-  assert.match(text, /^<b>🛡️ Chat Turn Guardian<\/b>/);
+  assert.match(text, /^<b>🛡️ AI Chat Monitor<\/b>/);
   assert.match(text, /<b>👤 Approval required<\/b>/);
   assert.match(text, /<b>💬 Conversation<\/b>\n<code>conversation-1234567890<\/code>/);
   assert.ok(text.length <= 700);

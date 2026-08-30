@@ -37,8 +37,8 @@ test("Side Panel exposes monitoring, compact protocol setup, notifications, prov
   }
 
   assert.match(html, /Read-only chat monitor/i);
-  assert.match(html, /Guardian still works when the marker is missing/i);
-  assert.match(html, /Guardian only observes/i);
+  assert.match(html, /AI Chat Monitor still works when the marker is missing/i);
+  assert.match(html, /AI Chat Monitor only observes/i);
   assert.match(html, /never writes to ChatGPT/i);
   assert.match(html, /Only chats with monitoring enabled are shown here/i);
   assert.match(html, /protocol-preview/);
@@ -59,8 +59,9 @@ test("Side Panel exposes monitoring, compact protocol setup, notifications, prov
   assert.match(script, /Copied/);
   assert.match(script, /Saving/);
   assert.match(script, /Refreshing/);
-  assert.match(script, /CHAT_TURN_GUARDIAN_STATUS=\\?\{?[^\n]*decision/);
-  assert.doesNotMatch(script, /CHAT_TURN_GUARDIAN_STATUS_V1=/);
+  assert.match(script, /AI_CHAT_MONITOR_STATUS=\\?\{?[^\n]*decision/);
+  assert.doesNotMatch(script, /AI_CHAT_MONITOR_STATUS_V1=/);
+  assert.doesNotMatch(script, /CHAT_TURN_GUARDIAN_STATUS=/);
   for (const decision of [
     "CONTINUE",
     "HOLD_APPROVAL",

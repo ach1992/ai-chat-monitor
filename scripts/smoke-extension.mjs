@@ -9,7 +9,7 @@ import { verifyManifestAssets } from "./verify-manifest-assets.mjs";
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const extensionPath = await realpath(resolve(repoRoot, "dist"));
 await verifyManifestAssets(extensionPath);
-const profilePath = await mkdtemp(resolve(tmpdir(), "chat-turn-guardian-chrome-"));
+const profilePath = await mkdtemp(resolve(tmpdir(), "ai-chat-monitor-chrome-"));
 
 function findOnPath(command) {
   if (command.includes("/")) {

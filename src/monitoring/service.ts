@@ -164,7 +164,7 @@ function eventPresentation(type: MonitoringEventType): { title: string; message:
     case "AUTH_REQUIRED": return { title: "Authentication required", message: "The monitored chat requires sign-in or session recovery." };
     case "VERIFICATION_REQUIRED": return { title: "Verification required", message: "The monitored chat requires human verification or confirmation." };
     case "CONVERSATION_FULL": return { title: "Conversation limit reached", message: "The monitored conversation indicates that a new chat may be required." };
-    case "SEMANTIC_UNKNOWN": return { title: "Chat status uncertain", message: "Guardian could not reliably determine the semantic work state." };
+    case "SEMANTIC_UNKNOWN": return { title: "Chat status uncertain", message: "AI Chat Monitor could not reliably determine the semantic work state." };
     case "PROVIDER_ERROR": return { title: "Classifier provider error", message: "The optional classifier provider could not resolve the chat state." };
     case "GENERATION_STALLED": return { title: "Generation may be stalled", message: "No observable response progress was detected within the configured threshold." };
     case "REPEATED_RESPONSE": return { title: "Repeated assistant response", message: "A fresh assistant turn repeated the previous response exactly." };
@@ -464,7 +464,7 @@ export class MonitoringService {
       return this.#cacheResolution({ key, decision: uiDecision, source: "UI", marker });
     }
 
-    if ((marker.health === "DETECTED" || marker.health === "LEGACY") && marker.decision !== undefined) {
+    if (marker.health === "DETECTED" && marker.decision !== undefined) {
       const classification = parseConversationProtocolStatus(assistant.normalizedText);
       return this.#cacheResolution({
         key,
