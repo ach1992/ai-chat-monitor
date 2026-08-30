@@ -2,9 +2,9 @@
 
 ## Product version
 
-Current source baseline: **v3.0.0 release candidate**
+Current stable baseline: **v3.0.0**
 
-v3 establishes the AI Chat Monitor product identity and the sole `AI_CHAT_MONITOR_STATUS` protocol. It preserves the durable read-only monitoring and notification boundary established by v2. Publication evidence must be recorded only after the exact merged candidate is validated and released.
+v3 establishes the AI Chat Monitor product identity and the sole `AI_CHAT_MONITOR_STATUS` protocol. It preserves the durable read-only monitoring and notification boundary established by v2. The exact-source publication evidence is recorded in the README and Store readiness document.
 
 ## Product goal
 

@@ -1,6 +1,6 @@
 # Chrome Web Store Listing — AI Chat Monitor v3.0.0
 
-> Draft Chrome Web Store listing copy for the v3.0.0 release candidate. The extension has not been submitted to or published in the Chrome Web Store.
+> Draft Chrome Web Store listing copy for the released v3.0.0 product baseline. GitHub Release `v3.0.0` is published, but the extension has not been submitted to or published in the Chrome Web Store.
 
 ## Name
 
