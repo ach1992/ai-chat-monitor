@@ -1,30 +1,20 @@
-# Chat Turn Guardian — Project Specification
+# AI Chat Monitor — Project Specification
 
 ## Product version
 
-Current released baseline: **v2.0.1**
+Current source baseline: **v3.0.0 release candidate**
 
-v2 is a breaking product pivot from guarded automatic continuation to a strictly read-only ChatGPT conversation monitor and notifier. `v2.0.1` is a compatible patch release in that same product contract.
-
-Released baseline evidence:
-
-- GitHub Release: `v2.0.1`
-- Release target commit: `53fd7a09abc99c157e15835d391ca4611eb128ec`
-- Release ZIP: `chat-turn-guardian-2.0.1.zip`
-- Packaged runtime files: `48`
-- Release ZIP SHA-256: `8aca51ced17ca1133293600df80abc9422170ded1f63fab221822da6b0bfe821`
-
-Future development starts from the current `main` baseline and should treat the v2 read-only boundary below as the durable product contract unless an explicit new product decision changes it.
+v3 establishes the AI Chat Monitor product identity and the sole `AI_CHAT_MONITOR_STATUS` protocol. It preserves the durable read-only monitoring and notification boundary established by v2. Publication evidence must be recorded only after the exact merged candidate is validated and released.
 
 ## Product goal
 
-Chat Turn Guardian helps a user observe selected long-running ChatGPT Web conversations without having to keep each tab in focus. It detects response/runtime state, resolves an optional semantic work state, and delivers useful notifications while preserving full human control of the conversation.
+AI Chat Monitor helps a user observe selected long-running ChatGPT Web conversations without having to keep each tab in focus. It detects response/runtime state, resolves an optional semantic work state, and delivers useful notifications while preserving full human control of the conversation.
 
 ## Single purpose
 
-Guardian may observe supported ChatGPT pages and notify the user.
+AI Chat Monitor may observe supported ChatGPT pages and notify the user.
 
-Guardian must never:
+AI Chat Monitor must never:
 
 - write to the ChatGPT composer;
 - click or programmatically activate Send, Retry, Continue generating, Regenerate, Stop, confirmation, verification, or other ChatGPT conversation controls;
@@ -46,7 +36,7 @@ This invariant applies even when semantic state is `CONTINUE`.
 
 ## State model
 
-Guardian keeps runtime/page state separate from semantic conversation state.
+AI Chat Monitor keeps runtime/page state separate from semantic conversation state.
 
 ### Page/runtime state
 
@@ -94,27 +84,19 @@ Meaning:
 Canonical public record:
 
 ```text
-CHAT_TURN_GUARDIAN_STATUS={"decision":"<VALUE>"}
+AI_CHAT_MONITOR_STATUS={"decision":"<VALUE>"}
 ```
 
 Rules:
 
-- optional; Guardian must work without it;
+- optional; AI Chat Monitor must work without it;
 - exactly one terminal record when used;
 - final standalone line of the same assistant turn;
 - nothing after it;
 - outside Markdown code fences, inline code, JSON/code payloads, block quotes, tables, or other requested output containers;
 - omit it when a user requires an exact/exclusive output format that an extra line would invalidate.
 
-Legacy compatibility:
-
-```text
-CHAT_TURN_GUARDIAN_STATUS_V1={"decision":"<VALUE>"}
-```
-
-The legacy form remains readable during the compatibility window, but v2 UI/docs generate and recommend only the unversioned canonical form.
-
-Multiple markers, conflicting marker forms, malformed JSON, unsupported decisions, or markers embedded in structured/code output are invalid and fall through safely.
+Multiple markers, malformed JSON, unsupported decisions, or markers embedded in structured/code output are invalid and fall through safely.
 
 ## Semantic resolution order
 
@@ -177,7 +159,7 @@ Events are transition/episode based and deduplicated. A single response should p
 
 ## Multi-tab behavior
 
-The same ChatGPT conversation may be open in multiple tabs. v2 uses conversation/response identity for notification/provider deduplication rather than v1 OWNER/MIRROR send authority.
+The same ChatGPT conversation may be open in multiple tabs. The current architecture uses conversation/response identity for notification/provider deduplication rather than legacy OWNER/MIRROR send authority.
 
 Tab/document identity remains useful to reject stale observations and focus a known tab, but no tab owns send authority because send authority no longer exists.
 
@@ -196,7 +178,7 @@ Migration from v1 policy:
 ## Privacy and security
 
 - ChatGPT content is untrusted input.
-- No page mutation authority exists anywhere in v2 runtime.
+- No page mutation authority exists anywhere in the current runtime.
 - Full transcripts are not intentionally stored in monitoring history.
 - Provider input is bounded/minimized and secret-redacted.
 - Provider API keys and Telegram bot tokens stay in trusted extension storage.
@@ -211,7 +193,7 @@ The Side Panel provides:
 - Monitoring ON/OFF;
 - current page state;
 - current semantic state and source (`UI`, `STATUS_MARKER`, `RULE`, `PROVIDER`, `UNKNOWN`);
-- marker health (`Detected`, `Legacy`, `Missing`, `Malformed`);
+- marker health (`Detected`, `Missing`, `Malformed`);
 - Browser/Sound event configuration;
 - status protocol setup with copyable Custom Instructions and per-chat variants;
 - provider settings/readiness;
@@ -222,14 +204,14 @@ The Side Panel must not expose AUTO-send, continuation text, send delay/cooldown
 
 ## Status protocol setup UX
 
-The Side Panel must explain that Guardian works without the status protocol.
+The Side Panel must explain that AI Chat Monitor works without the status protocol.
 
 Two copyable variants are supported:
 
 1. **Custom Instructions / Personalization** — for compatible normal replies across chats.
 2. **One conversation only** — a message the user manually sends once near the start of a specific chat.
 
-Both variants explain enough decision semantics for a model to choose reliably and explicitly state the strict-format exception. Guardian never pastes or sends these instructions itself.
+Both variants explain enough decision semantics for a model to choose reliably and explicitly state the strict-format exception. AI Chat Monitor never pastes or sends these instructions itself.
 
 ## Development and release requirements
 
@@ -250,11 +232,11 @@ A test artifact is not a public release. Any future version publication remains 
 The released v2.0.0 outcome satisfied the following acceptance requirements and they remain regression expectations for future development unless intentionally superseded:
 
 - no runtime path writes to the ChatGPT composer or programmatically activates ChatGPT conversation controls;
-- no in-chat self-check/bootstrap/status-response/recovery message is generated or sent by Guardian;
+- no in-chat self-check/bootstrap/status-response/recovery message is generated or sent by AI Chat Monitor;
 - stable response completion produces one deduplicated response episode;
 - reliable Retry/error/rate-limit/auth/verification/conversation-full states are surfaced observationally;
 - canonical status marker parses without creating another chat turn;
-- legacy `_V1` marker remains readable but is not generated/recommended;
+- retired product markers are rejected and fall through safely;
 - marker parser rejects ambiguous/embedded/structured-output marker situations;
 - missing/malformed marker falls through safely to rules/provider/unknown;
 - provider failure cannot override known UI state or cause browser action;
@@ -263,7 +245,7 @@ The released v2.0.0 outcome satisfied the following acceptance requirements and 
 - service-worker restart does not replay notification episodes excessively or restore send authority;
 - v1.2.5 settings migrate to monitoring-only behavior;
 - Side Panel contains no automatic continuation controls/claims;
-- README, Architecture, Privacy, Store readiness/listing, status protocol, and changelog describe v2 accurately;
+- README, Architecture, Privacy, Store readiness/listing, status protocol, and changelog described the v2 release accurately;
 - automated regression coverage enforces the read-only protocol/runtime invariant and core monitoring transitions;
 - repository validation passes on the exact candidate SHA;
 - Owner live Chromium acceptance was completed before integration;

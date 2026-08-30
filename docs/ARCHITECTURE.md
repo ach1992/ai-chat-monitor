@@ -1,10 +1,10 @@
-# Chat Turn Guardian — Architecture
+# AI Chat Monitor — Architecture
 
 ## Overview
 
-v2.0.0 is a read-only monitoring architecture. The extension observes supported ChatGPT pages, derives normalized runtime and semantic state, and emits deduplicated monitoring events to user-selected notification channels.
+v3.0.0 preserves the read-only monitoring architecture. The extension observes supported ChatGPT pages, derives normalized runtime and semantic state, and emits deduplicated monitoring events to user-selected notification channels.
 
-There is no ChatGPT write path in the v2 architecture.
+There is no ChatGPT write path in the current architecture.
 
 ```text
 ChatGPT DOM
@@ -51,7 +51,7 @@ The adapter has no send/continue/retry authority.
 
 ### Content agent
 
-`src/content/index.ts` reports observations and lifecycle identity to the background runtime. It may respond to read/reconnect/status-oriented extension messages, but the v2 protocol must contain no guarded-send or composer-mutation command.
+`src/content/index.ts` reports observations and lifecycle identity to the background runtime. It may respond to read/reconnect/status-oriented extension messages, but the current protocol must contain no guarded-send or composer-mutation command.
 
 ### Background runtime
 
@@ -69,7 +69,7 @@ A service-worker restart requires fresh page observations before current runtime
 
 ## Monitoring domain
 
-Primary v2 domain files:
+Primary monitoring domain files:
 
 - `src/monitoring/types.ts`
 - `src/monitoring/policy.ts`
@@ -116,7 +116,7 @@ Semantic source values:
 `MonitoringService` resolves stable assistant state in this order:
 
 1. high-confidence UI/page blocker state;
-2. canonical/legacy terminal status marker;
+2. canonical terminal status marker;
 3. strong deterministic local classifier;
 4. optional configured provider fallback;
 5. `UNSURE`/unknown.
@@ -128,20 +128,13 @@ Known UI blocker evidence cannot be overridden by provider interpretation.
 Canonical prefix:
 
 ```text
-CHAT_TURN_GUARDIAN_STATUS=
-```
-
-Legacy compatibility prefix:
-
-```text
-CHAT_TURN_GUARDIAN_STATUS_V1=
+AI_CHAT_MONITOR_STATUS=
 ```
 
 The parser accepts exactly one standalone terminal record with one supported `decision` field. It rejects ambiguous/malformed cases, including:
 
 - trailing content;
 - multiple markers;
-- conflicting canonical/legacy markers;
 - unsupported decisions;
 - extra JSON fields;
 - marker text embedded in Markdown backtick or tilde code fences;
@@ -233,7 +226,7 @@ Persistent host permissions are limited to supported ChatGPT origins. Broad HTTP
 
 ## Removed v1 architecture
 
-The following v1 concepts are not part of v2 runtime authority:
+The following legacy concepts are not part of current runtime authority:
 
 - automation coordinator;
 - guarded-send protocol;

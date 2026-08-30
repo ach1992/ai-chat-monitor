@@ -122,9 +122,9 @@ test("adapter normalizes and fingerprints assistant text without DOM payloads", 
   assert.equal(Object.hasOwn(result.latestAssistant, "outerHTML"), false);
 });
 
-test("adapter preserves rendered block boundaries for a terminal Guardian status", async () => {
+test("adapter preserves rendered block boundaries for a terminal AI Chat Monitor status", async () => {
   const GuardianContent = await loadAdapter();
-  const marker = 'CHAT_TURN_GUARDIAN_STATUS_V1={"decision":"CONTINUE"}';
+  const marker = 'AI_CHAT_MONITOR_STATUS={"decision":"CONTINUE"}';
   const assistant = new FakeElement({
     textContent: `Human-readable result.${marker}`,
     innerText: `Human-readable result.\n${marker}`,
@@ -141,9 +141,9 @@ test("adapter preserves rendered block boundaries for a terminal Guardian status
   assert.equal(result.latestAssistant.normalizedText, `Human-readable result.\n${marker}`);
 });
 
-test("adapter makes a Guardian marker rendered in a code block non-terminal", async () => {
+test("adapter makes an AI Chat Monitor marker rendered in a code block non-terminal", async () => {
   const GuardianContent = await loadAdapter();
-  const marker = 'CHAT_TURN_GUARDIAN_STATUS_V1={"decision":"CONTINUE"}';
+  const marker = 'AI_CHAT_MONITOR_STATUS={"decision":"CONTINUE"}';
   const assistant = new FakeElement({ textContent: marker, innerText: marker });
   const code = new FakeElement({ textContent: marker, innerText: marker });
   assistant.querySelectorAll = (selector) => selector === "pre, code" ? [code] : [];

@@ -9,7 +9,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const distRoot = resolve(repoRoot, "dist");
 const artifactsRoot = resolve(repoRoot, "artifacts");
 const packageJson = JSON.parse(await readFile(resolve(repoRoot, "package.json"), "utf8"));
-const archiveName = `chat-turn-guardian-${packageJson.version}.zip`;
+const archiveName = `ai-chat-monitor-${packageJson.version}.zip`;
 const archivePath = resolve(artifactsRoot, archiveName);
 
 const build = spawnSync(process.execPath, [resolve(repoRoot, "scripts/build.mjs")], {

@@ -2,8 +2,7 @@ export { ConservativeStopClassifier } from "./classifier.js";
 export { sanitizeContext, redactSecrets, type ContextSanitizerOptions } from "./context.js";
 export { evaluateDeterministicRules } from "./rules.js";
 export {
-  GUARDIAN_STATUS_PREFIX,
-  LEGACY_GUARDIAN_STATUS_PREFIX,
+  AI_CHAT_MONITOR_STATUS_PREFIX,
   conversationProtocolDecision,
   hasValidConversationProtocolStatus,
   inspectConversationStatusMarker,

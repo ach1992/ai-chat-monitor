@@ -1,12 +1,12 @@
-# Chat Turn Guardian
+# AI Chat Monitor
 
-Chat Turn Guardian is a Chromium Manifest V3 extension that **monitors selected ChatGPT conversations without controlling them**. It observes page/runtime state, resolves an optional semantic work status, and sends configurable Browser, local sound, and Telegram notifications.
+AI Chat Monitor is a Chromium Manifest V3 extension that **monitors selected ChatGPT conversations without controlling them**. It observes page/runtime state, resolves an optional semantic work status, and sends configurable Browser, local sound, and Telegram notifications.
 
-**Current stable release: v2.0.1.** v2 is a breaking product pivot from guarded auto-continuation to strictly read-only monitoring. The verified GitHub release is published at [v2.0.1](https://github.com/ach1992/chat-turn-guardian/releases/tag/v2.0.1).
+**Current source version: v3.0.0 release candidate.** v3 establishes the AI Chat Monitor identity and the sole `AI_CHAT_MONITOR_STATUS` protocol while preserving the strictly read-only monitoring behavior.
 
-## v2 single purpose
+## Single purpose
 
-Guardian may observe ChatGPT state and notify you. Guardian must never:
+AI Chat Monitor may observe ChatGPT state and notify you. AI Chat Monitor must never:
 
 - write to the ChatGPT composer;
 - click Send, Retry, Continue generating, Regenerate, Stop, confirmation, verification, or other conversation controls;
@@ -16,9 +16,9 @@ Guardian may observe ChatGPT state and notify you. Guardian must never:
 
 A missing or malformed semantic status is normal fallback input, not permission to mutate the page.
 
-## What v2 monitors
+## What AI Chat Monitor monitors
 
-Guardian keeps page/runtime state separate from semantic work state.
+AI Chat Monitor keeps page/runtime state separate from semantic work state.
 
 Page/runtime examples:
 
@@ -41,32 +41,31 @@ Semantic states:
 - `RATE_LIMIT` — a usage/quota/rate limit blocks progress;
 - `UNSURE` — the semantic state cannot be classified reliably.
 
-`CONTINUE` is notification metadata only. It never grants Guardian permission to send anything to ChatGPT.
+`CONTINUE` is notification metadata only. It never grants AI Chat Monitor permission to send anything to ChatGPT.
 
 ## Optional status protocol
 
 For best semantic accuracy, an assistant reply may end with exactly one standalone final line:
 
 ```text
-CHAT_TURN_GUARDIAN_STATUS={"decision":"<VALUE>"}
+AI_CHAT_MONITOR_STATUS={"decision":"<VALUE>"}
 ```
 
 The marker must be outside code fences, inline code, JSON/code payloads, block quotes, tables, and other format-specific output containers, with nothing after it. If the user requires an exact/exclusive output format, the assistant should omit the marker for that reply.
 
-The legacy `CHAT_TURN_GUARDIAN_STATUS_V1={...}` marker remains readable for compatibility, but v2 UI and documentation generate only the unversioned marker.
 
 The Side Panel contains two copyable setup texts:
 
 1. **Custom Instructions / Personalization** for compatible normal replies across chats.
 2. **One conversation only** for a message the user manually sends once near the start of a specific chat.
 
-Guardian never sends either setup text itself.
+AI Chat Monitor never sends either setup text itself.
 
 See [Conversation status protocol](docs/CONVERSATION_STATUS_PROTOCOL.md).
 
 ## Resolution order
 
-For a stable monitored response Guardian resolves state in this order:
+For a stable monitored response AI Chat Monitor resolves state in this order:
 
 1. high-confidence page/UI blocker evidence;
 2. valid terminal status marker;
@@ -80,11 +79,11 @@ Known page blockers outrank model/provider interpretation.
 
 Channels are independently configurable:
 
-- **Browser** — selected Guardian events through `chrome.notifications`;
+- **Browser** — selected AI Chat Monitor events through `chrome.notifications`;
 - **Sound** — optional local Manifest V3-compatible audio;
 - **Telegram** — outbound-only alerts through the user's own bot.
 
-Telegram receives bounded Guardian metadata by default, not full ChatGPT transcripts, and accepts no inbound control commands.
+Telegram receives bounded AI Chat Monitor metadata by default, not full ChatGPT transcripts, and accepts no inbound control commands.
 
 Events are episode/transition oriented and deduplicated across DOM churn, service-worker restarts, and duplicate tabs for the same conversation/response identity. Opening the same conversation in multiple tabs must not multiply provider classification or notification delivery for one response episode.
 
@@ -94,14 +93,14 @@ The Side Panel provides:
 
 - Monitoring ON/OFF for the current conversation;
 - current page state and semantic state/source;
-- status-marker health (`Detected`, `Legacy`, `Missing`, `Malformed`);
+- status-marker health (`Detected`, `Missing`, `Malformed`);
 - per-event Browser and Sound defaults;
 - copyable status-protocol setup text;
 - optional AI provider profiles and readiness testing;
 - Telegram settings and health;
 - bounded recent monitoring events/diagnostics.
 
-There are no AUTO-send, continuation-text, cooldown, post-send, or hard-fuse controls in v2.
+There are no AUTO-send, continuation-text, cooldown, post-send, or hard-fuse controls.
 
 ## Migration from v1.2.5
 
@@ -126,8 +125,8 @@ The breaking product-contract change began at `v2.0.0`; `v2.0.1` is a compatible
 ## Build and validate
 
 ```bash
-git clone https://github.com/ach1992/chat-turn-guardian.git
-cd chat-turn-guardian
+git clone https://github.com/ach1992/ai-chat-monitor.git
+cd ai-chat-monitor
 npm ci
 npm run validate
 npm run smoke:extension
@@ -136,7 +135,7 @@ npm run package
 
 `npm run package` creates:
 
-- `artifacts/chat-turn-guardian-<version>.zip`
+- `artifacts/ai-chat-monitor-<version>.zip`
 - `artifacts/SHA256SUMS.txt`
 - `artifacts/build-info.json`
 
@@ -150,8 +149,8 @@ The CI workflow validates the exact candidate SHA, runs the extension smoke chec
 4. Choose **Load unpacked**.
 5. Select the extracted directory.
 6. Open a ChatGPT conversation.
-7. Click the Chat Turn Guardian toolbar icon to open the Side Panel.
-8. Enable Monitoring for only the chats you want Guardian to observe.
+7. Click the AI Chat Monitor toolbar icon to open the Side Panel.
+8. Enable Monitoring for only the chats you want AI Chat Monitor to observe.
 
 ### Updating an existing unpacked installation
 
@@ -175,7 +174,7 @@ Telegram is outbound notification-only.
 
 1. Create a bot with `@BotFather`.
 2. Start/contact the bot or add it to the intended destination.
-3. Enter the bot token and Chat ID/destination in Guardian.
+3. Enter the bot token and Chat ID/destination in AI Chat Monitor.
 4. Choose inherited Browser events or a Telegram-specific event selection.
 5. Save and grant the exact Telegram origin permission when requested.
 6. Use **Test notification** and verify healthy delivery.
@@ -185,7 +184,7 @@ Saved bot tokens are not rendered back by the Side Panel.
 ## Privacy and permissions
 
 - Persistent page access is limited to supported ChatGPT origins.
-- Broad optional HTTPS host permission exists only so a user can configure an arbitrary HTTPS OpenAI-compatible provider; Guardian requests the selected origin at runtime.
+- Broad optional HTTPS host permission exists only so a user can configure an arbitrary HTTPS OpenAI-compatible provider; AI Chat Monitor requests the selected origin at runtime.
 - Provider API keys and Telegram bot tokens remain in trusted extension storage.
 - Monitoring history stores bounded metadata/fingerprints/diagnostics, not full chat transcripts or credentials.
 - Telegram receives bounded event metadata by default.
@@ -206,12 +205,6 @@ See [PRIVACY.md](PRIVACY.md) for the complete current policy.
 
 ## Release state
 
-`v2.0.1` is the current verified published GitHub release.
-
-- Release target commit: `53fd7a09abc99c157e15835d391ca4611eb128ec`
-- Release ZIP: `chat-turn-guardian-2.0.1.zip`
-- Packaged runtime files: `48`
-- Release ZIP SHA-256: `8aca51ced17ca1133293600df80abc9422170ded1f63fab221822da6b0bfe821`
-- Published release: [Chat Turn Guardian v2.0.1](https://github.com/ach1992/chat-turn-guardian/releases/tag/v2.0.1)
+`v3.0.0` is the current release candidate. Publication evidence will be recorded after the exact merged source is validated, packaged, and published under the renamed repository.
 
 Chrome Web Store submission/publication is a separate production action and has **not** been performed. See [Store readiness](docs/STORE_READINESS.md) before any future Store submission.

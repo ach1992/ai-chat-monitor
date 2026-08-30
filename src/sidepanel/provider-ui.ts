@@ -111,7 +111,7 @@ async function loadOverview(): Promise<PanelOverviewResponse> {
   const request: PanelOverviewRequest = { type: "panel:overview-request", protocolVersion: PROTOCOL_VERSION };
   const response = await chrome.runtime.sendMessage<GuardianResponse>(request);
   if (response.type === "background:error") throw new Error(response.message);
-  if (response.type !== "background:overview") throw new Error("Guardian returned an unexpected provider overview response.");
+  if (response.type !== "background:overview") throw new Error("AI Chat Monitor returned an unexpected provider overview response.");
   return response;
 }
 
@@ -224,7 +224,7 @@ async function testClassifier(profile: RedactedProviderProfile): Promise<void> {
     const response = await chrome.runtime.sendMessage<GuardianResponse>(request);
     if (response.type === "background:error") throw new Error(response.message);
     if (response.type !== "background:provider-classifier-readiness") {
-      throw new Error("Guardian returned an unexpected classifier-readiness response.");
+      throw new Error("AI Chat Monitor returned an unexpected classifier-readiness response.");
     }
     const result = response.result;
     if (result.ok) {
@@ -334,7 +334,7 @@ async function loadModels(): Promise<void> {
     };
     const response = await chrome.runtime.sendMessage<GuardianResponse>(request);
     if (response.type === "background:error") throw new Error(response.message);
-    if (response.type !== "background:provider-model-catalog") throw new Error("Guardian returned an unexpected model catalog response.");
+    if (response.type !== "background:provider-model-catalog") throw new Error("AI Chat Monitor returned an unexpected model catalog response.");
     catalog = response.models;
     catalogFilter = "ALL";
     filterSelect.value = "ALL";
@@ -376,7 +376,7 @@ async function saveProvider(): Promise<void> {
     };
     const response = await chrome.runtime.sendMessage<GuardianResponse>(request);
     if (response.type === "background:error") throw new Error(response.message);
-    if (response.type !== "background:provider-settings") throw new Error("Guardian returned an unexpected provider-settings response.");
+    if (response.type !== "background:provider-settings") throw new Error("AI Chat Monitor returned an unexpected provider-settings response.");
     settings = response.providers;
     const savedId = mutation.id;
     const saved = currentProfile(savedId);
@@ -402,7 +402,7 @@ async function removeProvider(providerId: string): Promise<void> {
     };
     const response = await chrome.runtime.sendMessage<GuardianResponse>(request);
     if (response.type === "background:error") throw new Error(response.message);
-    if (response.type !== "background:provider-settings") throw new Error("Guardian returned an unexpected provider-settings response.");
+    if (response.type !== "background:provider-settings") throw new Error("AI Chat Monitor returned an unexpected provider-settings response.");
     settings = response.providers;
     if (editingId === providerId) resetEditor(false);
     status(`Removed ${providerId}. Unused provider-origin permission cleanup runs in the background.`);
@@ -434,7 +434,7 @@ async function moveProvider(providerId: string, offset: -1 | 1): Promise<void> {
     };
     const response = await chrome.runtime.sendMessage<GuardianResponse>(request);
     if (response.type === "background:error") throw new Error(response.message);
-    if (response.type !== "background:provider-settings") throw new Error("Guardian returned an unexpected provider-order response.");
+    if (response.type !== "background:provider-settings") throw new Error("AI Chat Monitor returned an unexpected provider-order response.");
     settings = response.providers;
     status(`Updated provider priority. ${settings.order[0] ?? "No provider"} is primary.`);
   } catch (error) {

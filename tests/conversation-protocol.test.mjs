@@ -1,8 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  GUARDIAN_STATUS_PREFIX,
-  LEGACY_GUARDIAN_STATUS_PREFIX,
+  AI_CHAT_MONITOR_STATUS_PREFIX,
   conversationProtocolDecision,
   hasValidConversationProtocolStatus,
   inspectConversationStatusMarker,
@@ -10,7 +9,7 @@ import {
   stripConversationProtocolStatus,
 } from "../dist/classification/conversation-protocol.js";
 
-const status = (decision, prefix = GUARDIAN_STATUS_PREFIX) => `${prefix}{"decision":"${decision}"}`;
+const status = (decision) => `${AI_CHAT_MONITOR_STATUS_PREFIX}{"decision":"${decision}"}`;
 
 test("canonical standalone status maps every terminal decision", () => {
   const expected = new Map([
@@ -29,6 +28,7 @@ test("canonical standalone status maps every terminal decision", () => {
     const marker = inspectConversationStatusMarker(raw);
     assert.equal(marker.health, "DETECTED");
     assert.equal(marker.decision, value);
+    assert.equal(marker.prefix, AI_CHAT_MONITOR_STATUS_PREFIX);
     assert.equal(conversationProtocolDecision(raw), value);
     assert.equal(hasValidConversationProtocolStatus(raw), true);
     const parsed = parseConversationProtocolStatus(raw);
@@ -38,13 +38,20 @@ test("canonical standalone status maps every terminal decision", () => {
   }
 });
 
-test("legacy V1 marker remains readable but is identified as legacy", () => {
-  const raw = `Normal response.\n\n${status("HOLD_DECISION", LEGACY_GUARDIAN_STATUS_PREFIX)}`;
-  const marker = inspectConversationStatusMarker(raw);
-  assert.equal(marker.health, "LEGACY");
-  assert.equal(marker.decision, "HOLD_DECISION");
-  assert.equal(hasValidConversationProtocolStatus(raw), true);
-  assert.equal(parseConversationProtocolStatus(raw).reasonCode, "MATERIAL_DECISION_REQUIRED");
+test("retired product markers are not recognized", () => {
+  const retiredMarkers = [
+    'CHAT_TURN_GUARDIAN_STATUS={"decision":"COMPLETE"}',
+    'CHAT_TURN_GUARDIAN_STATUS_V1={"decision":"CONTINUE"}',
+    'AI_CHAT_MONITOR_STATUS_V1={"decision":"HOLD_DECISION"}',
+  ];
+
+  for (const retiredMarker of retiredMarkers) {
+    const raw = `Normal response.\n\n${retiredMarker}`;
+    assert.deepEqual(inspectConversationStatusMarker(raw), { health: "MISSING" });
+    assert.equal(conversationProtocolDecision(raw), undefined);
+    assert.equal(hasValidConversationProtocolStatus(raw), false);
+    assert.equal(stripConversationProtocolStatus(raw), raw);
+  }
 });
 
 test("missing status is a valid fallback condition rather than a fabricated decision", () => {
@@ -66,11 +73,10 @@ test("status must be the unique standalone terminal line and outside fenced code
     `~~~json\n${status("CONTINUE")}\n~~~`,
     `~~~~text\n${status("CONTINUE")}`,
     `${status("CONTINUE")}\n${status("COMPLETE")}`,
-    `${status("CONTINUE")}\n${status("CONTINUE", LEGACY_GUARDIAN_STATUS_PREFIX)}`,
-    `${GUARDIAN_STATUS_PREFIX}{"decision":"CONTINUE","extra":true}`,
-    `${GUARDIAN_STATUS_PREFIX}{"decision":"continue"}`,
-    `${GUARDIAN_STATUS_PREFIX}{"decision":"UNKNOWN"}`,
-    `${GUARDIAN_STATUS_PREFIX}{bad json}`,
+    `${AI_CHAT_MONITOR_STATUS_PREFIX}{"decision":"CONTINUE","extra":true}`,
+    `${AI_CHAT_MONITOR_STATUS_PREFIX}{"decision":"continue"}`,
+    `${AI_CHAT_MONITOR_STATUS_PREFIX}{"decision":"UNKNOWN"}`,
+    `${AI_CHAT_MONITOR_STATUS_PREFIX}{bad json}`,
   ];
 
   for (const raw of malformed) {

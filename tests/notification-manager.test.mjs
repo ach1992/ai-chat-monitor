@@ -48,7 +48,7 @@ function notification(overrides = {}) {
 
 test("Telegram text is structured, event-aware, HTML-safe, and bounded", () => {
   const text = telegramNotificationText(notification());
-  assert.match(text, /<b>🛡️ Chat Turn Guardian<\/b>/);
+  assert.match(text, /<b>🛡️ AI Chat Monitor<\/b>/);
   assert.match(text, /<b>🏁 Task complete<\/b>/);
   assert.match(text, /<b>💬 Conversation<\/b>/);
   assert.match(text, /<code>conversation-1234567890<\/code>/);

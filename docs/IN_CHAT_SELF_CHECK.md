@@ -6,10 +6,10 @@ v1.x could inject a bounded same-conversation self-check/status-recovery turn wh
 
 Current v2 invariants:
 
-- Guardian never writes to the ChatGPT composer.
-- Guardian never sends a self-check, protocol bootstrap, status-recovery, continuation, Retry, or other conversation turn.
-- Missing or malformed `CHAT_TURN_GUARDIAN_STATUS` is a normal fallback condition.
-- Guardian resolves semantic state from page/UI evidence, a valid optional marker, deterministic local rules, optional provider fallback, then unknown/unsure.
+- AI Chat Monitor never writes to the ChatGPT composer.
+- AI Chat Monitor never sends a self-check, protocol bootstrap, status-recovery, continuation, Retry, or other conversation turn.
+- Missing or malformed `AI_CHAT_MONITOR_STATUS` is a normal fallback condition.
+- AI Chat Monitor resolves semantic state from page/UI evidence, a valid optional marker, deterministic local rules, optional provider fallback, then unknown/unsure.
 - `CONTINUE` means only that the human may manually continue; it grants no browser mutation authority.
 
 For current behavior see:

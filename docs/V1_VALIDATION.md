@@ -4,7 +4,7 @@ Status: v1.0 acceptance and regression-evidence map
 Target: Chromium Manifest V3, ChatGPT Web, one browser profile/session  
 Delivery model: repository integration and validated release package; Chrome Web Store publication is a separate human-gated release action
 
-This document records the safety evidence expected for Chat Turn Guardian v1.0 and the live scenarios already exercised against real ChatGPT/Telegram environments. It is a durable maintenance reference, not a requirement to manufacture rare platform failures.
+This document records the safety evidence expected for AI Chat Monitor v1.0 and the live scenarios already exercised against real ChatGPT/Telegram environments. It is a durable maintenance reference, not a requirement to manufacture rare platform failures.
 
 ## 1. Release validation commands
 
@@ -21,7 +21,7 @@ A release candidate is acceptable only when the exact candidate SHA passes the r
 
 Expected package outputs:
 
-- `artifacts/chat-turn-guardian-<version>.zip`;
+- `artifacts/ai-chat-monitor-<version>.zip`;
 - `artifacts/SHA256SUMS.txt`;
 - `artifacts/build-info.json`.
 
@@ -53,7 +53,7 @@ The following are product constraints, not temporary v1 implementation details:
 | Human types/sends/edits/stops during automation | Interaction stales/cancels pending action; final checks repeat after waits | guarded-send/coordinator race tests and live human-race scenario |
 | Navigation/response changes during provider/timer delay | Immutable decision envelope is re-read; stale result is dropped | delayed-provider/navigation tests |
 | Silent terminal exposes an old assistant DOM node | Newer user turn prevents the old assistant from becoming a fresh response | `tests/revision7-regressions.test.mjs` and adapter/coordinator coverage |
-| Retry/error/blocking UI appears | Blocking UI prevents evaluation/action; final guarded send rechecks it; Guardian never clicks Retry/dismiss | revision-7 and guarded-send tests |
+| Retry/error/blocking UI appears | Blocking UI prevents evaluation/action; final guarded send rechecks it; AI Chat Monitor never clicks Retry/dismiss | revision-7 and guarded-send tests |
 | Human relay or approval is required | Deterministic HOLD before provider authority; provider contract remains advisory | revision-7/provider classifier contract tests and live relay scenario |
 | Service worker restarts | Restored sessions require fresh page evidence; no stale decision replay | restart/recovery tests and live restart scenario |
 | Page write result is ambiguous | Write intent is journaled and blind retry is blocked | automation journal/coordinator/guarded-send tests |
@@ -79,7 +79,7 @@ The following high-signal scenarios were exercised during v1 development and acc
 - trusted human-interaction race: user composer input remained untouched and pending automation was suppressed;
 - duplicate OWNER/MIRROR AUTO isolation: only the OWNER sent;
 - service-worker/extension restart: no stale continuation replayed and fresh observation was required;
-- independent-review/human-relay boundary: Guardian HOLDed and did not relay/paste/send the handoff automatically;
+- independent-review/human-relay boundary: AI Chat Monitor HOLDed and did not relay/paste/send the handoff automatically;
 - toolbar action opened the Side Panel on a supported ChatGPT page after the production toolbar/Side Panel work;
 - Telegram v1 owner-local acceptance on 2026-08-20: the same existing unpacked extension folder was updated and reloaded, saved configuration remained available, the Side Panel reported `Configured`, `Enabled`, and `Healthy`, and a real **Test notification** was delivered to the owner's Telegram destination without exposing the bot token.
 
@@ -99,13 +99,13 @@ Do not manufacture them, intentionally break ChatGPT, click Retry merely for evi
 
 ## 6. Provider and notification acceptance
 
-Provider classification remains optional. Without a usable provider for an ambiguous case, Guardian fails closed to `UNSURE`. Current provider support includes built-in OpenRouter and NaraRouter profiles plus the generic OpenAI-compatible transport documented in the README.
+Provider classification remains optional. Without a usable provider for an ambiguous case, AI Chat Monitor fails closed to `UNSURE`. Current provider support includes built-in OpenRouter and NaraRouter profiles plus the generic OpenAI-compatible transport documented in the README.
 
 Browser notifications and Telegram coexist independently. Telegram v1 is outbound-only: no Telegram command can inject a ChatGPT message, answer an approval, change a mode, start/stop supervision, or otherwise authorize browser mutation. Telegram payloads are bounded notification metadata; full ChatGPT messages are not exported by default.
 
 ## 7. Release and future-development decision
 
-Chat Turn Guardian v1.0 is considered feature-complete and release-ready when:
+AI Chat Monitor v1.0 is considered feature-complete and release-ready when:
 
 1. the v1.0 candidate's exact head passes required CI and package verification;
 2. review finds no open BLOCKER/REQUIRED correctness, security, privacy, compatibility, or authority issue;

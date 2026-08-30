@@ -8,7 +8,7 @@ function flushTasks() {
 test("Side Panel defaults closed and activation allowlists only supported ChatGPT hosts", async () => {
   const setOptionsCalls = [];
   const urls = new Map([
-    [11, "https://github.com/ach1992/chat-turn-guardian"],
+    [11, "https://github.com/ach1992/ai-chat-monitor"],
     [12, "https://chatgpt.com/c/test-conversation"],
   ]);
   let activatedListener;

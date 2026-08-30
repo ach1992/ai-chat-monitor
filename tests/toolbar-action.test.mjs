@@ -24,7 +24,7 @@ test("toolbar action opens the Side Panel while existing host gating remains exp
 
   assert.equal(manifest.minimum_chrome_version, "114");
   assert.equal(manifest.side_panel.default_path, "sidepanel/index.html");
-  assert.equal(manifest.action.default_title, "Open Chat Turn Guardian");
+  assert.equal(manifest.action.default_title, "Open AI Chat Monitor");
   assert.deepEqual(manifest.host_permissions, ["https://chatgpt.com/*", "https://chat.openai.com/*"]);
   assert.match(availability, /setPanelBehavior\(\{ openPanelOnActionClick: true \}\)/);
   assert.match(availability, /setOptions\(\{ enabled: false \}\)/);
