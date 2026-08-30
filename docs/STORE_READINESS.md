@@ -2,7 +2,7 @@
 
 Status:
 
-- **GitHub release:** `v3.0.0` candidate; publication pending exact-source validation.
+- **GitHub release:** `v3.0.0` published and verified.
 - **Chrome Web Store:** not submitted or published; production action deferred.
 
 This document tracks engineering and disclosure readiness for a future Chrome Web Store submission. The published GitHub release does not itself authorize Store upload, submission, visibility changes, or publication.
@@ -16,7 +16,7 @@ This document tracks engineering and disclosure readiness for a future Chrome We
 
 ## Runtime safety
 
-Verified for the v3.0.0 release candidate:
+Verified for the released v3.0.0 baseline:
 
 - [x] Exact candidate validation is green.
 - [x] Static/runtime regression coverage proves no ChatGPT composer write or conversation-control activation path exists.
@@ -93,10 +93,17 @@ CI must:
 - verify `build-info.json` points to the exact candidate SHA;
 - upload the package/checksum/provenance artifacts.
 
-v3.0.0 candidate evidence:
+Published v3.0.0 evidence:
 
-- Version, package name, manifest identity, CI artifact slug, and repository URLs use AI Chat Monitor/`ai-chat-monitor`.
-- Exact merged source SHA, release URL, runtime file count, and SHA-256 will be recorded after publication.
+- Release: https://github.com/ach1992/ai-chat-monitor/releases/tag/v3.0.0
+- Release target: `c38eb377c00d692ac739121e85d48c73eacea4d7`
+- Release ZIP: `ai-chat-monitor-3.0.0.zip`
+- Runtime files: `48`
+- SHA-256: `2771b6cf4fe3e90188af95d989e5f3dcd751b1b29f37b9594f5c36fb28ccc64c`
+- Release is non-draft and non-prerelease.
+- Tag resolves exactly to the release target.
+- `ai-chat-monitor-3.0.0.zip`, `SHA256SUMS.txt`, and `build-info.json` are present as release assets.
+- Published assets were re-downloaded from GitHub; source identity, file count, version, ZIP integrity, and SHA-256 were verified after publication.
 - Chrome Web Store publication remains a separate deferred production action.
 
 ## Store assets
