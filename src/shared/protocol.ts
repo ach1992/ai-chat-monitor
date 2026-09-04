@@ -32,6 +32,8 @@ export type UserInteractionKind =
   | "EDIT_TURN"
   | "BLOCKING_INTERACTION";
 
+export type ResponseTransportKind = "CHATGPT_CONVERSATION_STREAM";
+
 interface ContentSessionBase {
   protocolVersion: typeof PROTOCOL_VERSION;
   agentInstanceId: string;
@@ -60,6 +62,15 @@ export interface ContentObservation extends ContentSessionBase {
 export interface ContentUserInteraction extends ContentSessionBase {
   type: "content:user-interaction";
   interaction: UserInteractionKind;
+}
+
+export interface ContentResponseComplete extends ContentSessionBase {
+  type: "content:response-complete";
+  routeKey: string;
+  conversationId?: string;
+  transport: ResponseTransportKind;
+  visibility: "visible" | "hidden";
+  completedAt: number;
 }
 
 export interface PanelStatusRequest {
@@ -142,14 +153,20 @@ export interface TabLifecycleStatus {
 export interface HiddenMonitoringDiagnosticView {
   backgroundedAt: number;
   foregroundedAt?: number;
+  tabActivatedAt?: number;
+  visibleObservedAt?: number;
   baselineAssistantTextLength?: number;
   hiddenObservationCount: number;
+  firstHiddenObservationAt?: number;
   lastHiddenObservationAt?: number;
+  firstAssistantChangeAt?: number;
+  firstMarkerDetectedAt?: number;
   hiddenAssistantTextLength?: number;
   assistantChanged: boolean;
   hiddenGeneration?: PageObservation["generation"];
   hiddenStopControlPresent?: boolean;
   hiddenMarkerHealth?: MonitoringRuntimeStatus["markerHealth"];
+  transportCompletedAt?: number;
 }
 
 export interface PanelStatusResponse {
@@ -243,6 +260,7 @@ export type GuardianRequest =
   | ContentNavigation
   | ContentObservation
   | ContentUserInteraction
+  | ContentResponseComplete
   | PanelStatusRequest
   | PanelOverviewRequest
   | PanelMonitoringPolicyUpdate
@@ -368,6 +386,15 @@ export function isContentUserInteraction(value: unknown): value is ContentUserIn
       value.interaction === "STOP_GENERATION" ||
       value.interaction === "EDIT_TURN" ||
       value.interaction === "BLOCKING_INTERACTION")
+  );
+}
+
+export function isContentResponseComplete(value: unknown): value is ContentResponseComplete {
+  return (
+    isRecord(value) && value.type === "content:response-complete" && isSessionBase(value) && hasRouteIdentity(value) &&
+    value.transport === "CHATGPT_CONVERSATION_STREAM" &&
+    (value.visibility === "visible" || value.visibility === "hidden") &&
+    typeof value.completedAt === "number" && Number.isFinite(value.completedAt) && value.completedAt > 0
   );
 }
 
