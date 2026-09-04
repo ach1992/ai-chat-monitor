@@ -18,6 +18,7 @@ namespace GuardianContent {
     conversationId?: string;
     routeKey: string;
     pageTitle?: string;
+    visibility: "visible" | "hidden";
     generation: GenerationState;
     latestUser?: {
       normalizedText: string;
@@ -340,6 +341,7 @@ namespace GuardianContent {
       const observation: PageObservation = {
         routeKey: this.currentRouteKey(),
         ...(pageTitle.length === 0 ? {} : { pageTitle }),
+        visibility: this.#document.visibilityState === "hidden" ? "hidden" : "visible",
         generation,
         composer: {
           present: composer !== undefined,

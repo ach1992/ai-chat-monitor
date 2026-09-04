@@ -268,6 +268,8 @@ Post-release owner validation nevertheless proved the release incomplete. The re
 
 Current corrective invariant (Issue #83 Contract Revision 3): in a hidden runnable tab, an exact canonical terminal status is explicit end-of-response evidence and may outrank a stale Stop control for generation completion. This exception is hidden-only and fail-closed: visible tabs retain normal Stop-control behavior, and malformed, ambiguous, duplicate, code-fenced, or unsupported markers never override `GENERATING`. Missing-marker replies continue to use the normal UI/rule/provider fallback path.
 
+The unreleased `3.0.3` candidate under Issue #83 Contract Revision 4 additionally separates monitoring authority from active-tab UI state. The Side Panel is global across tabs and may show the active tab as non-ChatGPT while independently listing monitored chats that continue in the background. Side Panel refresh must not be required to reconnect a content agent. Managed-chat diagnostics expose only bounded observation metadata (last observation time, hidden/visible state, generation, lifecycle) so real-browser failures can be localized without storing transcript content or credentials. The real Chromium regression closes the Side Panel and force-restarts the MV3 worker while the monitored tab remains hidden; the hidden content agent must restart the worker and deliver the monitoring event without tab activation.
+
 ## Historical note
 
 v1.x implemented guarded automatic continuation and in-chat self-check behavior. Those capabilities are intentionally removed from the v2 product contract. Historical v1 documentation may remain only when clearly labeled as historical evidence and must not be presented as current behavior.

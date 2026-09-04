@@ -2,7 +2,7 @@
 
 AI Chat Monitor is a Chromium Manifest V3 extension that **monitors selected ChatGPT conversations without controlling them**. It observes page/runtime state, resolves an optional semantic work status, and sends configurable Browser, local sound, and Telegram notifications.
 
-**Current published release: [v3.0.2](https://github.com/ach1992/ai-chat-monitor/releases/tag/v3.0.2).** Post-release owner validation found one remaining inactive-tab defect: Chromium can leave the transient `Stop generating` control stale after the hidden assistant DOM already contains a valid terminal `AI_CHAT_MONITOR_STATUS` record, and v3.0.2 incorrectly keeps semantic resolution gated as `GENERATING`. Current source tracks the corrective work in [Issue #83](https://github.com/ach1992/ai-chat-monitor/issues/83). The product remains strictly read-only.
+**Current published release: [v3.0.2](https://github.com/ach1992/ai-chat-monitor/releases/tag/v3.0.2).** Post-release owner validation found remaining inactive-tab reliability/diagnostic gaps, so v3.0.2 must not be treated as the resolved background-monitoring build. Current unreleased source `3.0.3`, tracked by [Issue #83](https://github.com/ach1992/ai-chat-monitor/issues/83), includes the hidden stale-Stop correction, a global cross-tab Side Panel, active-tab-independent observer diagnostics, and a browser regression that survives an MV3 service-worker restart while the monitored tab stays hidden. The product remains strictly read-only.
 
 ## Single purpose
 
@@ -206,7 +206,7 @@ See [PRIVACY.md](PRIVACY.md) for the complete current policy.
 
 ## Release state
 
-`v3.0.2` is the current artifact-verified published GitHub release, but it must not be treated as proof that inactive-tab completion is fully resolved. Current source contains an unreleased stale-Stop correction tracked by Issue #83.
+`v3.0.2` is the current artifact-verified published GitHub release, but it must not be treated as proof that inactive-tab monitoring is fully resolved. Current source is `3.0.3` (unreleased) with Issue #83 corrections and diagnostics; GitHub Release `v3.0.3` remains gated on owner validation in the real logged-in Chrome environment.
 
 - Release target commit: `51cc8b6b1bac484309f4cc7537e183917d94fdc0`
 - Release ZIP: `ai-chat-monitor-3.0.2.zip`

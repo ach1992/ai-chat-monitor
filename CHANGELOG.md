@@ -1,11 +1,13 @@
 # Changelog
 
-## Unreleased
+## 3.0.3 — Unreleased
 
 - Correct the remaining inactive-tab completion gate: when a hidden runnable ChatGPT tab already exposes an exact canonical terminal `AI_CHAT_MONITOR_STATUS` record, that explicit end-of-response evidence outranks a stale transient Stop control so monitoring can resolve and notify without tab activation.
 - Keep the exception deliberately narrow: visible tabs still trust the normal Stop control, while malformed/code-rendered markers remain `GENERATING` and cannot trigger premature classification.
 - Replace the misleading background smoke condition that deleted `#stop` with a regression that requires `TASK_COMPLETE` while the stale Stop control is still present and the monitored tab remains hidden.
 - Re-audit the v3.0.1/v3.0.2 background changes. Timer-independent hidden observation, structural status recovery, MV3 session self-healing, automatic-discard protection, frozen/discarded lifecycle reporting, and Chrome-for-Testing extension identity validation remain because each protects an independent failure mode; they are not treated as proof of this root cause.
+- Decouple the management UI from the active tab: use one global Side Panel across tabs, remove Side Panel polling as a content-agent reconnect authority, refresh current-tab UI promptly on tab/lifecycle changes, and show bounded observer evidence (`hidden`/`visible`, observation age, generation, lifecycle) for each monitored chat.
+- Strengthen the real Chromium regression by closing the Side Panel and force-terminating the MV3 service worker while the monitored ChatGPT-origin tab is hidden; the hidden content agent must independently wake a replacement worker and still deliver `TASK_COMPLETE`.
 
 Tracking: [Issue #83](https://github.com/ach1992/ai-chat-monitor/issues/83).
 

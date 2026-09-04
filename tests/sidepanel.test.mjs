@@ -81,6 +81,13 @@ test("Side Panel exposes monitoring, compact protocol setup, notifications, prov
   assert.match(script, /Chrome frozen/);
   assert.match(script, /Discard protection ON/);
   assert.match(script, /paused by Chrome/);
+  assert.match(script, /Monitoring continues in the background across tabs/);
+  assert.match(script, /Observer: no page observation yet/);
+  assert.match(script, /Page state:/);
+  assert.match(script, /chrome\.tabs\.onActivated\.addListener/);
+  assert.match(script, /refreshPending = true/);
+  assert.match(script, /void refreshAll\(pendingManual\)/);
+  assert.doesNotMatch(script, /await reconnect\(tab\.id\)/);
 
   assert.match(script, /let notificationDefaultsDirty = false/);
   assert.match(script, /defaultsForm\.addEventListener\("input", \(\) => \{ notificationDefaultsDirty = true; \}\)/);

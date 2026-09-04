@@ -110,6 +110,7 @@ declare namespace chrome {
       openPanelOnActionClick?: boolean;
     }
 
+    function getOptions(options: { tabId?: number }): Promise<PanelOptions>;
     function setOptions(options: PanelOptions): Promise<void>;
     function setPanelBehavior(behavior: PanelBehavior): Promise<void>;
   }

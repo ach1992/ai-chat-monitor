@@ -15,7 +15,7 @@ function pngDimensions(buffer) {
   };
 }
 
-test("toolbar action opens the Side Panel while existing host gating remains explicit", async () => {
+test("toolbar action opens one global Side Panel while ChatGPT reconnect gating remains explicit", async () => {
   const [manifestText, availability] = await Promise.all([
     readDist("manifest.json", "utf8"),
     readDist("background/sidepanel-availability.js", "utf8"),
@@ -27,9 +27,10 @@ test("toolbar action opens the Side Panel while existing host gating remains exp
   assert.equal(manifest.action.default_title, "Open AI Chat Monitor");
   assert.deepEqual(manifest.host_permissions, ["https://chatgpt.com/*", "https://chat.openai.com/*"]);
   assert.match(availability, /setPanelBehavior\(\{ openPanelOnActionClick: true \}\)/);
-  assert.match(availability, /setOptions\(\{ enabled: false \}\)/);
+  assert.match(availability, /setOptions\(\{ path: SIDE_PANEL_PATH, enabled: true \}\)/);
+  assert.doesNotMatch(availability, /setOptions\(\{ enabled: false \}\)/);
   assert.match(availability, /new Set\(\["chatgpt\.com", "chat\.openai\.com"\]\)/);
-  assert.match(availability, /enabled = isSupportedChatGptUrl\(tab\.url\)/);
+  assert.match(availability, /if \(tabId === undefined \|\| !isSupportedChatGptUrl\(tab\.url\)\)/);
   assert.doesNotMatch(availability, /sidePanel\.open/);
 });
 

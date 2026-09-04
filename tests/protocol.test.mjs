@@ -54,6 +54,8 @@ test("observation validates bounded response metadata and read-only action hints
     observedAt: 200,
   };
   assert.equal(isContentObservation({ ...base, type: "content:observation", observation }), true);
+  assert.equal(isContentObservation({ ...base, type: "content:observation", observation: { ...observation, visibility: "hidden" } }), true);
+  assert.equal(isContentObservation({ ...base, type: "content:observation", observation: { ...observation, visibility: "background-ish" } }), false);
   assert.equal(
     isContentObservation({
       ...base,
