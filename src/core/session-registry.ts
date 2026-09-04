@@ -33,13 +33,6 @@ export interface HiddenMonitoringDiagnosticSnapshot {
   transportCompletedAt?: number;
 }
 
-export interface ResponseCompletionSnapshot {
-  sequence: number;
-  completedAt: number;
-  visibility: "visible" | "hidden";
-  transport: "CHATGPT_CONVERSATION_STREAM";
-}
-
 export interface AgentRegistration {
   tabId: number;
   documentId: string;
@@ -82,20 +75,6 @@ export interface InteractionEvent {
   sentAt: number;
 }
 
-export interface ResponseCompletionEvent {
-  tabId: number;
-  documentId: string;
-  agentInstanceId: string;
-  pageEpoch: number;
-  sequence: number;
-  routeKey: string;
-  conversationId?: string;
-  transport: "CHATGPT_CONVERSATION_STREAM";
-  visibility: "visible" | "hidden";
-  completedAt: number;
-  sentAt: number;
-}
-
 export interface SessionSnapshot {
   tabId: number;
   documentId: string;
@@ -109,7 +88,6 @@ export interface SessionSnapshot {
   lastUserInteractionAt?: number;
   observation?: PageObservation;
   lastObservationVisibility?: PageObservation["visibility"];
-  lastResponseCompletion?: ResponseCompletionSnapshot;
   hiddenDiagnostic?: HiddenMonitoringDiagnosticSnapshot;
 }
 
@@ -194,17 +172,6 @@ function validHiddenDiagnostic(value: unknown): value is HiddenMonitoringDiagnos
   );
 }
 
-function validResponseCompletion(value: unknown): value is ResponseCompletionSnapshot {
-  if (typeof value !== "object" || value === null) return false;
-  const candidate = value as Partial<ResponseCompletionSnapshot>;
-  return (
-    Number.isInteger(candidate.sequence) && (candidate.sequence as number) >= 1 &&
-    typeof candidate.completedAt === "number" && Number.isFinite(candidate.completedAt) && candidate.completedAt > 0 &&
-    (candidate.visibility === "visible" || candidate.visibility === "hidden") &&
-    candidate.transport === "CHATGPT_CONVERSATION_STREAM"
-  );
-}
-
 function validSnapshot(session: SessionSnapshot): boolean {
   return (
     Number.isInteger(session.tabId) &&
@@ -221,8 +188,7 @@ function validSnapshot(session: SessionSnapshot): boolean {
     session.routeKey.length > 0 &&
     Number.isFinite(session.registeredAt) &&
     Number.isFinite(session.lastSeenAt) &&
-    validOptionalVisibility(session.lastObservationVisibility) &&
-    (session.lastResponseCompletion === undefined || validResponseCompletion(session.lastResponseCompletion))
+    validOptionalVisibility(session.lastObservationVisibility)
   );
 }
 
@@ -325,9 +291,6 @@ export class SessionRegistry {
       ...(sameSessionIdentity && existing.lastObservationVisibility !== undefined
         ? { lastObservationVisibility: existing.lastObservationVisibility }
         : {}),
-      ...(sameSessionIdentity && existing.lastResponseCompletion !== undefined
-        ? { lastResponseCompletion: structuredClone(existing.lastResponseCompletion) }
-        : {}),
       ...(sameSessionIdentity && existing.lastUserInteractionAt !== undefined
         ? { lastUserInteractionAt: existing.lastUserInteractionAt }
         : {}),
@@ -415,7 +378,25 @@ export class SessionRegistry {
         ...(event.markerHealth === undefined ? {} : { hiddenMarkerHealth: event.markerHealth }),
         ...(assistant?.textLength === undefined ? {} : { hiddenAssistantTextLength: assistant.textLength }),
       };
-    } else if (hiddenDiagnostic !== undefined) {
+    }
+
+    const responseCompletion = event.observation.responseCompletion;
+    if (responseCompletion?.visibility === "hidden") {
+      const assistant = session.observation?.latestAssistant;
+      const prior = hiddenDiagnostic ?? {
+        backgroundedAt: responseCompletion.completedAt,
+        ...(assistant?.fingerprint === undefined ? {} : { baselineAssistantFingerprint: assistant.fingerprint }),
+        ...(assistant?.textLength === undefined ? {} : { baselineAssistantTextLength: assistant.textLength }),
+        hiddenObservationCount: 0,
+        assistantChanged: false,
+      };
+      hiddenDiagnostic = {
+        ...prior,
+        transportCompletedAt: responseCompletion.completedAt,
+      };
+    }
+
+    if (event.observation.visibility === "visible" && hiddenDiagnostic !== undefined) {
       const visibleObservedAt = hiddenDiagnostic.visibleObservedAt ?? event.observation.observedAt;
       hiddenDiagnostic = {
         ...hiddenDiagnostic,
@@ -447,45 +428,6 @@ export class SessionRegistry {
       lastSequence: event.sequence,
       lastSeenAt: event.sentAt,
       lastUserInteractionAt: event.sentAt,
-    };
-    this.#sessions.set(event.tabId, next);
-    return { accepted: true, session: this.#view(next) };
-  }
-
-  applyResponseCompletion(event: ResponseCompletionEvent): SessionMutationResult {
-    const session = this.#sessions.get(event.tabId);
-    const reject = this.#sameEpochReject(session, event);
-    if (reject !== undefined) return { accepted: false, reason: reject };
-    if (session === undefined) return { accepted: false, reason: "NO_SESSION" };
-    if (event.routeKey !== session.routeKey || !optionalStringEquals(event.conversationId, session.conversationId)) {
-      return { accepted: false, reason: "IDENTITY_MISMATCH" };
-    }
-
-    let hiddenDiagnostic = session.hiddenDiagnostic;
-    if (event.visibility === "hidden") {
-      const assistant = session.observation?.latestAssistant;
-      const prior = hiddenDiagnostic ?? {
-        backgroundedAt: event.completedAt,
-        ...(assistant?.fingerprint === undefined ? {} : { baselineAssistantFingerprint: assistant.fingerprint }),
-        ...(assistant?.textLength === undefined ? {} : { baselineAssistantTextLength: assistant.textLength }),
-        hiddenObservationCount: 0,
-        assistantChanged: false,
-      };
-      hiddenDiagnostic = { ...prior, transportCompletedAt: event.completedAt };
-    }
-
-    const completion: ResponseCompletionSnapshot = {
-      sequence: event.sequence,
-      completedAt: event.completedAt,
-      visibility: event.visibility,
-      transport: event.transport,
-    };
-    const next: SessionSnapshot = {
-      ...session,
-      lastSequence: event.sequence,
-      lastSeenAt: event.sentAt,
-      lastResponseCompletion: completion,
-      ...(hiddenDiagnostic === undefined ? {} : { hiddenDiagnostic }),
     };
     this.#sessions.set(event.tabId, next);
     return { accepted: true, session: this.#view(next) };
@@ -532,11 +474,6 @@ export class SessionRegistry {
   }
 
   invalidateTab(tabId: number): void {
-    // A tabs.onUpdated("loading") event does not identify which exact document caused it.
-    // Drop the live session so stale observations fail closed, but do not tombstone the
-    // document here: the same exact content agent may already have registered before the
-    // loading callback is delivered and must be allowed to reconnect. True document
-    // replacement is still retired by registerAgent when a newer document takes over.
     this.#sessions.delete(tabId);
   }
 
@@ -568,7 +505,7 @@ export class SessionRegistry {
 
   #sameEpochReject(
     session: SessionSnapshot | undefined,
-    event: Pick<ObservationEvent | InteractionEvent | ResponseCompletionEvent, "documentId" | "agentInstanceId" | "pageEpoch" | "sequence">,
+    event: Pick<ObservationEvent | InteractionEvent, "documentId" | "agentInstanceId" | "pageEpoch" | "sequence">,
   ): SessionEventRejectReason | undefined {
     const identityReject = this.#identityReject(session, event);
     if (identityReject !== undefined) return identityReject;
