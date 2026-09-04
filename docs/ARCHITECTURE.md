@@ -193,14 +193,14 @@ Notification-channel failures must not mutate ChatGPT state and must not convert
 
 ## Side Panel
 
-The Side Panel is the user-control and observability surface. It is a global per-window companion rather than an active-ChatGPT-tab-specific authority, so it remains available while the user browses other tabs. Side Panel polling does not reconnect content agents; content/background lifecycle recovery is independent of whether the panel is open.
+The Side Panel is the user-control and observability surface. Availability remains tab-scoped: supported ChatGPT tabs receive a tab-specific Side Panel option and unsupported tabs are disabled, allowing Chrome to preserve open/closed panel behavior per tab. This UI scoping is not monitoring authority. Side Panel polling does not reconnect content agents; content/background lifecycle recovery is independent of whether the panel is open.
 
 Current responsibilities:
 
 - current-tab Monitoring ON/OFF;
 - current page/semantic state and source;
 - marker health;
-- per-monitored-chat observer evidence: last observation age, `hidden`/`visible` state, generation state, and Chrome lifecycle state;
+- per-monitored-chat observer evidence: last observation age, `hidden`/`visible` state, generation state, Chrome lifecycle state, and a privacy-safe hidden-attempt trace for observation count/timing, assistant-change evidence, Stop presence, marker health, hidden event timing, and Browser/Sound/Telegram delivery outcome/timing;
 - Browser/Sound defaults;
 - status-protocol copy text;
 - provider profile management/readiness;

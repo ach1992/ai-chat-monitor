@@ -47,6 +47,7 @@ export interface PageObservation {
   pageTitle?: string;
   visibility?: "visible" | "hidden";
   generation: GenerationState;
+  stopControlPresent?: boolean;
   latestUser?: UserTurnSnapshot;
   latestAssistant?: AssistantResponseSnapshot;
   composer: ComposerSnapshot;
@@ -106,6 +107,7 @@ export function isPageObservation(value: unknown): value is PageObservation {
     !isOptionalVisibility(value.visibility) ||
     (value.pageTitle !== undefined && (typeof value.pageTitle !== "string" || value.pageTitle.length > 300)) ||
     !isGenerationState(value.generation) ||
+    (value.stopControlPresent !== undefined && typeof value.stopControlPresent !== "boolean") ||
     (value.confidence !== "HIGH" && value.confidence !== "LOW") ||
     !Number.isFinite(value.observedAt)
   ) {
