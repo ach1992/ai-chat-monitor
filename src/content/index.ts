@@ -99,7 +99,9 @@ namespace GuardianContentAgent {
     return isRecord(value) && value.type === "panel:agent-reconnect" && value.protocolVersion === GuardianContent.PROTOCOL_VERSION;
   }
 
-  function validStreamIdentity(value: Record<string, unknown>): boolean {
+  function validStreamIdentity(
+    value: Record<string, unknown>,
+  ): value is Record<string, unknown> & { requestId: string; startedAt: number } {
     return (
       typeof value.requestId === "string" && value.requestId.length > 0 &&
       typeof value.startedAt === "number" && Number.isFinite(value.startedAt) && value.startedAt > 0
