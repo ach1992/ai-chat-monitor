@@ -305,7 +305,10 @@ test("hidden diagnostics survive worker restore without retaining transcript tex
     baselineAssistantFingerprint: "a".repeat(64),
     baselineAssistantTextLength: 25,
     hiddenObservationCount: 1,
+    firstHiddenObservationAt: 2200,
     lastHiddenObservationAt: 2200,
+    firstAssistantChangeAt: 2200,
+    firstMarkerDetectedAt: 2200,
     hiddenAssistantTextLength: 81,
     assistantChanged: true,
     hiddenGeneration: "GENERATING",
@@ -317,6 +320,7 @@ test("hidden diagnostics survive worker restore without retaining transcript tex
 
   assert.equal(registry.markForegrounded(30, 3000), true);
   assert.equal(registry.getTab(30)?.hiddenDiagnostic?.foregroundedAt, 3000);
+  assert.equal(registry.getTab(30)?.hiddenDiagnostic?.tabActivatedAt, 3000);
 
   const restored = SessionRegistry.fromState(registry.exportState(), { invalidateObservations: true });
   assert.equal(restored.getTab(30)?.observation, undefined);
@@ -404,6 +408,7 @@ test("visible observation closes the hidden diagnostic window when activation me
   });
   assert.equal(visible.accepted, true);
   assert.equal(registry.getTab(32)?.hiddenDiagnostic?.foregroundedAt, 3000);
+  assert.equal(registry.getTab(32)?.hiddenDiagnostic?.visibleObservedAt, 3000);
 });
 
 test("first hidden snapshot becomes the comparison baseline when no visible assistant snapshot exists", () => {
@@ -552,4 +557,62 @@ test("worker restore retains only last visibility metadata while invalidating ob
   assert.equal(restored.getTab(36)?.observation, undefined);
   assert.equal(restored.getTab(36)?.controlEligibility, "NONE");
   assert.equal(restored.getTab(36)?.lastObservationVisibility, "visible");
+});
+
+test("hidden transport completion survives stale DOM and preserves activation timing boundaries", () => {
+  const registry = new SessionRegistry();
+  register(registry, 37, "transport", 100);
+  registry.markBackgrounded(37, 2000);
+
+  const hidden = registry.applyObservation({
+    tabId: 37,
+    documentId: "doc-37",
+    agentInstanceId: "agent-37",
+    pageEpoch: 1,
+    sequence: 2,
+    observation: {
+      ...observation("transport", "/c/transport", "GENERATING"),
+      visibility: "hidden",
+      stopControlPresent: true,
+      observedAt: 2500,
+      latestAssistant: {
+        normalizedText: "old",
+        textLength: 3,
+        fingerprint: "1".repeat(64),
+        domMessageId: "assistant-stale",
+      },
+      responseCompletion: {
+        serial: 1,
+        transport: "CHATGPT_CONVERSATION_STREAM",
+        visibility: "hidden",
+        completedAt: 2400,
+      },
+    },
+    markerHealth: "MISSING",
+    sentAt: 2501,
+  });
+  assert.equal(hidden.accepted, true);
+  assert.equal(registry.getTab(37)?.hiddenDiagnostic?.transportCompletedAt, 2400);
+  assert.equal(registry.getTab(37)?.hiddenDiagnostic?.tabActivatedAt, undefined);
+  assert.equal(registry.getTab(37)?.hiddenDiagnostic?.visibleObservedAt, undefined);
+
+  assert.equal(registry.markForegrounded(37, 3000), true);
+  assert.equal(registry.getTab(37)?.hiddenDiagnostic?.tabActivatedAt, 3000);
+
+  const visible = registry.applyObservation({
+    tabId: 37,
+    documentId: "doc-37",
+    agentInstanceId: "agent-37",
+    pageEpoch: 1,
+    sequence: 3,
+    observation: {
+      ...observation("transport", "/c/transport", "IDLE"),
+      visibility: "visible",
+      observedAt: 3100,
+    },
+    sentAt: 3101,
+  });
+  assert.equal(visible.accepted, true);
+  assert.equal(registry.getTab(37)?.hiddenDiagnostic?.visibleObservedAt, 3100);
+  assert.equal(registry.getTab(37)?.hiddenDiagnostic?.transportCompletedAt, 2400);
 });
