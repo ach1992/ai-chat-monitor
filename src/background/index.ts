@@ -290,10 +290,10 @@ async function handleInteraction(message: ContentUserInteraction, sender: chrome
       agentInstanceId: message.agentInstanceId,
       pageEpoch: message.pageEpoch,
       sequence: message.sequence,
+      interaction: message.interaction,
       sentAt: message.sentAt,
     }));
     if (!result.accepted) return staleEvent(result.reason);
-    await monitoring.handleSession(result.session);
     return acceptedAck(identity.tabId, identity.documentId, result);
   } catch {
     return protocolError("STORAGE_FAILURE", "Unable to persist user-interaction state.");

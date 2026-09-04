@@ -616,3 +616,46 @@ test("hidden transport completion survives stale DOM and preserves activation ti
   assert.equal(registry.getTab(37)?.hiddenDiagnostic?.visibleObservedAt, 3100);
   assert.equal(registry.getTab(37)?.hiddenDiagnostic?.transportCompletedAt, 2400);
 });
+
+
+test("manual send opens a persisted response episode against the prior assistant", () => {
+  const registry = new SessionRegistry();
+  register(registry, 31, "episode", 100);
+  const observed = observation("episode", "/c/episode", "IDLE");
+  observed.observedAt = 200;
+  observed.latestAssistant = {
+    normalizedText: "previous response",
+    textLength: 17,
+    fingerprint: "d".repeat(64),
+    domMessageId: "assistant-old",
+  };
+  assert.equal(registry.applyObservation({
+    tabId: 31,
+    documentId: "doc-31",
+    agentInstanceId: "agent-31",
+    pageEpoch: 1,
+    sequence: 2,
+    observation: observed,
+    sentAt: 200,
+  }).accepted, true);
+
+  assert.equal(registry.applyInteraction({
+    tabId: 31,
+    documentId: "doc-31",
+    agentInstanceId: "agent-31",
+    pageEpoch: 1,
+    sequence: 3,
+    interaction: "MANUAL_SEND",
+    sentAt: 300,
+  }).accepted, true);
+
+  assert.deepEqual(registry.getTab(31)?.pendingResponse, {
+    startedAt: 300,
+    baselineAssistantFingerprint: "d".repeat(64),
+    baselineAssistantDomMessageId: "assistant-old",
+  });
+
+  const restored = SessionRegistry.fromState(registry.exportState(), { invalidateObservations: true });
+  assert.deepEqual(restored.getTab(31)?.pendingResponse, registry.getTab(31)?.pendingResponse);
+  assert.equal(restored.getTab(31)?.observation, undefined);
+});

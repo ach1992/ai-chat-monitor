@@ -13,6 +13,20 @@ export type SessionEventRejectReason =
 
 export type HiddenMarkerHealth = "DETECTED" | "MISSING" | "MALFORMED";
 
+export type SessionInteractionKind =
+  | "COMPOSER_INPUT"
+  | "COMPOSER_FOCUS"
+  | "MANUAL_SEND"
+  | "STOP_GENERATION"
+  | "EDIT_TURN"
+  | "BLOCKING_INTERACTION";
+
+export interface PendingResponseEpisode {
+  startedAt: number;
+  baselineAssistantFingerprint?: string;
+  baselineAssistantDomMessageId?: string;
+}
+
 export interface HiddenMonitoringDiagnosticSnapshot {
   backgroundedAt: number;
   foregroundedAt?: number;
@@ -72,6 +86,7 @@ export interface InteractionEvent {
   agentInstanceId: string;
   pageEpoch: number;
   sequence: number;
+  interaction: SessionInteractionKind;
   sentAt: number;
 }
 
@@ -88,6 +103,7 @@ export interface SessionSnapshot {
   lastUserInteractionAt?: number;
   observation?: PageObservation;
   lastObservationVisibility?: PageObservation["visibility"];
+  pendingResponse?: PendingResponseEpisode;
   hiddenDiagnostic?: HiddenMonitoringDiagnosticSnapshot;
 }
 
@@ -172,6 +188,16 @@ function validHiddenDiagnostic(value: unknown): value is HiddenMonitoringDiagnos
   );
 }
 
+function validPendingResponse(value: unknown): value is PendingResponseEpisode {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Partial<PendingResponseEpisode>;
+  return (
+    typeof candidate.startedAt === "number" && Number.isFinite(candidate.startedAt) && candidate.startedAt > 0 &&
+    validOptionalFingerprint(candidate.baselineAssistantFingerprint) &&
+    (candidate.baselineAssistantDomMessageId === undefined || typeof candidate.baselineAssistantDomMessageId === "string")
+  );
+}
+
 function validSnapshot(session: SessionSnapshot): boolean {
   return (
     Number.isInteger(session.tabId) &&
@@ -188,7 +214,8 @@ function validSnapshot(session: SessionSnapshot): boolean {
     session.routeKey.length > 0 &&
     Number.isFinite(session.registeredAt) &&
     Number.isFinite(session.lastSeenAt) &&
-    validOptionalVisibility(session.lastObservationVisibility)
+    validOptionalVisibility(session.lastObservationVisibility) &&
+    (session.pendingResponse === undefined || validPendingResponse(session.pendingResponse))
   );
 }
 
@@ -293,6 +320,9 @@ export class SessionRegistry {
         : {}),
       ...(sameSessionIdentity && existing.lastUserInteractionAt !== undefined
         ? { lastUserInteractionAt: existing.lastUserInteractionAt }
+        : {}),
+      ...(sameSessionIdentity && existing.pendingResponse !== undefined
+        ? { pendingResponse: structuredClone(existing.pendingResponse) }
         : {}),
       ...(sameSessionIdentity && existing.hiddenDiagnostic !== undefined
         ? { hiddenDiagnostic: structuredClone(existing.hiddenDiagnostic) }
@@ -423,11 +453,21 @@ export class SessionRegistry {
     if (reject !== undefined) return { accepted: false, reason: reject };
     if (session === undefined) return { accepted: false, reason: "NO_SESSION" };
 
+    const baselineAssistant = session.observation?.latestAssistant;
+    const pendingResponse = event.interaction === "MANUAL_SEND"
+      ? {
+          startedAt: event.sentAt,
+          ...(baselineAssistant?.fingerprint === undefined ? {} : { baselineAssistantFingerprint: baselineAssistant.fingerprint }),
+          ...(baselineAssistant?.domMessageId === undefined ? {} : { baselineAssistantDomMessageId: baselineAssistant.domMessageId }),
+        }
+      : session.pendingResponse;
+
     const next: SessionSnapshot = {
       ...session,
       lastSequence: event.sequence,
       lastSeenAt: event.sentAt,
       lastUserInteractionAt: event.sentAt,
+      ...(pendingResponse === undefined ? {} : { pendingResponse }),
     };
     this.#sessions.set(event.tabId, next);
     return { accepted: true, session: this.#view(next) };
