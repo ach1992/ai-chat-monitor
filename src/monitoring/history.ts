@@ -12,10 +12,21 @@ export interface MonitoringHistoryPersistence {
 
 const MAX_EVENTS = 200;
 
+function validOptionalTimestamp(value: unknown): boolean {
+  return value === undefined || (typeof value === "number" && Number.isFinite(value) && value >= 0);
+}
+
 function validDelivery(value: MonitoringEvent["delivery"]): boolean {
   if (value === undefined) return true;
   const valid = (state: string) => state === "NOT_REQUESTED" || state === "DELIVERED" || state === "FAILED";
-  return valid(value.browser) && valid(value.sound) && valid(value.telegram);
+  return (
+    valid(value.browser) &&
+    valid(value.sound) &&
+    valid(value.telegram) &&
+    validOptionalTimestamp(value.browserAt) &&
+    validOptionalTimestamp(value.soundAt) &&
+    validOptionalTimestamp(value.telegramAt)
+  );
 }
 
 function validEvent(event: MonitoringEvent): boolean {
@@ -32,7 +43,7 @@ function validEvent(event: MonitoringEvent): boolean {
     typeof event.message === "string" && event.message.length <= 500 &&
     (event.assistantFingerprint === undefined || /^[a-f0-9]{64}$/.test(event.assistantFingerprint)) &&
     validDelivery(event.delivery) &&
-    (event.deliveryAt === undefined || Number.isFinite(event.deliveryAt))
+    validOptionalTimestamp(event.deliveryAt)
   );
 }
 
@@ -79,7 +90,7 @@ export class MonitoringHistoryRepository {
   updateDelivery(id: string, delivery: NonNullable<MonitoringEvent["delivery"]>, deliveryAt: number): Promise<boolean> {
     return this.#enqueue(async () => {
       const index = this.#state.events.findIndex((event) => event.id === id);
-      if (index < 0 || !Number.isFinite(deliveryAt)) return false;
+      if (index < 0 || !Number.isFinite(deliveryAt) || deliveryAt < 0 || !validDelivery(delivery)) return false;
       const events = this.#state.events.map((event, current) =>
         current === index ? { ...event, delivery: structuredClone(delivery), deliveryAt } : event,
       );
