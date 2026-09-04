@@ -67,6 +67,7 @@ interface ResolutionCacheState {
 interface GenerationProgress {
   fingerprint?: string;
   textLength: number;
+  startedAt: number;
   changedAt: number;
   notified: boolean;
 }
@@ -188,6 +189,38 @@ export function monitoringEventIdentity(session: SessionView, runtime: Monitorin
   return session.observation?.latestAssistant?.domMessageId ?? runtime.assistantFingerprint ?? `${session.pageEpoch}:${session.routeKey}`;
 }
 
+export type ResponseEpisodeAssistantState = "UNSCOPED" | "WAITING_FOR_FRESH_ASSISTANT" | "FRESH_ASSISTANT";
+
+export function responseEpisodeStartedAt(
+  manualStartedAt: number | undefined,
+  generationStartedAt: number | undefined,
+): number | undefined {
+  if (generationStartedAt === undefined) return manualStartedAt;
+  if (manualStartedAt === undefined) return generationStartedAt;
+  return Math.max(manualStartedAt, generationStartedAt);
+}
+
+export function responseEpisodeAssistantState(session: SessionView): ResponseEpisodeAssistantState {
+  const episode = session.pendingResponse;
+  if (episode === undefined) return "UNSCOPED";
+  const observation = session.observation;
+  const assistant = observation?.latestAssistant;
+  if (observation === undefined || observation.observedAt < episode.startedAt || assistant === undefined) {
+    return "WAITING_FOR_FRESH_ASSISTANT";
+  }
+  if (episode.baselineAssistantDomMessageId !== undefined && assistant.domMessageId !== undefined) {
+    return episode.baselineAssistantDomMessageId === assistant.domMessageId
+      ? "WAITING_FOR_FRESH_ASSISTANT"
+      : "FRESH_ASSISTANT";
+  }
+  if (episode.baselineAssistantFingerprint !== undefined) {
+    return episode.baselineAssistantFingerprint === assistant.fingerprint
+      ? "WAITING_FOR_FRESH_ASSISTANT"
+      : "FRESH_ASSISTANT";
+  }
+  return "FRESH_ASSISTANT";
+}
+
 function deliverySucceeded(event: MonitoringEvent): boolean {
   return event.delivery?.browser === "DELIVERED" || event.delivery?.sound === "DELIVERED" || event.delivery?.telegram === "DELIVERED";
 }
@@ -271,15 +304,43 @@ export class MonitoringService {
     }
 
     const completion = observation.responseCompletion;
+    const episodeState = responseEpisodeAssistantState(session);
+    const generationStartedAt = this.#generation.get(conversationId)?.startedAt;
+    const sawGenerating = generationStartedAt !== undefined;
+    const pageEvent = eventForPageState(state);
 
     if (observation.generation === "GENERATING") {
       await this.#handleGenerating(session, policy, state);
-      await this.#maybeEmitTransportCompletion(session, policy, state, completion);
+      await this.#maybeEmitTransportCompletion(
+        session,
+        policy,
+        state,
+        completion,
+        this.#generation.get(conversationId)?.startedAt,
+      );
       return;
     }
-    this.#generation.delete(conversationId);
 
-    const pageEvent = eventForPageState(state);
+    if (episodeState === "WAITING_FOR_FRESH_ASSISTANT") {
+      const uiDecision = semanticFromUi(state);
+      const runtime: MonitoringRuntimeStatus = {
+        tabId: session.tabId,
+        conversationId,
+        enabled: true,
+        generation: observation.generation,
+        pageState: state,
+        blockingReasons: [...observation.blocking.reasons],
+        ...(uiDecision === undefined ? {} : { semanticDecision: uiDecision }),
+        semanticSource: uiDecision === undefined ? "UNKNOWN" : "UI",
+        markerHealth: "MISSING",
+        ...(pageEvent === undefined ? {} : { lastEvent: pageEvent }),
+        updatedAt: Date.now(),
+      };
+      this.#runtime.set(session.tabId, runtime);
+      if (pageEvent !== undefined) await this.#emitEvent(session, policy, runtime, pageEvent);
+      await this.#maybeEmitTransportCompletion(session, policy, state, completion, generationStartedAt);
+      return;
+    }
     const assistant = observation.latestAssistant;
     if (assistant === undefined || observation.confidence !== "HIGH") {
       const uiDecision = semanticFromUi(state);
@@ -298,10 +359,36 @@ export class MonitoringService {
       };
       this.#runtime.set(session.tabId, runtime);
       if (pageEvent !== undefined) await this.#emitEvent(session, policy, runtime, pageEvent);
-      await this.#maybeEmitTransportCompletion(session, policy, state, completion);
+      await this.#maybeEmitTransportCompletion(session, policy, state, completion, generationStartedAt);
       return;
     }
 
+    const marker = inspectConversationStatusMarker(assistant.normalizedText);
+    const completionMatchesEpisode = session.pendingResponse === undefined
+      ? sawGenerating
+      : completion !== undefined && completion.completedAt >= session.pendingResponse.startedAt;
+    if (
+      episodeState === "FRESH_ASSISTANT" &&
+      marker.health !== "DETECTED" &&
+      !sawGenerating &&
+      !completionMatchesEpisode
+    ) {
+      this.#runtime.set(session.tabId, {
+        tabId: session.tabId,
+        conversationId,
+        enabled: true,
+        generation: observation.generation,
+        pageState: state,
+        blockingReasons: [...observation.blocking.reasons],
+        semanticSource: "UNKNOWN",
+        markerHealth: marker.health,
+        assistantFingerprint: assistant.fingerprint,
+        updatedAt: Date.now(),
+      });
+      return;
+    }
+
+    this.#generation.delete(conversationId);
     const resolution = await this.#resolveSemantic(session, state);
     const prior = this.#lastAssistant.get(conversationId);
     const repeated = prior !== undefined &&
@@ -314,7 +401,7 @@ export class MonitoringService {
       ...(assistant.domMessageId === undefined ? {} : { domMessageId: assistant.domMessageId }),
     });
 
-    let eventType = pageEvent ?? eventForDecision(resolution.decision) ?? "RESPONSE_COMPLETE";
+    let eventType = pageEvent ?? eventForDecision(resolution.decision);
     if (resolution.classification?.reasonCode === "PROVIDER_FAILURE") eventType = "PROVIDER_ERROR";
     if (repeated && pageEvent === undefined) eventType = "REPEATED_RESPONSE";
 
@@ -330,12 +417,12 @@ export class MonitoringService {
       markerHealth: resolution.marker.health,
       ...(resolution.classification === undefined ? {} : { classification: resolution.classification }),
       assistantFingerprint: assistant.fingerprint,
-      lastEvent: eventType,
+      ...(eventType === undefined ? {} : { lastEvent: eventType }),
       updatedAt: Date.now(),
     };
     this.#runtime.set(session.tabId, runtime);
-    await this.#emitEvent(session, policy, runtime, eventType);
-    await this.#maybeEmitTransportCompletion(session, policy, state, completion);
+    if (eventType !== undefined) await this.#emitEvent(session, policy, runtime, eventType);
+    await this.#maybeEmitTransportCompletion(session, policy, state, completion, generationStartedAt);
   }
 
   async updateChat(tabId: number, expectedConversationId: string, patch: ChatMonitoringPolicyPatch): Promise<ResolvedMonitoringPolicy> {
@@ -559,7 +646,13 @@ export class MonitoringService {
     const existing = this.#generation.get(conversationId);
     const changed = existing === undefined || existing.fingerprint !== currentFingerprint || existing.textLength !== currentLength;
     const progress: GenerationProgress = changed
-      ? { ...(currentFingerprint === undefined ? {} : { fingerprint: currentFingerprint }), textLength: currentLength, changedAt: now, notified: false }
+      ? {
+          ...(currentFingerprint === undefined ? {} : { fingerprint: currentFingerprint }),
+          textLength: currentLength,
+          startedAt: existing?.startedAt ?? now,
+          changedAt: now,
+          notified: false,
+        }
       : existing;
     this.#generation.set(conversationId, progress);
 
@@ -605,14 +698,19 @@ export class MonitoringService {
     policy: ResolvedMonitoringPolicy,
     state: MonitoringPageState,
     completion: ResponseCompletionEvidence | undefined,
+    generationStartedAt: number | undefined,
   ): Promise<void> {
     if (completion?.visibility !== "hidden") return;
     const conversationId = session.conversationId;
     if (conversationId === undefined) return;
 
+    const episodeStartedAt = responseEpisodeStartedAt(session.pendingResponse?.startedAt, generationStartedAt);
+    if (episodeStartedAt === undefined || completion.completedAt < episodeStartedAt) return;
+
+    const deliveredSince = episodeStartedAt;
     const alreadyDelivered = this.#history.snapshot(200).some((event) =>
       event.conversationId === conversationId &&
-      event.at >= completion.completedAt &&
+      event.at >= deliveredSince &&
       deliverySucceeded(event),
     );
     if (alreadyDelivered) return;
@@ -631,7 +729,7 @@ export class MonitoringService {
     };
     this.#runtime.set(session.tabId, runtime);
     await this.#emitEvent(session, policy, runtime, "RESPONSE_COMPLETE", {
-      identity: `transport:${session.documentId}:${completion.serial}`,
+      identity: `response:${session.documentId}:${episodeStartedAt}`,
       at: completion.completedAt,
     });
   }

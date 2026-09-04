@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { monitoringEventIdentity } from "../dist/monitoring/service.js";
+import { monitoringEventIdentity, responseEpisodeAssistantState, responseEpisodeStartedAt } from "../dist/monitoring/service.js";
 
 function session(latestAssistant) {
   return {
@@ -66,4 +66,53 @@ test("fingerprint remains the bounded fallback when no DOM message identity exis
     textLength: 3,
     fingerprint: "a".repeat(64),
   }), runtime), "a".repeat(64));
+});
+
+test("response episode rejects the previous assistant and pre-send observations", () => {
+  const current = session({
+    normalizedText: "previous",
+    textLength: 8,
+    fingerprint: "b".repeat(64),
+    domMessageId: "assistant-old",
+  });
+  current.observation.observedAt = 20;
+  current.pendingResponse = {
+    startedAt: 10,
+    baselineAssistantFingerprint: "b".repeat(64),
+    baselineAssistantDomMessageId: "assistant-old",
+  };
+  assert.equal(responseEpisodeAssistantState(current), "WAITING_FOR_FRESH_ASSISTANT");
+
+  current.observation.observedAt = 9;
+  current.observation.latestAssistant = {
+    normalizedText: "new but sampled too early",
+    textLength: 25,
+    fingerprint: "c".repeat(64),
+    domMessageId: "assistant-new",
+  };
+  assert.equal(responseEpisodeAssistantState(current), "WAITING_FOR_FRESH_ASSISTANT");
+});
+
+test("response episode accepts only a demonstrably fresh assistant identity", () => {
+  const current = session({
+    normalizedText: "fresh partial",
+    textLength: 13,
+    fingerprint: "c".repeat(64),
+    domMessageId: "assistant-new",
+  });
+  current.observation.observedAt = 20;
+  current.pendingResponse = {
+    startedAt: 10,
+    baselineAssistantFingerprint: "b".repeat(64),
+    baselineAssistantDomMessageId: "assistant-old",
+  };
+  assert.equal(responseEpisodeAssistantState(current), "FRESH_ASSISTANT");
+});
+
+test("newer observed generation supersedes an older manual-send episode", () => {
+  assert.equal(responseEpisodeStartedAt(100, undefined), 100);
+  assert.equal(responseEpisodeStartedAt(undefined, 200), 200);
+  assert.equal(responseEpisodeStartedAt(100, 200), 200);
+  assert.equal(responseEpisodeStartedAt(300, 200), 300);
+  assert.equal(responseEpisodeStartedAt(undefined, undefined), undefined);
 });

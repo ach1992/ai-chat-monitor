@@ -14,11 +14,13 @@ await verifyManifestAssets(extensionPath);
 const CONVERSATION_ID = "stale-dom-smoke-chat";
 const TEST_HTML = `<!doctype html>
 <meta charset="utf-8">
-<title>AI Chat Monitor stale DOM smoke</title>
-<div data-message-author-role="user" data-message-id="user-stale">Finish this response while I am away.</div>
-<article id="latest-turn"><div data-message-author-role="assistant" data-message-id="assistant-stale" id="assistant">...</div></article>
-<div id="prompt-textarea" data-testid="composer" contenteditable="true"></div>
-<button data-testid="stop-button" id="stop">Stop generating</button>`;
+<title>AI Chat Monitor response-episode smoke</title>
+<div id="conversation">
+  <div data-message-author-role="user" data-message-id="user-old">Previous request.</div>
+  <article><div data-message-author-role="assistant" data-message-id="assistant-old" id="assistant-old">Previous response complete.
+AI_CHAT_MONITOR_STATUS={"decision":"COMPLETE"}</div></article>
+</div>
+<div id="prompt-textarea" data-testid="composer" contenteditable="true">New request.</div>`;
 
 function findOnPath(command) {
   if (command.includes("/")) return existsSync(command) ? command : undefined;
@@ -257,13 +259,80 @@ try {
   await waitFor(async () => {
     const stored = await evaluate(queryPage, "chrome.storage.session.get('guardian:session-registry:runtime')");
     const session = stored["guardian:session-registry:runtime"]?.sessions?.find((candidate) => candidate.conversationId === CONVERSATION_ID);
-    return session?.observation?.generation === "GENERATING" ? session : false;
-  }, "initial stale-DOM generating observation");
+    return session?.observation?.generation === "IDLE" && session?.observation?.latestAssistant?.domMessageId === "assistant-old" ? session : false;
+  }, "initial completed assistant observation");
 
   await waitFor(async () => {
     const current = await evaluate(queryPage, `chrome.tabs.get(${tab.id}).then((item) => ({autoDiscardable:item.autoDiscardable}))`);
     return current.autoDiscardable === false;
   }, "stale-DOM automatic-discard protection");
+
+  await evaluate(queryPage, `chrome.runtime.sendMessage({type:'panel:history-clear',protocolVersion:2})`);
+  await evaluate(chatPage, "document.querySelector('#prompt-textarea')?.focus(); true");
+  await chatPage.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+  await chatPage.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+
+  const episode = await waitFor(async () => {
+    const stored = await evaluate(queryPage, "chrome.storage.session.get('guardian:session-registry:runtime')");
+    const session = stored["guardian:session-registry:runtime"]?.sessions?.find((candidate) => candidate.conversationId === CONVERSATION_ID);
+    return session?.pendingResponse?.baselineAssistantDomMessageId === "assistant-old" ? session.pendingResponse : false;
+  }, "manual-send response episode boundary");
+
+  await sleep(250);
+  const eventsAfterSend = await evaluate(queryPage, "chrome.storage.local.get('guardian:monitoring-history:events').then((stored) => stored['guardian:monitoring-history:events']?.events ?? [])");
+  if (eventsAfterSend.some((candidate) => candidate.at >= episode.startedAt)) {
+    throw new Error(`MANUAL_SEND reprocessed the previous assistant into a fresh event: ${JSON.stringify(eventsAfterSend)}`);
+  }
+
+  await evaluate(chatPage, `(() => {
+    const conversation = document.querySelector('#conversation');
+    const user = document.createElement('div');
+    user.setAttribute('data-message-author-role', 'user');
+    user.setAttribute('data-message-id', 'user-new');
+    user.textContent = 'New request.';
+    conversation?.append(user);
+  })()`);
+  await waitFor(async () => {
+    const stored = await evaluate(queryPage, "chrome.storage.session.get('guardian:session-registry:runtime')");
+    const session = stored["guardian:session-registry:runtime"]?.sessions?.find((candidate) => candidate.conversationId === CONVERSATION_ID);
+    return session?.observation?.latestAssistant === undefined ? session : false;
+  }, "new user turn outranking the previous assistant");
+
+  await evaluate(chatPage, `(() => {
+    const conversation = document.querySelector('#conversation');
+    const article = document.createElement('article');
+    const assistant = document.createElement('div');
+    assistant.id = 'assistant-new';
+    assistant.setAttribute('data-message-author-role', 'assistant');
+    assistant.setAttribute('data-message-id', 'assistant-new');
+    assistant.textContent = '...';
+    article.append(assistant);
+    conversation?.append(article);
+  })()`);
+  await waitFor(async () => {
+    const stored = await evaluate(queryPage, "chrome.storage.session.get('guardian:session-registry:runtime')");
+    const session = stored["guardian:session-registry:runtime"]?.sessions?.find((candidate) => candidate.conversationId === CONVERSATION_ID);
+    return session?.observation?.latestAssistant?.domMessageId === "assistant-new" && session?.observation?.generation === "IDLE" ? session : false;
+  }, "fresh partial assistant with transient IDLE UI");
+
+  await sleep(250);
+  const eventsDuringPartial = await evaluate(queryPage, "chrome.storage.local.get('guardian:monitoring-history:events').then((stored) => stored['guardian:monitoring-history:events']?.events ?? [])");
+  if (eventsDuringPartial.some((candidate) => candidate.at >= episode.startedAt)) {
+    throw new Error(`Partial fresh assistant emitted a premature completion event: ${JSON.stringify(eventsDuringPartial)}`);
+  }
+
+  await evaluate(chatPage, `(() => {
+    const stop = document.createElement('button');
+    stop.id = 'stop';
+    stop.setAttribute('data-testid', 'stop-button');
+    stop.textContent = 'Stop generating';
+    document.body.append(stop);
+  })()`);
+  await waitFor(async () => {
+    const stored = await evaluate(queryPage, "chrome.storage.session.get('guardian:session-registry:runtime')");
+    const session = stored["guardian:session-registry:runtime"]?.sessions?.find((candidate) => candidate.conversationId === CONVERSATION_ID);
+    return session?.observation?.generation === "GENERATING" && session?.observation?.latestAssistant?.domMessageId === "assistant-new" ? session : false;
+  }, "current response generating observation");
 
   const blank = await secondBrowser.browserClient.send("Target.createTarget", { url: "about:blank" });
   await secondBrowser.browserClient.send("Target.activateTarget", { targetId: blank.targetId });
@@ -271,7 +340,7 @@ try {
 
   const fetchResult = await evaluate(
     chatPage,
-    `fetch('/backend-api/f/conversation', {method:'POST', headers:{'content-type':'application/json'}, body:'{}'}).then((response) => response.text()).then(() => ({done:true,visibility:document.visibilityState,assistant:document.querySelector('#assistant')?.textContent,stop:document.querySelector('#stop') !== null}))`,
+    `fetch('/backend-api/f/conversation', {method:'POST', headers:{'content-type':'application/json'}, body:'{}'}).then((response) => response.text()).then(() => ({done:true,visibility:document.visibilityState,assistant:document.querySelector('#assistant-new')?.textContent,stop:document.querySelector('#stop') !== null}))`,
   );
   if (fetchResult?.done !== true || fetchResult.visibility !== "hidden" || fetchResult.assistant !== "..." || fetchResult.stop !== true) {
     throw new Error(`Synthetic stream did not finish with the monitored DOM still stale and hidden: ${JSON.stringify(fetchResult)}`);
@@ -306,7 +375,7 @@ try {
   if (await evaluate(chatPage, "document.visibilityState") !== "hidden") {
     throw new Error("Stale-DOM monitored tab was activated before the notification completed.");
   }
-  if (await evaluate(chatPage, "document.querySelector('#assistant')?.textContent") !== "...") {
+  if (await evaluate(chatPage, "document.querySelector('#assistant-new')?.textContent") !== "...") {
     throw new Error("Stale-DOM smoke accidentally installed final assistant content.");
   }
 
