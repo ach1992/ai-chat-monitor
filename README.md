@@ -2,7 +2,7 @@
 
 AI Chat Monitor is a Chromium Manifest V3 extension that **monitors selected ChatGPT conversations without controlling them**. It observes page/runtime state, resolves an optional semantic work status, and sends configurable Browser, local sound, and Telegram notifications.
 
-**Current stable release: [v3.0.1](https://github.com/ach1992/ai-chat-monitor/releases/tag/v3.0.1).** v3.0.1 restores reliable hidden/background-tab monitoring and refreshes the packaged extension icons while preserving the strictly read-only monitoring behavior and sole `AI_CHAT_MONITOR_STATUS` protocol.
+**Current stable release: [v3.0.1](https://github.com/ach1992/ai-chat-monitor/releases/tag/v3.0.1).** Post-release owner validation found that its inactive/background-tab reliability fix was incomplete. The corrective work is tracked in [Issue #83](https://github.com/ach1992/ai-chat-monitor/issues/83); do not treat v3.0.1 itself as proof that inactive-tab monitoring is fully resolved. The product remains strictly read-only and continues to use the sole `AI_CHAT_MONITOR_STATUS` protocol.
 
 ## Single purpose
 
@@ -129,7 +129,8 @@ git clone https://github.com/ach1992/ai-chat-monitor.git
 cd ai-chat-monitor
 npm ci
 npm run validate
-npm run smoke:extension
+CHROME_BIN=/path/to/chrome-for-testing-or-chromium npm run smoke:extension
+CHROME_BIN=/path/to/chrome-for-testing-or-chromium npm run smoke:background
 npm run package
 ```
 
@@ -139,7 +140,7 @@ npm run package
 - `artifacts/SHA256SUMS.txt`
 - `artifacts/build-info.json`
 
-The CI workflow validates the exact candidate SHA, runs the extension smoke check, verifies the ZIP layout/provenance, and uploads the `artifacts/` directory as a GitHub Actions artifact.
+The CI workflow validates the exact candidate SHA, downloads a pinned Chrome for Testing build, proves the unpacked AI Chat Monitor service worker actually loaded, runs the real hidden/background-tab smoke regression, verifies the ZIP layout/provenance, and uploads the `artifacts/` directory as a GitHub Actions artifact. Branded Google Chrome builds no longer honor the command-line unpacked-extension flags used by these automated smoke tests, so local smoke runs should point `CHROME_BIN` at Chrome for Testing or Chromium.
 
 ## Load an unpacked build
 

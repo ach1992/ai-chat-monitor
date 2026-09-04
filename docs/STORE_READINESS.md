@@ -2,8 +2,8 @@
 
 Status:
 
-- **GitHub release:** `v3.0.1` published and verified.
-- **Chrome Web Store:** not submitted or published; production action deferred.
+- **GitHub release:** `v3.0.1` published and artifact-verified, but post-release owner validation found an unresolved inactive/background-tab reliability defect.
+- **Chrome Web Store:** not submitted or published; production action deferred. v3.0.1 must not be submitted as the background-reliability fix.
 
 This document tracks engineering and disclosure readiness for a future Chrome Web Store submission. The published GitHub release does not itself authorize Store upload, submission, visibility changes, or publication.
 
@@ -16,7 +16,7 @@ This document tracks engineering and disclosure readiness for a future Chrome We
 
 ## Runtime safety
 
-Verified for the released v3.0.1 baseline:
+Verified for the released v3.0.1 baseline, except for the separately documented post-release inactive-tab defect tracked by Issue #83 Contract Revision 2:
 
 - [x] Exact candidate validation is green.
 - [x] Static/runtime regression coverage proves no ChatGPT composer write or conversation-control activation path exists.

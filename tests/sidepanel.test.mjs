@@ -77,6 +77,10 @@ test("Side Panel exposes monitoring, compact protocol setup, notifications, prov
   assert.match(script, /exact, strict, or format-exclusive output/i);
   assert.match(script, /outside Markdown code fences/i);
   assert.match(script, /Do not use CONTINUE when a real human gate is required/i);
+  assert.match(script, /Chrome discarded/);
+  assert.match(script, /Chrome frozen/);
+  assert.match(script, /Discard protection ON/);
+  assert.match(script, /paused by Chrome/);
 
   assert.match(script, /let notificationDefaultsDirty = false/);
   assert.match(script, /defaultsForm\.addEventListener\("input", \(\) => \{ notificationDefaultsDirty = true; \}\)/);

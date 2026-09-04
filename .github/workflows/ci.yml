@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VALIDATION_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      CHROME_FOR_TESTING_VERSION: 152.0.7977.82
     steps:
       - uses: actions/checkout@v6
         with:
@@ -25,7 +26,17 @@ jobs:
           package-manager-cache: false
       - run: npm ci
       - run: npm run validate
+      - name: Install Chrome for Testing
+        run: |
+          mkdir -p "$RUNNER_TEMP/chrome-for-testing"
+          curl -fsSL --retry 3 \
+            "https://storage.googleapis.com/chrome-for-testing-public/${CHROME_FOR_TESTING_VERSION}/linux64/chrome-linux64.zip" \
+            -o "$RUNNER_TEMP/chrome-for-testing/chrome.zip"
+          unzip -q "$RUNNER_TEMP/chrome-for-testing/chrome.zip" -d "$RUNNER_TEMP/chrome-for-testing"
+          echo "CHROME_BIN=$RUNNER_TEMP/chrome-for-testing/chrome-linux64/chrome" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/chrome-for-testing/chrome-linux64/chrome" --version
       - run: npm run smoke:extension
+      - run: npm run smoke:background
       - run: npm run package
       - name: Verify release ZIP
         run: |
