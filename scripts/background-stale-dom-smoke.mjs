@@ -391,12 +391,25 @@ try {
     return stored["guardian:monitoring-history:events"]?.events?.find(
       (candidate) => candidate.conversationId === CONVERSATION_ID && candidate.type === "RESPONSE_COMPLETE" && candidate.delivery?.browser === "DELIVERED",
     ) ?? false;
-  }, "single RESPONSE_COMPLETE from the verified hidden SSE completion", 6_000);
+  }, "one delivered RESPONSE_COMPLETE from the verified hidden SSE completion", 6_000);
 
   const allEvents = await evaluate(queryPage, "chrome.storage.local.get('guardian:monitoring-history:events').then((stored) => stored['guardian:monitoring-history:events']?.events ?? [])");
   const responseEvents = allEvents.filter((candidate) => candidate.conversationId === CONVERSATION_ID && candidate.at >= episode.startedAt);
-  if (responseEvents.length !== 1 || responseEvents[0].id !== event.id) {
-    throw new Error(`Response lifecycle emitted duplicate/premature events: ${JSON.stringify(responseEvents)}`);
+  const deliveredEvents = responseEvents.filter((candidate) =>
+    candidate.delivery?.browser === "DELIVERED" ||
+    candidate.delivery?.sound === "DELIVERED" ||
+    candidate.delivery?.telegram === "DELIVERED",
+  );
+  if (deliveredEvents.length !== 1 || deliveredEvents[0].id !== event.id) {
+    throw new Error(`Response lifecycle emitted duplicate notification delivery: ${JSON.stringify(responseEvents)}`);
+  }
+  const nonGenericDelivered = responseEvents.some((candidate) => candidate.id !== event.id && (
+    candidate.delivery?.browser === "DELIVERED" ||
+    candidate.delivery?.sound === "DELIVERED" ||
+    candidate.delivery?.telegram === "DELIVERED"
+  ));
+  if (nonGenericDelivered) {
+    throw new Error(`Semantic diagnostics produced an extra delivered notification: ${JSON.stringify(responseEvents)}`);
   }
 
   const sessionState = await evaluate(queryPage, "chrome.storage.session.get('guardian:session-registry:runtime')");
