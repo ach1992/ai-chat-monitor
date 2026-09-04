@@ -40,7 +40,7 @@ The `webRequest` permission is used only on the persistent ChatGPT host permissi
 
 AI Chat Monitor accepts only a bounded response-stream shape for completion correlation: a top-frame ChatGPT conversation request using `POST`, a successful response status, and `Content-Type: text/event-stream`. It correlates that request using bounded request/tab/document identity and timestamps.
 
-AI Chat Monitor does **not** read request bodies, response bodies, cookies, or authorization headers through this permission. It does not use `webRequestBlocking`, does not alter, redirect, cancel, or rewrite ChatGPT requests, and does not persist network payload content.
+AI Chat Monitor does not read request bodies, response bodies, cookies, or authorization headers through this permission. It does not use `webRequestBlocking`, does not alter, redirect, cancel, or rewrite ChatGPT requests, and does not persist network payload content.
 
 ## Optional AI provider transfer
 
