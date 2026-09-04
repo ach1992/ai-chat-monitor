@@ -2,7 +2,7 @@
 
 AI Chat Monitor is a Chromium Manifest V3 extension that **monitors selected ChatGPT conversations without controlling them**. It observes page/runtime state, resolves an optional semantic work status, and sends configurable Browser, local sound, and Telegram notifications.
 
-**Current stable release: [v3.0.0](https://github.com/ach1992/ai-chat-monitor/releases/tag/v3.0.0).** v3 establishes the AI Chat Monitor identity and the sole `AI_CHAT_MONITOR_STATUS` protocol while preserving the strictly read-only monitoring behavior.
+**Current stable release: [v3.0.1](https://github.com/ach1992/ai-chat-monitor/releases/tag/v3.0.1).** v3.0.1 restores reliable hidden/background-tab monitoring and refreshes the packaged extension icons while preserving the strictly read-only monitoring behavior and sole `AI_CHAT_MONITOR_STATUS` protocol.
 
 ## Single purpose
 
@@ -205,12 +205,12 @@ See [PRIVACY.md](PRIVACY.md) for the complete current policy.
 
 ## Release state
 
-`v3.0.0` is the current verified published GitHub release.
+`v3.0.1` is the current verified published GitHub release.
 
-- Release target commit: `c38eb377c00d692ac739121e85d48c73eacea4d7`
-- Release ZIP: `ai-chat-monitor-3.0.0.zip`
+- Release target commit: `2e4c24256940ac5c9ce0e25bb3eaaf8707d2a269`
+- Release ZIP: `ai-chat-monitor-3.0.1.zip`
 - Packaged runtime files: `48`
-- Release ZIP SHA-256: `2771b6cf4fe3e90188af95d989e5f3dcd751b1b29f37b9594f5c36fb28ccc64c`
-- Published release: [AI Chat Monitor v3.0.0](https://github.com/ach1992/ai-chat-monitor/releases/tag/v3.0.0)
+- Release ZIP SHA-256: `6791bed632904ad740c459dd5769c49eab0fc1ed6c329a0e60f00f17a7297d0c`
+- Published release: [AI Chat Monitor v3.0.1](https://github.com/ach1992/ai-chat-monitor/releases/tag/v3.0.1)
 
 Chrome Web Store submission/publication is a separate production action and has **not** been performed. See [Store readiness](docs/STORE_READINESS.md) before any future Store submission.
