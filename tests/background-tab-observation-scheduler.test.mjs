@@ -8,6 +8,7 @@ function observation() {
     conversationId: "chat-bg",
     routeKey: "/c/chat-bg",
     pageTitle: "Background chat",
+    visibility: "hidden",
     generation: "IDLE",
     latestAssistant: {
       normalizedText: 'Done.\nAI_CHAT_MONITOR_STATUS={"decision":"COMPLETE"}',
@@ -36,13 +37,15 @@ async function loadContentAgent(initialVisibility) {
   const documentListeners = new Map();
   let nextTimerId = 1;
   let mutationCallback;
-  let resourceCallback;
+  let runtimeCallback;
   const state = { visibilityState: initialVisibility, observation: observation(), rejectNextObservation: false };
 
   class FakeAdapter {
     currentRouteKey() { return "/c/chat-bg"; }
     currentConversationId() { return "chat-bg"; }
-    async observe() { return structuredClone(state.observation); }
+    async observe() {
+      return { ...structuredClone(state.observation), visibility: state.visibilityState };
+    }
     isComposerTarget() { return false; }
     isManualSendTarget() { return false; }
     isStopGenerationTarget() { return false; }
@@ -52,24 +55,6 @@ async function loadContentAgent(initialVisibility) {
 
   class FakeMutationObserver {
     constructor(callback) { mutationCallback = callback; }
-    observe() {}
-  }
-
-  class FakePerformanceResourceTiming {
-    constructor(overrides = {}) {
-      Object.assign(this, {
-        entryType: "resource",
-        name: "https://chatgpt.com/backend-api/f/conversation",
-        initiatorType: "fetch",
-        responseEnd: 250,
-        responseStatus: 200,
-        contentType: "text/event-stream",
-      }, overrides);
-    }
-  }
-
-  class FakePerformanceObserver {
-    constructor(callback) { resourceCallback = callback; }
     observe() {}
   }
 
@@ -97,7 +82,7 @@ async function loadContentAgent(initialVisibility) {
 
   const chrome = {
     runtime: {
-      onMessage: { addListener() {} },
+      onMessage: { addListener(callback) { runtimeCallback = callback; } },
       async sendMessage(message) {
         sent.push(structuredClone(message));
         if (message.type === "content:observation" && state.rejectNextObservation) {
@@ -124,15 +109,12 @@ async function loadContentAgent(initialVisibility) {
   const context = {
     GuardianContent: { PROTOCOL_VERSION: 2, BrowserChatGPTAdapter: FakeAdapter },
     MutationObserver: FakeMutationObserver,
-    PerformanceObserver: FakePerformanceObserver,
-    PerformanceResourceTiming: FakePerformanceResourceTiming,
-    URL,
     chrome,
     crypto: { randomUUID: () => "agent-test" },
     Date,
     document,
     location: { href: "https://chatgpt.com/c/chat-bg", origin: "https://chatgpt.com", pathname: "/c/chat-bg" },
-    performance: { now: () => 0, timeOrigin: 1_000 },
+    performance: { now: () => 0 },
     Promise,
     queueMicrotask,
     structuredClone,
@@ -148,10 +130,9 @@ async function loadContentAgent(initialVisibility) {
       assert.equal(typeof mutationCallback, "function");
       mutationCallback([], undefined);
     },
-    resource(overrides = {}) {
-      assert.equal(typeof resourceCallback, "function");
-      const entry = new FakePerformanceResourceTiming(overrides);
-      resourceCallback({ getEntries: () => [entry] }, undefined);
+    backgroundMessage(message) {
+      assert.equal(typeof runtimeCallback, "function");
+      runtimeCallback(structuredClone(message), {}, () => undefined);
     },
     setVisibility(value) { state.visibilityState = value; },
     setObservation(value) { state.observation = structuredClone(value); },
@@ -226,44 +207,147 @@ test("hidden agent self-heals a lost background session without tab activation",
   );
 });
 
-test("conversation transport completion is bound to a hidden observation even when assistant DOM stays stale", async () => {
+test("browser stream start keeps hidden transient IDLE observations in generation", async () => {
   const agent = await loadContentAgent("hidden");
   agent.sent.length = 0;
   agent.setObservation({
     ...observation(),
     generation: "IDLE",
     latestAssistant: {
-      normalizedText: "old",
-      textLength: 3,
+      normalizedText: "partial response",
+      textLength: 16,
       fingerprint: "b".repeat(64),
-      domMessageId: "assistant-old",
+      domMessageId: "assistant-new",
     },
   });
 
-  agent.resource();
+  agent.backgroundMessage({
+    type: "background:response-stream-started",
+    protocolVersion: 2,
+    requestId: "request-1",
+    startedAt: 1_000,
+  });
+  await flushAsyncWork();
+
+  const observations = observationMessages(agent.sent);
+  assert.equal(observations.length, 1);
+  assert.equal(observations[0].observation.generation, "GENERATING");
+  assert.equal(observations[0].observation.responseCompletion, undefined);
+});
+
+test("matching browser stream completion releases hidden generation and binds completion evidence", async () => {
+  const agent = await loadContentAgent("hidden");
+  agent.sent.length = 0;
+  agent.setObservation({
+    ...observation(),
+    generation: "IDLE",
+    latestAssistant: {
+      normalizedText: "partial response",
+      textLength: 16,
+      fingerprint: "b".repeat(64),
+      domMessageId: "assistant-new",
+    },
+  });
+
+  agent.backgroundMessage({
+    type: "background:response-stream-started",
+    protocolVersion: 2,
+    requestId: "request-2",
+    startedAt: 2_000,
+  });
+  await flushAsyncWork();
+  agent.sent.length = 0;
+
+  agent.backgroundMessage({
+    type: "background:response-stream-completed",
+    protocolVersion: 2,
+    requestId: "request-2",
+    startedAt: 2_000,
+    completedAt: 3_000,
+  });
   await flushAsyncWork();
 
   const completions = completionObservations(agent.sent);
   assert.equal(completions.length, 1);
-  assert.equal(completions[0].observation.latestAssistant.normalizedText, "old");
-  assert.equal(completions[0].observation.latestAssistant.textLength, 3);
+  assert.equal(completions[0].observation.generation, "IDLE");
+  assert.equal(completions[0].observation.latestAssistant.normalizedText, "partial response");
   assert.deepEqual(completions[0].observation.responseCompletion, {
     serial: 1,
     transport: "CHATGPT_CONVERSATION_STREAM",
     visibility: "hidden",
-    completedAt: 1_250,
+    completedAt: 3_000,
   });
 });
 
-test("transport observer ignores prepare, cross-origin, non-stream, and failed resources", async () => {
+test("mismatched browser stream completion cannot end the active hidden response", async () => {
   const agent = await loadContentAgent("hidden");
   agent.sent.length = 0;
+  agent.setObservation({
+    ...observation(),
+    generation: "IDLE",
+    latestAssistant: {
+      normalizedText: "partial response",
+      textLength: 16,
+      fingerprint: "b".repeat(64),
+      domMessageId: "assistant-new",
+    },
+  });
 
-  agent.resource({ name: "https://chatgpt.com/backend-api/f/conversation/prepare" });
-  agent.resource({ name: "https://example.com/backend-api/f/conversation" });
-  agent.resource({ contentType: "application/json" });
-  agent.resource({ responseStatus: 500 });
+  agent.backgroundMessage({
+    type: "background:response-stream-started",
+    protocolVersion: 2,
+    requestId: "request-current",
+    startedAt: 4_000,
+  });
+  await flushAsyncWork();
+  agent.sent.length = 0;
+
+  agent.backgroundMessage({
+    type: "background:response-stream-completed",
+    protocolVersion: 2,
+    requestId: "request-old",
+    startedAt: 3_000,
+    completedAt: 4_500,
+  });
+  agent.mutation();
   await flushAsyncWork();
 
   assert.equal(completionObservations(agent.sent).length, 0);
+  assert.ok(observationMessages(agent.sent).every((message) => message.observation.generation === "GENERATING"));
+});
+
+test("aborted browser stream clears the hidden generation hold without fabricating completion", async () => {
+  const agent = await loadContentAgent("hidden");
+  agent.sent.length = 0;
+  agent.setObservation({
+    ...observation(),
+    generation: "IDLE",
+    latestAssistant: {
+      normalizedText: "partial response",
+      textLength: 16,
+      fingerprint: "b".repeat(64),
+      domMessageId: "assistant-new",
+    },
+  });
+
+  agent.backgroundMessage({
+    type: "background:response-stream-started",
+    protocolVersion: 2,
+    requestId: "request-abort",
+    startedAt: 5_000,
+  });
+  await flushAsyncWork();
+  agent.sent.length = 0;
+
+  agent.backgroundMessage({
+    type: "background:response-stream-aborted",
+    protocolVersion: 2,
+    requestId: "request-abort",
+    startedAt: 5_000,
+  });
+  await flushAsyncWork();
+
+  const observations = observationMessages(agent.sent);
+  assert.equal(completionObservations(agent.sent).length, 0);
+  assert.equal(observations.at(-1)?.observation.generation, "IDLE");
 });
