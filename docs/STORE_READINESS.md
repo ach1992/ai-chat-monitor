@@ -1,9 +1,9 @@
-# Chrome Web Store Readiness — v3.0.1
+# Chrome Web Store Readiness — v3.0.2
 
 Status:
 
-- **GitHub release:** `v3.0.1` published and artifact-verified, but post-release owner validation found an unresolved inactive/background-tab reliability defect.
-- **Chrome Web Store:** not submitted or published; production action deferred. v3.0.1 must not be submitted as the background-reliability fix.
+- **GitHub release:** `v3.0.2` published and artifact-verified with the corrected inactive/background-tab reliability path.
+- **Chrome Web Store:** not submitted or published; production action deferred.
 
 This document tracks engineering and disclosure readiness for a future Chrome Web Store submission. The published GitHub release does not itself authorize Store upload, submission, visibility changes, or publication.
 
@@ -16,7 +16,7 @@ This document tracks engineering and disclosure readiness for a future Chrome We
 
 ## Runtime safety
 
-Verified for the released v3.0.1 baseline, except for the separately documented post-release inactive-tab defect tracked by Issue #83 Contract Revision 2:
+Verified for the released v3.0.2 baseline:
 
 - [x] Exact candidate validation is green.
 - [x] Static/runtime regression coverage proves no ChatGPT composer write or conversation-control activation path exists.
@@ -93,18 +93,21 @@ CI must:
 - verify `build-info.json` points to the exact candidate SHA;
 - upload the package/checksum/provenance artifacts.
 
-Published v3.0.1 evidence:
+Published v3.0.2 evidence:
 
-- Release: https://github.com/ach1992/ai-chat-monitor/releases/tag/v3.0.1
-- Release target: `2e4c24256940ac5c9ce0e25bb3eaaf8707d2a269`
-- Exact-main CI: `33876644784` — PASS, including validation, Chromium extension smoke test, packaging, and ZIP verification.
-- Release ZIP: `ai-chat-monitor-3.0.1.zip`
-- Runtime files: `48`
-- SHA-256: `6791bed632904ad740c459dd5769c49eab0fc1ed6c329a0e60f00f17a7297d0c`
+- Release: https://github.com/ach1992/ai-chat-monitor/releases/tag/v3.0.2
+- Release target: `51cc8b6b1bac484309f4cc7537e183917d94fdc0`
+- PR #90 exact-head CI: `33889020497` — PASS.
+- Post-remediation main CI: `33889209756` — PASS.
+- v3.0.2 release-prep exact-head CI: `33889605412` — PASS.
+- Exact-main release CI: `33889768839` — PASS, including 134 tests, Chrome for Testing 152.0.7977.82 installation, unpacked service-worker identity smoke, real hidden/background-tab smoke, packaging, ZIP verification, and artifact upload.
+- Release ZIP: `ai-chat-monitor-3.0.2.zip`
+- Runtime files: `49`
+- SHA-256: `0e9d535777d57fd04b0506cbc7ff0635d8fc320fab1ac9b9068ede9432c32a94`
 - Release is non-draft and non-prerelease.
 - Tag resolves exactly to the release target.
-- `ai-chat-monitor-3.0.1.zip`, `SHA256SUMS.txt`, and `build-info.json` are present as release assets.
-- Published assets were re-downloaded from GitHub and matched the exact CI artifacts byte-for-byte; source identity, file count, version, ZIP integrity, and SHA-256 were verified after publication.
+- `ai-chat-monitor-3.0.2.zip`, `SHA256SUMS.txt`, and `build-info.json` are present as release assets.
+- Published assets were re-downloaded from GitHub and matched the exact-main CI artifacts byte-for-byte; source identity, file count, version, ZIP integrity, manifest/package parity, icon identity, and SHA-256 were verified after publication.
 - Chrome Web Store publication remains a separate deferred production action.
 
 ## Store assets
@@ -115,7 +118,7 @@ Published v3.0.1 evidence:
 
 ## Documentation alignment
 
-The v3.0.1 released baseline is aligned across:
+The v3.0.2 released baseline is aligned across:
 
 - `README.md`
 - `docs/PROJECT_SPEC.md`

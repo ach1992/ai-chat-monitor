@@ -2,7 +2,7 @@
 
 AI Chat Monitor is a Chromium Manifest V3 extension that **monitors selected ChatGPT conversations without controlling them**. It observes page/runtime state, resolves an optional semantic work status, and sends configurable Browser, local sound, and Telegram notifications.
 
-**Current stable release: [v3.0.1](https://github.com/ach1992/ai-chat-monitor/releases/tag/v3.0.1).** Post-release owner validation found that its inactive/background-tab reliability fix was incomplete. The corrective work is tracked in [Issue #83](https://github.com/ach1992/ai-chat-monitor/issues/83); do not treat v3.0.1 itself as proof that inactive-tab monitoring is fully resolved. The product remains strictly read-only and continues to use the sole `AI_CHAT_MONITOR_STATUS` protocol.
+**Current stable release: [v3.0.2](https://github.com/ach1992/ai-chat-monitor/releases/tag/v3.0.2).** v3.0.2 corrects the inactive/background-tab defect left by v3.0.1: terminal status extraction is background-safe, recoverable MV3 session loss self-heals without tab activation, and monitored tabs opt out of Chrome automatic discard while monitoring is enabled. The product remains strictly read-only and continues to use the sole `AI_CHAT_MONITOR_STATUS` protocol.
 
 ## Single purpose
 
@@ -206,12 +206,13 @@ See [PRIVACY.md](PRIVACY.md) for the complete current policy.
 
 ## Release state
 
-`v3.0.1` is the current verified published GitHub release.
+`v3.0.2` is the current verified published GitHub release.
 
-- Release target commit: `2e4c24256940ac5c9ce0e25bb3eaaf8707d2a269`
-- Release ZIP: `ai-chat-monitor-3.0.1.zip`
-- Packaged runtime files: `48`
-- Release ZIP SHA-256: `6791bed632904ad740c459dd5769c49eab0fc1ed6c329a0e60f00f17a7297d0c`
-- Published release: [AI Chat Monitor v3.0.1](https://github.com/ach1992/ai-chat-monitor/releases/tag/v3.0.1)
+- Release target commit: `51cc8b6b1bac484309f4cc7537e183917d94fdc0`
+- Release ZIP: `ai-chat-monitor-3.0.2.zip`
+- Packaged runtime files: `49`
+- Release ZIP SHA-256: `0e9d535777d57fd04b0506cbc7ff0635d8fc320fab1ac9b9068ede9432c32a94`
+- Exact-main release CI: `33889768839` — PASS
+- Published release: [AI Chat Monitor v3.0.2](https://github.com/ach1992/ai-chat-monitor/releases/tag/v3.0.2)
 
 Chrome Web Store submission/publication is a separate production action and has **not** been performed. See [Store readiness](docs/STORE_READINESS.md) before any future Store submission.
