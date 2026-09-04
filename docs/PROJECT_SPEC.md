@@ -2,13 +2,15 @@
 
 ## Product version
 
-Current stable baseline: **v3.0.2**
+Current published stable baseline: **v3.0.2**
 
-v3 establishes the AI Chat Monitor product identity and the sole `AI_CHAT_MONITOR_STATUS` protocol. It preserves the durable read-only monitoring and notification boundary established by v2. The exact-source publication evidence is recorded in the README and Store readiness document.
+Current development source: **v3.0.3 candidate, unreleased**
+
+v3 establishes the AI Chat Monitor product identity and sole `AI_CHAT_MONITOR_STATUS` protocol while preserving the read-only monitoring/notification boundary established by v2. The current v3.0.3 candidate includes Issue #83 Revision 9 browser-response lifecycle correlation. No v3.0.3 release is authorized until the exact integrated candidate passes owner live validation.
 
 ## Product goal
 
-AI Chat Monitor helps a user observe selected long-running ChatGPT Web conversations without having to keep each tab in focus. It detects response/runtime state, resolves an optional semantic work state, and delivers useful notifications while preserving full human control of the conversation.
+AI Chat Monitor helps a user observe selected long-running ChatGPT Web conversations without keeping every tab in focus. It detects response/runtime state, resolves an optional semantic work state, and delivers useful notifications while preserving full human control of the conversation.
 
 ## Single purpose
 
@@ -18,8 +20,9 @@ AI Chat Monitor must never:
 
 - write to the ChatGPT composer;
 - click or programmatically activate Send, Retry, Continue generating, Regenerate, Stop, confirmation, verification, or other ChatGPT conversation controls;
-- create or inject protocol bootstrap, self-check, status-recovery, continuation, or other user turns;
+- create or inject protocol bootstrap, self-check, recovery, continuation, or other user turns;
 - automatically continue a conversation;
+- alter, redirect, cancel, or rewrite ChatGPT requests;
 - use Telegram or AI-provider output as browser mutation authority;
 - bypass platform limits, authentication, verification, CAPTCHAs, approvals, confirmations, or safety controls.
 
@@ -28,7 +31,7 @@ This invariant applies even when semantic state is `CONTINUE`.
 ## Supported environment
 
 - Chromium Manifest V3 extension.
-- Chrome/Chromium 114+ baseline because the Side Panel API is used.
+- Chrome/Chromium 114+ baseline because Side Panel and document-scoped request identity are required.
 - Supported ChatGPT origins:
   - `https://chatgpt.com/*`
   - `https://chat.openai.com/*`
@@ -36,24 +39,15 @@ This invariant applies even when semantic state is `CONTINUE`.
 
 ## State model
 
-AI Chat Monitor keeps runtime/page state separate from semantic conversation state.
+AI Chat Monitor keeps page/runtime state separate from semantic conversation state.
 
 ### Page/runtime state
 
-Representative states:
+Representative states include `GENERATING`, `IDLE`, `RETRY_AVAILABLE`, platform/network error, rate limit, authentication/verification required, conversation-full, and unknown state.
 
-- `GENERATING`
-- `IDLE`
-- `RETRY_AVAILABLE`
-- `PLATFORM_ERROR`
-- `NETWORK_ERROR`
-- `RATE_LIMIT`
-- `AUTH_REQUIRED`
-- `VERIFICATION_REQUIRED`
-- `CONVERSATION_FULL`
-- `UNKNOWN`
+High-confidence blocker state is authoritative over semantic/provider evidence.
 
-Page state comes from normalized DOM/runtime observation. High-confidence blocker state is authoritative over semantic/provider evidence.
+For a hidden response, adapter `IDLE` and absence of the Stop control are observational only while the current response is pending. Owner live evidence proved ChatGPT can keep changing the assistant DOM in a runnable hidden tab while those UI signals look idle.
 
 ### Semantic work state
 
@@ -68,16 +62,7 @@ Supported terminal vocabulary:
 - `RATE_LIMIT`
 - `UNSURE`
 
-Meaning:
-
-- `CONTINUE` — requested work remains and can proceed without human approval, a material human decision, missing human information/credentials, or a human-only operation. This only means a human may manually continue.
-- `HOLD_APPROVAL` — explicit human approval/authorization is required.
-- `HOLD_DECISION` — a material human decision is required.
-- `HOLD_HUMAN_OPERATION` — missing human information/credentials or a human-only operation is required.
-- `COMPLETE` — the requested outcome is actually complete and no further work remains for the current request.
-- `PLATFORM_ERROR` — platform/tool/runtime/service failure blocks progress.
-- `RATE_LIMIT` — usage/quota/rate limit blocks progress.
-- `UNSURE` — semantic state cannot be classified reliably.
+`CONTINUE` means only that a human may manually continue. It never grants automatic-send authority.
 
 ## Optional machine-readable status protocol
 
@@ -89,18 +74,54 @@ AI_CHAT_MONITOR_STATUS={"decision":"<VALUE>"}
 
 Rules:
 
-- optional; AI Chat Monitor must work without it;
+- optional; monitoring must work without it;
 - exactly one terminal record when used;
 - final standalone line of the same assistant turn;
 - nothing after it;
-- outside Markdown code fences, inline code, JSON/code payloads, block quotes, tables, or other requested output containers;
-- omit it when a user requires an exact/exclusive output format that an extra line would invalidate.
+- outside Markdown/code/quoted/table or other format-specific containers;
+- omit it when an exact/exclusive user output format would be invalidated by an extra line.
 
-Multiple markers, malformed JSON, unsupported decisions, or markers embedded in structured/code output are invalid and fall through safely.
+Multiple markers, malformed JSON, unsupported decisions, or embedded/code-rendered markers are invalid and fall through safely.
+
+A canonical terminal marker on the current hidden assistant is explicit completion evidence and may outrank a stale Stop control. Invalid marker text never does.
+
+## Response episode and completion authority
+
+A trusted `MANUAL_SEND` immediately opens a new response episode against the previous assistant identity. This prevents the prior completed assistant/marker from being reprocessed as the new response.
+
+Revision 9 removes two previously attempted hidden completion assumptions:
+
+1. generic content `PerformanceResourceTiming` / resource-end timing is not completion authority;
+2. hidden adapter `IDLE` / missing Stop is not completion authority while a response is pending.
+
+For a hidden response, completion authority is limited to:
+
+- an exact canonical terminal status on the current assistant turn; or
+- successful completion of the exact current ChatGPT SSE response observed at browser level.
+
+No stable-text timeout or elapsed-time heuristic is allowed to fabricate completion because a hidden renderer may pause mid-response.
+
+## Browser response lifecycle correlation
+
+The service worker uses non-blocking `chrome.webRequest` on the existing ChatGPT hosts. A request may acquire response-completion authority only when it is:
+
+- on a supported exact ChatGPT conversation-response path;
+- `xmlhttprequest` in the top frame with document identity;
+- `POST`;
+- successful (`2xx`);
+- returned as `Content-Type: text/event-stream`.
+
+The request is correlated by request ID, tab ID, document ID, and timestamps. Bounded in-flight identity is stored in `chrome.storage.session` so service-worker restart cannot confuse an unrelated request with the current response.
+
+Matching `onCompleted` may release the hidden response hold. Matching `onErrorOccurred` retires the request without completion. Mismatched/terminal request records are removed rather than left as stale completion authority.
+
+The network observer does not read request bodies, response bodies, cookies, or Authorization headers. `webRequestBlocking` is not requested.
+
+See `docs/REV9_BROWSER_RESPONSE_LIFECYCLE.md`.
 
 ## Semantic resolution order
 
-For each stable response/episode:
+After the current response has legitimate completion/stability authority:
 
 1. authoritative/high-confidence page/UI blocker evidence;
 2. valid terminal status marker;
@@ -108,28 +129,15 @@ For each stable response/episode:
 4. optional configured AI provider fallback;
 5. `UNKNOWN` / `UNSURE`.
 
-Provider fallback is advisory, bounded, secret-redacted, cached/deduplicated per response identity, and cannot cause page mutation.
+Provider fallback is advisory, bounded, secret-redacted, cached/deduplicated by response identity, and cannot cause page mutation.
+
+For verified hidden SSE completion, semantic diagnostics may still be retained. If no semantic event was actually delivered for that episode, one generic `RESPONSE_COMPLETE` fallback may be delivered. A non-delivered diagnostic entry does not count as a second user notification.
 
 ## Monitoring events
 
-Core events include:
+Core events include response complete, manual continuation available, human gates, task complete, Retry, platform/network error, rate limit, authentication/verification, conversation-full, semantic unknown/provider failure, generation stall, and repeated-response diagnostics.
 
-- response complete;
-- manual continuation available;
-- approval required;
-- material decision required;
-- human operation/input required;
-- task complete;
-- Retry available;
-- platform/network error;
-- rate limit;
-- authentication/verification required;
-- conversation limit reached;
-- semantic state unknown/provider failure;
-- generation stalled;
-- repeated exact assistant response where useful diagnostically.
-
-Events are transition/episode based and deduplicated. A single response should produce one useful primary notification rather than overlapping spam.
+Events are response/transition oriented and deduplicated. One response must not create duplicate Browser/Telegram delivery merely because DOM or service-worker state changes repeatedly.
 
 ## Notification channels
 
@@ -137,31 +145,35 @@ Events are transition/episode based and deduplicated. A single response should p
 
 - configurable per event;
 - uses `chrome.notifications`;
-- uses the packaged extension icon resolved through `chrome.runtime.getURL()` for notification delivery;
-- may focus/open the known monitored tab when safely resolvable;
-- may suppress low-priority alerts while the exact chat is already focused when configured.
+- uses the packaged extension icon;
+- may focus a known monitored tab from an explicit notification interaction when safely resolvable.
 
 ### Sound
 
 - optional local channel;
-- configurable per event;
-- uses a Manifest V3-compatible offscreen extension context;
-- no repeated playback for the same deduplicated event episode.
+- event-selectable;
+- uses a Manifest V3-compatible offscreen context.
 
 ### Telegram
 
 - outbound notification-only;
 - user supplies bot token and destination;
 - bounded metadata by default, not full ChatGPT transcripts;
-- inherited or Telegram-specific event selection;
-- sanitized delivery health;
 - no inbound remote control.
 
-## Multi-tab behavior
+## Multi-tab and stale-document behavior
 
-The same ChatGPT conversation may be open in multiple tabs. The current architecture uses conversation/response identity for notification/provider deduplication rather than legacy OWNER/MIRROR send authority.
+Tab/document/content-agent/page/route identity rejects stale observations and stale network lifecycle delivery. Conversation/response identity provides provider/notification deduplication across duplicate tabs.
 
-Tab/document identity remains useful to reject stale observations and focus a known tab, but no tab owns send authority because send authority no longer exists.
+No tab owns send authority because send authority does not exist.
+
+## Background lifecycle behavior
+
+- Hidden DOM observations must not depend on throttled page timers.
+- Monitored tabs set `autoDiscardable: false` and restore the prior value when monitoring stops.
+- `frozen` / `discarded` state is reported honestly; the extension does not claim to execute inside an actually suspended page.
+- A still-running content agent self-reannounces after recoverable MV3 session loss without needing Side Panel polling or tab activation.
+- Side Panel availability remains tab-scoped, but Side Panel state is never monitoring authority.
 
 ## Persistence and migration
 
@@ -172,110 +184,79 @@ Migration from v1 policy:
 - `OFF` -> monitoring disabled;
 - `OBSERVE`, `NOTIFY_ONLY`, or `AUTO` -> monitoring enabled;
 - compatible notification preferences preserved where practical;
-- continuation text, continuation delay, cooldown, hard auto-continue fuse, write journal, self-check/bootstrap state, and any pending send authority are discarded/deprecated;
-- service-worker restart must never restore old automatic-send authority.
+- legacy continuation/send timing/write-journal/self-check state and any pending send authority are discarded/deprecated;
+- service-worker restart never restores automatic-send authority.
+
+Durable trusted storage may contain monitoring policy/history, provider credentials, and Telegram configuration. Session/ephemeral state may contain bounded semantic cache, lifecycle/hidden diagnostics, and current request correlation metadata.
+
+Full transcripts are not intentionally stored in monitoring history. Network payloads and credential headers are not persisted for response correlation.
 
 ## Privacy and security
 
-- ChatGPT content is untrusted input.
-- No page mutation authority exists anywhere in the current runtime.
-- Full transcripts are not intentionally stored in monitoring history.
+- ChatGPT DOM/content is untrusted input.
+- No page mutation authority exists in current runtime.
 - Provider input is bounded/minimized and secret-redacted.
 - Provider API keys and Telegram bot tokens stay in trusted extension storage.
 - Telegram receives bounded monitoring metadata by default.
-- Notification delivery failure cannot change semantic state or create browser-control authority.
+- `webRequest` is non-blocking and restricted to the supported ChatGPT host scope for response lifecycle correlation.
+- Request bodies, response bodies, cookies, and Authorization headers are outside the Revision 9 network-correlation data model.
 - Broad optional HTTPS host permission is used only for user-configured HTTPS provider origins.
+- Notification failure cannot change semantic state or create browser-control authority.
 
 ## Side Panel requirements
 
-The Side Panel provides:
+The Side Panel provides Monitoring ON/OFF, page and semantic state/source, marker health, Browser/Sound event configuration, copyable status-protocol setup, provider readiness/settings, Telegram settings/health, lifecycle state, and bounded privacy-safe diagnostics/history.
 
-- Monitoring ON/OFF;
-- current page state;
-- current semantic state and source (`UI`, `STATUS_MARKER`, `RULE`, `PROVIDER`, `UNKNOWN`);
-- marker health (`Detected`, `Missing`, `Malformed`);
-- Browser/Sound event configuration;
-- status protocol setup with copyable Custom Instructions and per-chat variants;
-- provider settings/readiness;
-- Telegram settings/health;
-- bounded recent monitoring events/diagnostics.
-
-The Side Panel must not expose AUTO-send, continuation text, send delay/cooldown, guarded-send, write-journal, or hard-fuse controls/claims.
-
-## Status protocol setup UX
-
-The Side Panel must explain that AI Chat Monitor works without the status protocol.
-
-Two copyable variants are supported:
-
-1. **Custom Instructions / Personalization** — for compatible normal replies across chats.
-2. **One conversation only** — a message the user manually sends once near the start of a specific chat.
-
-Both variants explain enough decision semantics for a model to choose reliably and explicitly state the strict-format exception. AI Chat Monitor never pastes or sends these instructions itself.
+It must not expose AUTO-send, continuation text, send delay/cooldown, guarded-send, write-journal, or hard-fuse controls/claims.
 
 ## Development and release requirements
 
-Every future candidate must retain repository-standard validation:
+Every future candidate must retain:
 
 - typecheck;
 - lint;
 - automated tests;
-- extension smoke test that proves the unpacked AI Chat Monitor service worker actually loaded;
-- real Chromium background-tab smoke test that keeps the monitored tab hidden, verifies terminal-status boundary preservation, confirms Browser notification creation, and confirms automatic-discard protection;
-- deterministic packaging;
+- real unpacked service-worker identity smoke;
+- real Chromium hidden/background regression;
+- deterministic package generation;
 - ZIP layout/provenance verification;
-- exact candidate SHA identity in build metadata.
+- exact candidate SHA in build metadata;
+- static regression enforcing the absence of ChatGPT write/control and `webRequestBlocking` paths.
 
-A test artifact is not a public release. Any future version publication remains a separate release action after the exact candidate has passed the required validation/review/integration gates.
+Revision 9's browser regression must additionally prove:
 
-## v2.0.0 acceptance baseline
+1. same-endpoint non-SSE traffic cannot complete a response;
+2. a hidden partial assistant with no Stop remains `GENERATING` while the current response is pending;
+3. no response notification is delivered while the verified SSE remains open;
+4. matching SSE completion can complete/deliver while the tab remains hidden;
+5. only one user notification delivery occurs for the modeled response episode.
 
-The released v2.0.0 outcome satisfied the following acceptance requirements and they remain regression expectations for future development unless intentionally superseded:
+A test artifact is not a public release. Any version publication remains a separate action after exact candidate validation/review/integration and the required owner gate.
 
-- no runtime path writes to the ChatGPT composer or programmatically activates ChatGPT conversation controls;
-- no in-chat self-check/bootstrap/status-response/recovery message is generated or sent by AI Chat Monitor;
-- stable response completion produces one deduplicated response episode;
-- reliable Retry/error/rate-limit/auth/verification/conversation-full states are surfaced observationally;
-- canonical status marker parses without creating another chat turn;
-- retired product markers are rejected and fall through safely;
-- marker parser rejects ambiguous/embedded/structured-output marker situations;
-- missing/malformed marker falls through safely to rules/provider/unknown;
-- provider failure cannot override known UI state or cause browser action;
-- Browser, Sound, and Telegram routing are independently configurable and deduplicated;
-- duplicate/background tabs do not duplicate provider classification or notification for the same response episode;
-- service-worker restart does not replay notification episodes excessively or restore send authority;
-- v1.2.5 settings migrate to monitoring-only behavior;
-- Side Panel contains no automatic continuation controls/claims;
-- README, Architecture, Privacy, Store readiness/listing, status protocol, and changelog described the v2 release accurately;
-- automated regression coverage enforces the read-only protocol/runtime invariant and core monitoring transitions;
-- repository validation passes on the exact candidate SHA;
-- Owner live Chromium acceptance was completed before integration;
-- the deterministic release package was published with checksum/provenance and verified after publication.
+## Historical baselines
 
-## v2.0.1 patch baseline
+### v2.0.0 / v2.0.1
 
-The v2.0.1 patch preserves all v2.0.0 acceptance requirements and additionally verifies that Browser notification delivery uses the packaged extension icon and the Promise-based Chrome notification API. The fix was validated by automated regression coverage and by live Chromium/Windows delivery before publication.
+v2 removed automatic continuation and established the durable read-only monitoring contract. v2.0.1 additionally fixed Browser notification API/icon delivery and received live Chromium validation before publication. These read-only invariants remain regression requirements.
 
-## v3.0.1 patch baseline
+### v3.0.1
 
-The v3.0.1 patch preserved the v3 read-only product contract and attempted to improve background monitoring by removing a page-timer dependency from hidden DOM observations. Post-release owner validation proved that this was incomplete: background `innerText` could retain/flatten the status prefix without a valid terminal-line boundary, preventing structural recovery, and content-agent recovery still depended too much on later Side Panel/tab activity when the MV3 background session was lost. Therefore v3.0.1 must not be used as evidence that inactive-tab monitoring is fully reliable.
+v3.0.1 removed a hidden page-timer observation dependency, but post-release owner validation proved that change alone did not solve inactive-tab monitoring.
 
-## v3.0.2 patch baseline and post-release correction
+### v3.0.2
 
-The v3.0.2 release retained useful background safeguards: structural terminal-status recovery, content-agent self-reannouncement after recoverable MV3 session loss, automatic-discard protection for monitored tabs, explicit frozen/discarded lifecycle state, and real unpacked-extension identity validation. Its published artifact was verified against exact-main CI.
+v3.0.2 retained independently useful structural marker recovery, content-agent MV3 self-reannouncement, automatic-discard protection, explicit frozen/discarded lifecycle state, and real unpacked-extension identity validation. Post-release owner testing still reproduced inactive-tab failure, so the release must not be presented as fully resolved.
 
-Post-release owner validation proved the release incomplete. Subsequent investigation isolated several real failure modes, including stale structural text, MV3 session loss, automatic-discard exposure, stale `Stop generating`, and selector-order mistakes, and added regression coverage for each. Owner validation after those corrections still reproduces the inactive-tab failure in the real logged-in Chrome environment, so none of those isolated defects is treated as the complete live root cause. Synthetic browser smoke is regression evidence for the modeled conditions only.
+### Issue #83 Revisions 3–8
 
-Current corrective invariant (Issue #83 Contract Revision 3): in a hidden runnable tab, an exact canonical terminal status is explicit end-of-response evidence and may outrank a stale Stop control for generation completion. This exception is hidden-only and fail-closed: visible tabs retain normal Stop-control behavior, and malformed, ambiguous, duplicate, code-fenced, or unsupported markers never override `GENERATING`. Missing-marker replies continue to use the normal UI/rule/provider fallback path.
+Subsequent work corrected stale Stop handling for exact markers, restored tab-scoped Side Panel behavior, fixed mixed-selector DOM ordering, preserved fresh observations across same-session MV3 reannounce, added bounded hidden diagnostics/delivery timing, and established trusted response-episode identity after `MANUAL_SEND`. Each remains an independent reliability safeguard, but owner validation showed none was the complete remaining root cause.
 
-The unreleased `3.0.3` work under Issue #83 Contract Revision 4 separated monitoring authority from Side Panel refresh: Side Panel polling must not be required to reconnect a content agent, and the real Chromium regression closes the panel page and force-restarts the MV3 worker while the monitored tab remains hidden. Revision 4 also changed the Side Panel itself to a global panel; later owner feedback proved that UI change was a regression because established behavior is tab-scoped open/closed state. Revision 6 restores tab-scoped Side Panel availability while keeping background-runtime independence.
+### Issue #83 Revision 9
 
+Owner diagnostics finally showed the monitored tab remained runnable and assistant DOM changed while hidden UI reported `IDLE` with no Stop. They also showed the prior ResourceTiming completion arriving about 57 seconds before the first assistant change. Revision 9 therefore moves hidden completion authority to exact terminal marker or positively identified browser SSE lifecycle and conservatively holds partial hidden responses as generating.
 
-Issue #83 Contract Revision 5 added another valid correction: supported assistant/user selector matches must be resolved in actual DOM order. Grouping matches by selector can select an older assistant turn while a newer hidden/streaming turn temporarily uses a different DOM shape. The Chromium regression therefore uses multiple turns with mixed selector shapes and requires the newest assistant/user message identities while the tab remains hidden. Owner validation nevertheless still fails, so this remains an independently valid bug fix rather than a complete root-cause claim.
+Pre-documentation candidate `36c040a948a920c3a3aa55009bd1db48f4dbdcbb` passed CI `33927680435`, 161/161 tests, extension identity, both hidden/background Chromium regressions, packaging, and artifact verification. Documentation changes after that candidate require fresh exact-head CI. Owner validation of the exact integrated artifact remains mandatory; Issue #83 stays open until that outcome passes.
 
-The Revision 6 regression also exposed a session-ordering race during MV3 recovery: a delayed `content:hello` from the same document/agent could arrive after a fresh observation and rebuild the session without that observation. Same-session reannounce now preserves the current observation and diagnostic, while a changed page epoch/route remains a hard boundary that drops prior page evidence.
-Issue #83 Contract Revision 6 restores the established tab-scoped Side Panel behavior and adds a bounded hidden-attempt diagnostic snapshot. The internal diagnostic may retain timing, counts, assistant text lengths and fingerprints, generation/Stop state, and marker health, but never transcript text, credentials, provider payloads, or Telegram secrets; the Side Panel exposes an even narrower redacted view without fingerprints or conversation content. Existing bounded monitoring-event history now also records per-channel `NOT_REQUESTED`/`DELIVERED`/`FAILED` delivery outcome and completion timestamp, allowing the trace to distinguish an event emitted while hidden from delivery failure or delivery that completed only after foreground. It must distinguish at least: no hidden observation, observer alive but assistant snapshot unchanged, assistant changed with missing/malformed marker, marker detected with no event before foreground, event emitted but delivery failed/finished after return, and frozen/discarded lifecycle. The issue remains open until the exact integrated candidate passes owner validation in the real logged-in Chrome environment.
+## Historical v1 note
 
-## Historical note
-
-v1.x implemented guarded automatic continuation and in-chat self-check behavior. Those capabilities are intentionally removed from the v2 product contract. Historical v1 documentation may remain only when clearly labeled as historical evidence and must not be presented as current behavior.
+v1.x implemented guarded automatic continuation and in-chat self-check behavior. Those capabilities are intentionally removed from the current product contract and may appear only as historical evidence.
