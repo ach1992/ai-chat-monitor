@@ -50,6 +50,8 @@ The ChatGPT page and its content are untrusted inputs. The content script may ob
 
 The adapter has no send/continue/retry authority.
 
+Assistant and user candidates that match multiple supported ChatGPT DOM selector shapes are deduplicated and resolved in actual document order before selecting the latest turn. Selector-group insertion order is never used as conversation chronology.
+
 ### Content agent
 
 `src/content/index.ts` reports observations and lifecycle identity to the background runtime. It may respond to read/reconnect/status-oriented extension messages, but the current protocol must contain no guarded-send or composer-mutation command.
