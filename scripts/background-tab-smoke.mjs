@@ -264,7 +264,7 @@ try {
 
   await evaluate(
     chatPage,
-    `(() => { document.querySelector('#assistant').textContent = 'Task done.\\n${STATUS_LINE}'; document.querySelector('#stop')?.remove(); return document.visibilityState; })()`,
+    `(() => { document.querySelector('#assistant').textContent = 'Task done.\\n${STATUS_LINE}'; return { visibilityState: document.visibilityState, stopStillPresent: document.querySelector('#stop') !== null }; })()`,
   );
 
   const event = await waitFor(async () => {
@@ -280,6 +280,13 @@ try {
   )?.observation;
   if (observation?.latestAssistant?.normalizedText !== `Task done.\n${STATUS_LINE}`) {
     throw new Error(`Hidden observation lost the terminal status boundary: ${JSON.stringify(observation?.latestAssistant?.normalizedText)}`);
+  }
+  if (observation?.generation !== "IDLE") {
+    throw new Error(`Canonical hidden terminal status did not outrank the stale Stop control: ${JSON.stringify(observation?.generation)}`);
+  }
+  const staleStopStillPresent = await evaluate(chatPage, "document.querySelector('#stop') !== null");
+  if (staleStopStillPresent !== true) {
+    throw new Error("Background smoke must retain the stale Stop control through TASK_COMPLETE.");
   }
 
   const tabAfter = await evaluate(

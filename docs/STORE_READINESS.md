@@ -2,8 +2,8 @@
 
 Status:
 
-- **GitHub release:** `v3.0.2` published and artifact-verified with the corrected inactive/background-tab reliability path.
-- **Chrome Web Store:** not submitted or published; production action deferred.
+- **GitHub release:** `v3.0.2` published and artifact-verified, but post-release owner validation found a remaining hidden stale-Stop completion gate tracked by Issue #83 Contract Revision 3.
+- **Chrome Web Store:** not submitted or published; production action deferred. Do not submit v3.0.2 as the resolved background-reliability build.
 
 This document tracks engineering and disclosure readiness for a future Chrome Web Store submission. The published GitHub release does not itself authorize Store upload, submission, visibility changes, or publication.
 
@@ -16,7 +16,7 @@ This document tracks engineering and disclosure readiness for a future Chrome We
 
 ## Runtime safety
 
-Verified for the released v3.0.2 baseline:
+Verified for the released v3.0.2 baseline except for the separately tracked hidden stale-Stop completion defect:
 
 - [x] Exact candidate validation is green.
 - [x] Static/runtime regression coverage proves no ChatGPT composer write or conversation-control activation path exists.
@@ -108,6 +108,7 @@ Published v3.0.2 evidence:
 - Tag resolves exactly to the release target.
 - `ai-chat-monitor-3.0.2.zip`, `SHA256SUMS.txt`, and `build-info.json` are present as release assets.
 - Published assets were re-downloaded from GitHub and matched the exact-main CI artifacts byte-for-byte; source identity, file count, version, ZIP integrity, manifest/package parity, icon identity, and SHA-256 were verified after publication.
+- Artifact verification does not override the later owner reproduction: the v3.0.2 browser smoke removed the synthetic Stop control and therefore did not exercise the stale-Stop gate now covered by Issue #83 Contract Revision 3.
 - Chrome Web Store publication remains a separate deferred production action.
 
 ## Store assets
