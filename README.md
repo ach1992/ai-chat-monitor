@@ -2,7 +2,7 @@
 
 AI Chat Monitor is a Chromium Manifest V3 extension that **monitors selected ChatGPT conversations without controlling them**. It observes page/runtime state, resolves an optional semantic work status, and sends configurable Browser, local sound, and Telegram notifications.
 
-**Current stable release: [v3.0.2](https://github.com/ach1992/ai-chat-monitor/releases/tag/v3.0.2).** v3.0.2 corrects the inactive/background-tab defect left by v3.0.1: terminal status extraction is background-safe, recoverable MV3 session loss self-heals without tab activation, and monitored tabs opt out of Chrome automatic discard while monitoring is enabled. The product remains strictly read-only and continues to use the sole `AI_CHAT_MONITOR_STATUS` protocol.
+**Current published release: [v3.0.2](https://github.com/ach1992/ai-chat-monitor/releases/tag/v3.0.2).** Post-release owner validation found one remaining inactive-tab defect: Chromium can leave the transient `Stop generating` control stale after the hidden assistant DOM already contains a valid terminal `AI_CHAT_MONITOR_STATUS` record, and v3.0.2 incorrectly keeps semantic resolution gated as `GENERATING`. Current source tracks the corrective work in [Issue #83](https://github.com/ach1992/ai-chat-monitor/issues/83). The product remains strictly read-only.
 
 ## Single purpose
 
@@ -206,7 +206,7 @@ See [PRIVACY.md](PRIVACY.md) for the complete current policy.
 
 ## Release state
 
-`v3.0.2` is the current verified published GitHub release.
+`v3.0.2` is the current artifact-verified published GitHub release, but it must not be treated as proof that inactive-tab completion is fully resolved. Current source contains an unreleased stale-Stop correction tracked by Issue #83.
 
 - Release target commit: `51cc8b6b1bac484309f4cc7537e183917d94fdc0`
 - Release ZIP: `ai-chat-monitor-3.0.2.zip`

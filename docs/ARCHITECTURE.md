@@ -73,6 +73,8 @@ When monitoring is enabled for a conversation, the background runtime records th
 
 Hidden assistant text recovery does not trust mere `AI_CHAT_MONITOR_STATUS=` prefix presence in layout-derived `innerText`. If rendered text lacks a canonical terminal record but structural DOM text contains one, the adapter reconstructs the terminal-line boundary before downstream protocol validation. Code-block/ambiguity validation remains fail-closed.
 
+A hidden ChatGPT tab may also retain its transient Stop control after structural assistant DOM already contains the exact canonical terminal status. In that hidden-only case the canonical terminal record is explicit completion evidence and the adapter reports the observation as idle despite the stale Stop control. Visible tabs keep normal Stop-control semantics, and malformed/code-fenced status text cannot take this path.
+
 ## Monitoring domain
 
 Primary monitoring domain files:

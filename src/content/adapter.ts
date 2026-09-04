@@ -365,6 +365,20 @@ namespace GuardianContent {
             fingerprint: await fingerprintText(normalizedText),
             ...(domMessageId === undefined ? {} : { domMessageId }),
           };
+
+          // In hidden Chromium tabs the transient Stop control can remain stale even
+          // after the assistant DOM already contains the canonical terminal status.
+          // The terminal protocol is explicit end-of-response evidence; allow it to
+          // outrank only that hidden stale-UI signal. Visible tabs retain the normal
+          // Stop-control generation check, and malformed/code-fenced markers never
+          // satisfy hasCanonicalTerminalStatus().
+          if (
+            stopControl !== undefined &&
+            this.#document.visibilityState === "hidden" &&
+            hasCanonicalTerminalStatus(normalizedText)
+          ) {
+            observation.generation = "IDLE";
+          }
         }
       }
 

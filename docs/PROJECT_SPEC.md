@@ -260,11 +260,13 @@ The v2.0.1 patch preserves all v2.0.0 acceptance requirements and additionally v
 
 The v3.0.1 patch preserved the v3 read-only product contract and attempted to improve background monitoring by removing a page-timer dependency from hidden DOM observations. Post-release owner validation proved that this was incomplete: background `innerText` could retain/flatten the status prefix without a valid terminal-line boundary, preventing structural recovery, and content-agent recovery still depended too much on later Side Panel/tab activity when the MV3 background session was lost. Therefore v3.0.1 must not be used as evidence that inactive-tab monitoring is fully reliable.
 
-## v3.0.2 corrective patch baseline
+## v3.0.2 patch baseline and post-release correction
 
-The v3.0.2 release establishes the corrected inactive/background-tab reliability baseline. While a hidden ChatGPT page remains runnable, a canonical terminal status must survive background text extraction and reach monitoring/notification routing without tab activation; a content agent self-reannounces after recoverable background-session loss; monitored tabs opt out of automatic discard while monitoring is enabled and restore the prior tab setting afterward; frozen/discarded lifecycle state is surfaced truthfully and reconnect is requested immediately on resume. Actual frozen pages cannot execute content-script tasks until Chrome resumes them.
+The v3.0.2 release retained useful background safeguards: structural terminal-status recovery, content-agent self-reannouncement after recoverable MV3 session loss, automatic-discard protection for monitored tabs, explicit frozen/discarded lifecycle state, and real unpacked-extension identity validation. Its published artifact was verified against exact-main CI.
 
-The release is verified by 134 automated tests, an unpacked service-worker identity smoke, and a real Chrome for Testing 152.0.7977.82 hidden/background-tab regression tied to exact release source `51cc8b6b1bac484309f4cc7537e183917d94fdc0`. The published artifact was re-downloaded and matched the exact-main CI artifact byte-for-byte.
+Post-release owner validation nevertheless proved the release incomplete. The real remaining gate is not missing hidden observation: a hidden tab can deliver the final assistant DOM and canonical terminal status to the service worker while ChatGPT's transient `Stop generating` control remains stale. v3.0.2 maps that stale control to `generation=GENERATING` and returns before marker/rule/provider resolution, so analysis/notification begins only after the UI catches up. The earlier browser smoke masked this by deleting the Stop control in the same synthetic DOM mutation that installed the terminal response.
+
+Current corrective invariant (Issue #83 Contract Revision 3): in a hidden runnable tab, an exact canonical terminal status is explicit end-of-response evidence and may outrank a stale Stop control for generation completion. This exception is hidden-only and fail-closed: visible tabs retain normal Stop-control behavior, and malformed, ambiguous, duplicate, code-fenced, or unsupported markers never override `GENERATING`. Missing-marker replies continue to use the normal UI/rule/provider fallback path.
 
 ## Historical note
 
