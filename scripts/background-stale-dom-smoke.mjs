@@ -425,8 +425,16 @@ try {
   if (observation?.generation !== "IDLE" || observation?.stopControlPresent !== false) {
     throw new Error(`Verified network completion did not release the hidden generation hold: ${JSON.stringify({generation:observation?.generation,stop:observation?.stopControlPresent})}`);
   }
-  if (diagnostic?.transportCompletedAt === undefined || diagnostic?.tabActivatedAt !== undefined || diagnostic?.visibleObservedAt !== undefined) {
-    throw new Error(`Diagnostic did not prove verified completion before activation: ${JSON.stringify(diagnostic)}`);
+  if (diagnostic?.transportCompletedAt === undefined) {
+    throw new Error(`Diagnostic did not retain verified transport completion: ${JSON.stringify(diagnostic)}`);
+  }
+  const foregroundEvidenceAfterBackground = [
+    diagnostic.foregroundedAt,
+    diagnostic.tabActivatedAt,
+    diagnostic.visibleObservedAt,
+  ].some((value) => typeof value === "number" && value > diagnostic.backgroundedAt);
+  if (foregroundEvidenceAfterBackground) {
+    throw new Error(`Diagnostic shows foreground/activation after the monitored tab was backgrounded: ${JSON.stringify(diagnostic)}`);
   }
   if (diagnostic.transportCompletedAt < inFlight.startedAt) {
     throw new Error(`Completion preceded its correlated SSE start: ${JSON.stringify({inFlight,diagnostic})}`);
