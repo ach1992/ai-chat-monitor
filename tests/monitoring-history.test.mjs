@@ -32,7 +32,7 @@ test("history deduplicates an event identity before notification routing", async
   assert.equal(repository.snapshot().length, 1);
 });
 
-test("history persists bounded delivery outcomes onto an existing event", async () => {
+test("history persists bounded delivery outcomes and per-channel timing onto an existing event", async () => {
   let stored;
   const repository = new MonitoringHistoryRepository({
     load: async () => stored,
@@ -44,13 +44,23 @@ test("history persists bounded delivery outcomes onto an existing event", async 
     browser: "DELIVERED",
     sound: "NOT_REQUESTED",
     telegram: "FAILED",
+    browserAt: 90,
+    telegramAt: 98,
   }, 99), true);
   assert.deepEqual(repository.snapshot()[0].delivery, {
     browser: "DELIVERED",
     sound: "NOT_REQUESTED",
     telegram: "FAILED",
+    browserAt: 90,
+    telegramAt: 98,
   });
   assert.equal(repository.snapshot()[0].deliveryAt, 99);
+  assert.equal(await repository.updateDelivery("delivery", {
+    browser: "DELIVERED",
+    sound: "NOT_REQUESTED",
+    telegram: "FAILED",
+    browserAt: Number.NaN,
+  }, 100), false);
 });
 
 test("history restoration preserves dedupe identity across worker restart", async () => {
