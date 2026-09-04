@@ -23,6 +23,12 @@ namespace GuardianContentAgent {
 
   const FOCUS_INTENT_WINDOW_MS = 1_500;
   const PERIODIC_OBSERVATION_MS = 15_000;
+  const CHAT_RESPONSE_STREAM_PATHS = new Set([
+    "/backend-api/f/conversation",
+    "/backend-api/f/conversation/resume",
+    "/backend-api/conversation",
+    "/backend-anon/f/conversation",
+  ]);
   const adapter = new GuardianContent.BrowserChatGPTAdapter(document, location);
   const agentInstanceId = crypto.randomUUID();
   let pageEpoch = 1;
@@ -202,6 +208,57 @@ namespace GuardianContentAgent {
     scheduleObservation(0);
   }
 
+  function responseStreamResource(entry: PerformanceResourceTiming): boolean {
+    if (entry.entryType !== "resource") return false;
+    if (entry.initiatorType !== "fetch" && entry.initiatorType !== "xmlhttprequest") return false;
+    try {
+      const url = new URL(entry.name, location.href);
+      if (url.origin !== location.origin || !CHAT_RESPONSE_STREAM_PATHS.has(url.pathname)) return false;
+    } catch {
+      return false;
+    }
+    const status = entry.responseStatus;
+    if (typeof status === "number" && status !== 0 && (status < 200 || status >= 300)) return false;
+    const contentType = entry.contentType;
+    if (typeof contentType === "string" && contentType.length > 0 && contentType !== "text/event-stream") return false;
+    return Number.isFinite(entry.responseEnd) && entry.responseEnd > 0;
+  }
+
+  function responseCompletedAt(entry: PerformanceResourceTiming): number {
+    const absolute = performance.timeOrigin + entry.responseEnd;
+    return Number.isFinite(absolute) && absolute > 0 ? Math.round(absolute) : Date.now();
+  }
+
+  async function emitResponseComplete(entry: PerformanceResourceTiming): Promise<void> {
+    const nextRouteKey = adapter.currentRouteKey();
+    if (nextRouteKey !== lastRouteKey) {
+      const navigated = await emitNavigation(nextRouteKey);
+      if (!navigated) return;
+    }
+    const conversationId = adapter.currentConversationId();
+    const sentAt = Date.now();
+    const response = await send({
+      type: "content:response-complete",
+      protocolVersion: GuardianContent.PROTOCOL_VERSION,
+      agentInstanceId,
+      pageEpoch,
+      sequence: nextSequence(),
+      routeKey: adapter.currentRouteKey(),
+      ...(conversationId === undefined ? {} : { conversationId }),
+      transport: "CHATGPT_CONVERSATION_STREAM",
+      visibility: document.visibilityState === "hidden" ? "hidden" : "visible",
+      completedAt: responseCompletedAt(entry),
+      sentAt,
+    });
+    const recoverable = response === undefined || (response.type === "background:error" && response.code === "STALE_EVENT");
+    if (recoverable) {
+      const recovered = await ensureAgentReconnected();
+      if (recovered) scheduleObservation(0);
+    } else {
+      scheduleObservation(0);
+    }
+  }
+
   function consumeRecentKeyboardFocusIntent(now: number): boolean {
     const intentAt = lastKeyboardFocusIntentAt;
     lastKeyboardFocusIntentAt = undefined;
@@ -241,6 +298,19 @@ namespace GuardianContentAgent {
     attributes: true,
     attributeFilter: ["aria-label", "aria-busy", "data-testid", "data-message-author-role", "disabled"],
   });
+
+  if (typeof PerformanceObserver === "function") {
+    try {
+      const transportObserver = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          if (entry instanceof PerformanceResourceTiming && responseStreamResource(entry)) void emitResponseComplete(entry);
+        }
+      });
+      transportObserver.observe({ type: "resource" });
+    } catch {
+      // Resource timing is advisory completion evidence. DOM monitoring remains the fallback.
+    }
+  }
 
   for (const eventName of ["beforeinput", "input", "paste", "compositionstart"] as const) {
     document.addEventListener(eventName, (event) => {
