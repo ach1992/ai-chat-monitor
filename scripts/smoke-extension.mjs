@@ -55,7 +55,7 @@ const browserArgs = [
   "about:blank",
 ];
 
-if (typeof process.getuid === "function" && process.getuid() === 0) {
+if ((typeof process.getuid === "function" && process.getuid() === 0) || process.env.CI === "true") {
   browserArgs.unshift("--no-sandbox");
 }
 

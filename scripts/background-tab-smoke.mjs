@@ -135,6 +135,7 @@ async function launchBrowser() {
   const debugPort = 10_000 + (process.pid % 20_000) + launchSequence;
   const browserArgs = [
     "--disable-gpu",
+    "--disable-dev-shm-usage",
     "--no-first-run",
     "--disable-default-apps",
     "--ignore-certificate-errors",
@@ -145,7 +146,7 @@ async function launchBrowser() {
     `--load-extension=${extensionPath}`,
     "about:blank",
   ];
-  if (typeof process.getuid === "function" && process.getuid() === 0) browserArgs.unshift("--no-sandbox");
+  if ((typeof process.getuid === "function" && process.getuid() === 0) || process.env.CI === "true") browserArgs.unshift("--no-sandbox");
   const command = xvfbRun ?? browser;
   const args = xvfbRun === undefined ? browserArgs : ["-a", browser, ...browserArgs];
   const detached = process.platform !== "win32";
