@@ -8,7 +8,7 @@
 - Added regression coverage for hidden-tab scheduling, foreground debounce, and visibility catch-up; Browser and Telegram notification routing remain unchanged downstream of monitoring.
 - Preserved the strictly read-only ChatGPT boundary, permissions, provider behavior, Browser/sound notifications, and outbound-only Telegram behavior.
 
-Tracking: [Issue #85](https://github.com/ach1992/ai-chat-monitor/issues/85), [Issue #83](https://github.com/ach1992/ai-chat-monitor/issues/83), and [PR #84](https://github.com/ach1992/ai-chat-monitor/pull/84).
+Tracking: [Issue #85](https://github.com/ach1992/ai-chat-monitor/issues/85), [Issue #83](https://github.com/ach1992/ai-chat-monitor/issues/83), [PR #84](https://github.com/ach1992/ai-chat-monitor/pull/84), [PR #86](https://github.com/ach1992/ai-chat-monitor/pull/86), and [Release v3.0.1](https://github.com/ach1992/ai-chat-monitor/releases/tag/v3.0.1).
 
 ## 3.0.0 — 2026-08-30
 

@@ -2,7 +2,7 @@
 
 ## Product version
 
-Current stable baseline: **v3.0.0**
+Current stable baseline: **v3.0.1**
 
 v3 establishes the AI Chat Monitor product identity and the sole `AI_CHAT_MONITOR_STATUS` protocol. It preserves the durable read-only monitoring and notification boundary established by v2. The exact-source publication evidence is recorded in the README and Store readiness document.
 
@@ -254,6 +254,10 @@ The released v2.0.0 outcome satisfied the following acceptance requirements and 
 ## v2.0.1 patch baseline
 
 The v2.0.1 patch preserves all v2.0.0 acceptance requirements and additionally verifies that Browser notification delivery uses the packaged extension icon and the Promise-based Chrome notification API. The fix was validated by automated regression coverage and by live Chromium/Windows delivery before publication.
+
+## v3.0.1 patch baseline
+
+The v3.0.1 patch preserves the v3 read-only product contract and adds a background-monitoring reliability invariant: while a hidden ChatGPT page remains runnable, DOM-triggered observations must not depend on throttled page timers; foreground observation retains its debounce behavior, and visibility changes trigger prompt catch-up. Actual browser freeze/discard remains a browser lifecycle boundary and is not claimed to be bypassed. The patch also refreshes the packaged 16/32/48/128 extension icon set without changing permissions or notification/provider authority.
 
 ## Historical note
 
