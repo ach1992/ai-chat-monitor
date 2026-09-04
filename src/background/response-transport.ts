@@ -108,6 +108,13 @@ function eligibleStreamStart(details: chrome.webRequest.OnResponseStartedDetails
   );
 }
 
+function sameDocument(record: ResponseStreamRecord, details: { tabId: number; documentId?: string }): boolean {
+  return (
+    details.tabId === record.tabId &&
+    (details.documentId === undefined || details.documentId === record.documentId)
+  );
+}
+
 async function sendToDocument(record: ResponseStreamRecord, message: Record<string, unknown>): Promise<void> {
   try {
     await chrome.tabs.sendMessage(record.tabId, message, { documentId: record.documentId });
@@ -145,14 +152,9 @@ chrome.webRequest.onCompleted.addListener((details) => {
     const state = await loadState();
     const record = state.requests.find((candidate) => candidate.requestId === details.requestId);
     if (record === undefined) return;
-    if (
-      details.tabId !== record.tabId ||
-      (details.documentId !== undefined && details.documentId !== record.documentId)
-    ) {
-      return;
-    }
     state.requests = state.requests.filter((candidate) => candidate.requestId !== details.requestId);
     await saveState(state);
+    if (!sameDocument(record, details)) return;
     await sendToDocument(record, {
       type: "background:response-stream-completed",
       protocolVersion: 2,
@@ -170,6 +172,7 @@ chrome.webRequest.onErrorOccurred.addListener((details) => {
     if (record === undefined) return;
     state.requests = state.requests.filter((candidate) => candidate.requestId !== details.requestId);
     await saveState(state);
+    if (!sameDocument(record, details)) return;
     await sendToDocument(record, {
       type: "background:response-stream-aborted",
       protocolVersion: 2,
