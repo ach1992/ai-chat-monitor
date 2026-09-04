@@ -201,6 +201,7 @@ async function createPage(environment, url) {
     return targets.find((candidate) => candidate.id === target.targetId) ?? false;
   }, `target ${url}`);
   const client = new CdpClient(info.webSocketDebuggerUrl);
+  client.targetId = target.targetId;
   await client.send("Runtime.enable");
   return client;
 }
@@ -262,10 +263,39 @@ try {
   await secondBrowser.browserClient.send("Target.activateTarget", { targetId: blank.targetId });
   await waitFor(async () => (await evaluate(chatPage, "document.visibilityState")) === "hidden", "hidden monitored tab");
 
+  // Remove the Side Panel page entirely before forcing the MV3 worker down. The
+  // hidden content agent must be the component that wakes the replacement worker;
+  // otherwise panel polling could mask a background recovery dependency.
+  const queryTargetId = queryPage.targetId;
+  queryPage.close();
+  queryPage = undefined;
+  await secondBrowser.browserClient.send("Target.closeTarget", { targetId: queryTargetId });
+
+  const workerBefore = await waitFor(async () => {
+    const targets = await secondBrowser.json("/json/list");
+    return targets.find((target) => target.type === "service_worker" && target.url === `chrome-extension://${secondBrowser.extensionId}/background/worker.js`) ?? false;
+  }, "AI Chat Monitor service worker before forced restart");
+  await secondBrowser.browserClient.send("Target.closeTarget", { targetId: workerBefore.id });
+  await waitFor(async () => {
+    const targets = await secondBrowser.json("/json/list");
+    return targets.every((target) => target.id !== workerBefore.id) || false;
+  }, "forced AI Chat Monitor service-worker stop");
+
   await evaluate(
     chatPage,
     `(() => { document.querySelector('#assistant').textContent = 'Task done.\\n${STATUS_LINE}'; return { visibilityState: document.visibilityState, stopStillPresent: document.querySelector('#stop') !== null }; })()`,
   );
+
+  const workerAfter = await waitFor(async () => {
+    const targets = await secondBrowser.json("/json/list");
+    const worker = targets.find((target) => target.type === "service_worker" && target.url === `chrome-extension://${secondBrowser.extensionId}/background/worker.js`);
+    return worker !== undefined && worker.id !== workerBefore.id ? worker : false;
+  }, "hidden content agent to wake a replacement AI Chat Monitor service worker");
+  if (workerAfter.id === workerBefore.id) throw new Error("Background smoke did not observe a replacement service worker.");
+
+  // Re-open an extension page only after the hidden content agent has independently
+  // restarted the worker; use it solely to inspect persisted monitoring evidence.
+  queryPage = await createPage(secondBrowser, `chrome-extension://${secondBrowser.extensionId}/sidepanel/index.html`);
 
   const event = await waitFor(async () => {
     const stored = await evaluate(queryPage, "chrome.storage.local.get('guardian:monitoring-history:events')");
@@ -280,6 +310,9 @@ try {
   )?.observation;
   if (observation?.latestAssistant?.normalizedText !== `Task done.\n${STATUS_LINE}`) {
     throw new Error(`Hidden observation lost the terminal status boundary: ${JSON.stringify(observation?.latestAssistant?.normalizedText)}`);
+  }
+  if (observation?.visibility !== "hidden") {
+    throw new Error(`Final monitoring observation was not captured while hidden: ${JSON.stringify(observation?.visibility)}`);
   }
   if (observation?.generation !== "IDLE") {
     throw new Error(`Canonical hidden terminal status did not outrank the stale Stop control: ${JSON.stringify(observation?.generation)}`);

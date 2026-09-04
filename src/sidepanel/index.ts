@@ -139,6 +139,8 @@ const browserInputs = new Map<MonitoringEventType, HTMLInputElement>();
 const soundInputs = new Map<MonitoringEventType, HTMLInputElement>();
 let latestOverview: PanelOverviewResponse | undefined;
 let refreshInFlight = false;
+let refreshPending = false;
+let refreshPendingManual = false;
 let notificationDefaultsDirty = false;
 let resetConfirmUntil = 0;
 let resetConfirmTimer: number | undefined;
@@ -236,6 +238,21 @@ function appendLifecycleBadge(row: HTMLElement, lifecycle: PanelStatusResponse["
   else if (lifecycle?.autoDiscardable === false) row.append(badge("Discard protection ON", "ok"));
 }
 
+function observationAgeText(observedAt: number | undefined, visibility: ManagedChatStatus["visibility"]): string {
+  if (observedAt === undefined) return "Observer: no page observation yet";
+  const ageSeconds = Math.max(0, Math.floor((Date.now() - observedAt) / 1_000));
+  const age = ageSeconds < 5
+    ? "just now"
+    : ageSeconds < 60
+      ? `${ageSeconds}s ago`
+      : `${Math.floor(ageSeconds / 60)}m ago`;
+  return `Observer: ${visibility ?? "unknown"} · ${age}`;
+}
+
+function generationEvidenceText(generation: ManagedChatStatus["generation"]): string {
+  return generation === undefined ? "Page state: no observation" : `Page state: ${humanizeToken(generation)}`;
+}
+
 function buildEventChecks(root: HTMLElement, target: Map<MonitoringEventType, HTMLInputElement>): void {
   root.replaceChildren();
   for (const event of MONITORING_EVENTS) {
@@ -263,14 +280,6 @@ function isSupportedUrl(url: string | undefined): boolean {
 async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   return tabs[0];
-}
-
-async function reconnect(tabId: number): Promise<void> {
-  try {
-    await chrome.tabs.sendMessage(tabId, { type: "panel:agent-reconnect", protocolVersion: PROTOCOL_VERSION });
-  } catch {
-    // Content script may still be loading. A later refresh can recover naturally.
-  }
 }
 
 async function statusForTab(tabId: number): Promise<PanelStatusResponse> {
@@ -314,8 +323,11 @@ function renderCurrentStatus(status: PanelStatusResponse | undefined, tab: chrom
   currentTabElement.replaceChildren();
   if (tab?.id === undefined || !isSupportedUrl(tab.url)) {
     currentTabElement.className = "empty-state";
-    currentTabElement.textContent = "Open a ChatGPT conversation in the active tab to monitor it.";
-    markerHealth.textContent = "Not observed yet";
+    const monitored = latestOverview?.chats.length ?? 0;
+    currentTabElement.textContent = monitored > 0
+      ? `This active tab is not ChatGPT. ${monitored} monitored conversation${monitored === 1 ? " continues" : "s continue"} in the background; see Monitored ChatGPT chats below.`
+      : "This active tab is not ChatGPT. Open a ChatGPT conversation when you want to add one to monitoring.";
+    markerHealth.textContent = "Current tab not observed";
     markerHealth.dataset.tone = "muted";
     return;
   }
@@ -384,6 +396,8 @@ function renderChatCard(chat: ManagedChatStatus): HTMLElement {
   const meta = e("div", "meta-row");
   meta.append(badge("Monitoring ON", "ok"));
   meta.append(badge(markerHealthText(chat.runtime), markerTone(chat.runtime?.markerHealth)));
+  meta.append(badge(observationAgeText(chat.lastObservationAt, chat.visibility), chat.lastObservationAt === undefined ? "warn" : "muted"));
+  meta.append(badge(generationEvidenceText(chat.generation), chat.generation === "GENERATING" ? "info" : "muted"));
   appendLifecycleBadge(meta, chat.tabLifecycle);
   card.append(meta);
 
@@ -565,13 +579,16 @@ historyClear.addEventListener("click", () => {
 });
 
 async function refreshAll(manual = false): Promise<void> {
-  if (refreshInFlight) return;
+  if (refreshInFlight) {
+    refreshPending = true;
+    refreshPendingManual ||= manual;
+    return;
+  }
   refreshInFlight = true;
   refreshButton.disabled = true;
   if (manual) setButtonState(refreshButton, "working", "Refreshing…");
   try {
     const tab = await activeTab();
-    if (tab?.id !== undefined && isSupportedUrl(tab.url)) await reconnect(tab.id);
     const [data, tabStatus] = await Promise.all([
       overview(),
       tab?.id !== undefined && isSupportedUrl(tab.url) ? statusForTab(tab.id).catch(() => undefined) : Promise.resolve(undefined),
@@ -585,7 +602,7 @@ async function refreshAll(manual = false): Promise<void> {
       ? "AI Chat Monitor is ready. Turn monitoring on from a ChatGPT tab to add it."
       : lifecyclePaused > 0
         ? `${lifecyclePaused} monitored tab${lifecyclePaused === 1 ? " is" : "s are"} paused by Chrome (frozen/discarded); monitoring reconnects when Chrome resumes the tab.`
-        : "AI Chat Monitor is observing only; it has no ChatGPT mutation path.";
+        : "Monitoring continues in the background across tabs. AI Chat Monitor is observing only; it has no ChatGPT mutation path.";
     summaryCard.dataset.tone = lifecyclePaused > 0 ? "warn" : monitored > 0 ? "ok" : "info";
     if (manual) flashButton(refreshButton, "success", "Refreshed ✓", "Refresh");
   } catch (error) {
@@ -596,9 +613,21 @@ async function refreshAll(manual = false): Promise<void> {
   } finally {
     refreshButton.disabled = false;
     refreshInFlight = false;
+    if (refreshPending) {
+      const pendingManual = refreshPendingManual;
+      refreshPending = false;
+      refreshPendingManual = false;
+      void refreshAll(pendingManual);
+    }
   }
 }
 
 refreshButton.addEventListener("click", () => { void refreshAll(true); });
+chrome.tabs.onActivated.addListener(() => { void refreshAll(); });
+chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
+  const lifecycleChanged = changeInfo.discarded !== undefined || changeInfo.frozen !== undefined;
+  const activeTabStateChanged = tab.active === true && (changeInfo.url !== undefined || changeInfo.status !== undefined);
+  if (lifecycleChanged || activeTabStateChanged) void refreshAll();
+});
 void refreshAll();
 window.setInterval(() => { void refreshAll(); }, 5_000);

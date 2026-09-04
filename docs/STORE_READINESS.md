@@ -2,8 +2,9 @@
 
 Status:
 
-- **GitHub release:** `v3.0.2` published and artifact-verified, but post-release owner validation found a remaining hidden stale-Stop completion gate tracked by Issue #83 Contract Revision 3.
-- **Chrome Web Store:** not submitted or published; production action deferred. Do not submit v3.0.2 as the resolved background-reliability build.
+- **GitHub release:** `v3.0.2` published and artifact-verified, but post-release owner validation found remaining inactive-tab reliability/diagnostic gaps tracked by Issue #83 Contract Revisions 3–4.
+- **Unreleased candidate:** source version `3.0.3` contains Issue #83 corrections/diagnostics but is not a published release and remains gated on owner live validation.
+- **Chrome Web Store:** not submitted or published; production action deferred. Do not submit v3.0.2 or an unvalidated 3.0.3 candidate as the resolved background-reliability build.
 
 This document tracks engineering and disclosure readiness for a future Chrome Web Store submission. The published GitHub release does not itself authorize Store upload, submission, visibility changes, or publication.
 
@@ -16,7 +17,7 @@ This document tracks engineering and disclosure readiness for a future Chrome We
 
 ## Runtime safety
 
-Verified for the released v3.0.2 baseline except for the separately tracked hidden stale-Stop completion defect:
+Verified for the released v3.0.2 baseline except for the separately tracked inactive-tab defects; unreleased Issue #83 source corrections are not Store-ready until owner live validation:
 
 - [x] Exact candidate validation is green.
 - [x] Static/runtime regression coverage proves no ChatGPT composer write or conversation-control activation path exists.

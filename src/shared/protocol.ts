@@ -160,6 +160,8 @@ export interface ManagedChatStatus {
   pageTitle?: string;
   controlEligibility: ControlEligibility;
   lastSeenAt: number;
+  lastObservationAt?: number;
+  visibility?: PageObservation["visibility"];
   generation?: PageObservation["generation"];
   overrides?: ChatMonitoringPolicy;
   policy?: ResolvedMonitoringPolicy;

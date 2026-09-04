@@ -45,6 +45,7 @@ export interface PageObservation {
   conversationId?: string;
   routeKey: string;
   pageTitle?: string;
+  visibility?: "visible" | "hidden";
   generation: GenerationState;
   latestUser?: UserTurnSnapshot;
   latestAssistant?: AssistantResponseSnapshot;
@@ -61,6 +62,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isGenerationState(value: unknown): value is GenerationState {
   return value === "IDLE" || value === "GENERATING" || value === "UNKNOWN";
+}
+
+function isOptionalVisibility(value: unknown): boolean {
+  return value === undefined || value === "visible" || value === "hidden";
 }
 
 function isBlockingReason(value: unknown): value is BlockingReason {
@@ -98,6 +103,7 @@ export function isPageObservation(value: unknown): value is PageObservation {
     !isOptionalString(value.conversationId) ||
     typeof value.routeKey !== "string" ||
     value.routeKey.length === 0 ||
+    !isOptionalVisibility(value.visibility) ||
     (value.pageTitle !== undefined && (typeof value.pageTitle !== "string" || value.pageTitle.length > 300)) ||
     !isGenerationState(value.generation) ||
     (value.confidence !== "HIGH" && value.confidence !== "LOW") ||

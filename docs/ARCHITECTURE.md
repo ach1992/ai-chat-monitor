@@ -40,6 +40,7 @@ The ChatGPT page and its content are untrusted inputs. The content script may ob
 
 `src/content/adapter.ts` normalizes page observations such as:
 
+- document visibility (`visible` / `hidden`) and observation time;
 - generation state;
 - latest assistant/user turn identity and bounded normalized text;
 - page confidence;
@@ -74,6 +75,8 @@ When monitoring is enabled for a conversation, the background runtime records th
 Hidden assistant text recovery does not trust mere `AI_CHAT_MONITOR_STATUS=` prefix presence in layout-derived `innerText`. If rendered text lacks a canonical terminal record but structural DOM text contains one, the adapter reconstructs the terminal-line boundary before downstream protocol validation. Code-block/ambiguity validation remains fail-closed.
 
 A hidden ChatGPT tab may also retain its transient Stop control after structural assistant DOM already contains the exact canonical terminal status. In that hidden-only case the canonical terminal record is explicit completion evidence and the adapter reports the observation as idle despite the stale Stop control. Visible tabs keep normal Stop-control semantics, and malformed/code-fenced status text cannot take this path.
+
+The inactive-tab browser regression deliberately closes the Side Panel and force-terminates the extension service worker while the monitored ChatGPT-origin tab remains hidden. A passing run requires the hidden content agent itself to wake a replacement worker and persist the terminal monitoring event before any extension page is reopened.
 
 ## Monitoring domain
 
@@ -188,13 +191,14 @@ Notification-channel failures must not mutate ChatGPT state and must not convert
 
 ## Side Panel
 
-The Side Panel is the user-control and observability surface.
+The Side Panel is the user-control and observability surface. It is a global per-window companion rather than an active-ChatGPT-tab-specific authority, so it remains available while the user browses other tabs. Side Panel polling does not reconnect content agents; content/background lifecycle recovery is independent of whether the panel is open.
 
 Current responsibilities:
 
 - current-tab Monitoring ON/OFF;
 - current page/semantic state and source;
 - marker health;
+- per-monitored-chat observer evidence: last observation age, `hidden`/`visible` state, generation state, and Chrome lifecycle state;
 - Browser/Sound defaults;
 - status-protocol copy text;
 - provider profile management/readiness;

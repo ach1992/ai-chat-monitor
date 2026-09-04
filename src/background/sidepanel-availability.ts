@@ -13,18 +13,14 @@ function isSupportedChatGptUrl(rawUrl: string | undefined): boolean {
   }
 }
 
-async function syncSidePanelForTab(tab: chrome.tabs.Tab): Promise<void> {
+async function repairLegacyDisabledTab(tab: chrome.tabs.Tab): Promise<void> {
   const tabId = tab.id;
   if (tabId === undefined) return;
-  const enabled = isSupportedChatGptUrl(tab.url);
   try {
-    await chrome.sidePanel.setOptions({
-      tabId,
-      ...(enabled ? { path: SIDE_PANEL_PATH } : {}),
-      enabled,
-    });
+    const options = await chrome.sidePanel.getOptions({ tabId });
+    if (options.enabled === false) await chrome.sidePanel.setOptions({ tabId, enabled: true });
   } catch {
-    // Availability is UX-only. Failure must never influence supervision state.
+    // This is a one-time UX repair for tab-specific disabled overrides from older builds.
   }
 }
 
@@ -45,29 +41,28 @@ async function initializeSidePanelAvailability(): Promise<void> {
   try {
     await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
   } catch {
-    // Toolbar opening is UX-only. Per-tab availability still remains fail-closed below.
+    // Toolbar opening is UX-only. The panel remains independently available below.
   }
 
   try {
-    await chrome.sidePanel.setOptions({ enabled: false });
+    await chrome.sidePanel.setOptions({ path: SIDE_PANEL_PATH, enabled: true });
   } catch {
-    // Keep the explicit per-tab deny path below even if the default update fails.
+    // Per-tab repair below clears any stale disabled option when tabs are encountered.
   }
 
   try {
     const tabs = await chrome.tabs.query({});
-    await Promise.allSettled(tabs.map(syncSidePanelForTab));
+    await Promise.allSettled(tabs.map(repairLegacyDisabledTab));
   } catch {
-    // Availability is UX-only. Later tab events will retry the relevant tab.
+    // Availability is UX-only. Later tab activation will retry the relevant tab.
   }
 }
 
 chrome.tabs.onActivated.addListener(({ tabId }) => {
-  void chrome.tabs.get(tabId).then(syncSidePanelForTab, () => undefined);
+  void chrome.tabs.get(tabId).then(repairLegacyDisabledTab, () => undefined);
 });
 
 chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
-  if (changeInfo.url !== undefined || changeInfo.status === "complete") void syncSidePanelForTab(tab);
   if (changeInfo.status === "complete") void reannounceCompletedChatGptTab(tab);
 });
 
