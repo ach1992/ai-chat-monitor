@@ -14,7 +14,7 @@ await verifyManifestAssets(extensionPath);
 const CONVERSATION_ID = "stale-dom-smoke-chat";
 const TEST_HTML = `<!doctype html>
 <meta charset="utf-8">
-<title>AI Chat Monitor response-episode smoke</title>
+<title>AI Chat Monitor response lifecycle smoke</title>
 <div id="conversation">
   <div data-message-author-role="user" data-message-id="user-old">Previous request.</div>
   <article><div data-message-author-role="assistant" data-message-id="assistant-old" id="assistant-old">Previous response complete.
@@ -35,28 +35,37 @@ const browser = [process.env.CHROME_BIN, "google-chrome-for-testing", "chromium"
   .filter((candidate) => typeof candidate === "string" && candidate.length > 0)
   .map(findOnPath)
   .find((candidate) => candidate !== undefined);
-if (browser === undefined) throw new Error("Chrome for Testing/Chromium was not found. Set CHROME_BIN to run the stale-DOM smoke test.");
+if (browser === undefined) throw new Error("Chrome for Testing/Chromium was not found. Set CHROME_BIN to run the response-lifecycle smoke test.");
 const xvfbRun = findOnPath("xvfb-run");
-if (process.platform !== "win32" && xvfbRun === undefined) throw new Error("xvfb-run is required for the stale-DOM smoke test on Linux.");
+if (process.platform !== "win32" && xvfbRun === undefined) throw new Error("xvfb-run is required for the response-lifecycle smoke test on Linux.");
 
-const profilePath = await mkdtemp(resolve(tmpdir(), "ai-chat-monitor-stale-dom-profile-"));
-const certificatePath = await mkdtemp(resolve(tmpdir(), "ai-chat-monitor-stale-dom-cert-"));
+const profilePath = await mkdtemp(resolve(tmpdir(), "ai-chat-monitor-response-lifecycle-profile-"));
+const certificatePath = await mkdtemp(resolve(tmpdir(), "ai-chat-monitor-response-lifecycle-cert-"));
 const keyPath = resolve(certificatePath, "key.pem");
 const certPath = resolve(certificatePath, "cert.pem");
 const openssl = findOnPath("openssl");
-if (openssl === undefined) throw new Error("openssl is required for the stale-DOM smoke test.");
+if (openssl === undefined) throw new Error("openssl is required for the response-lifecycle smoke test.");
 const certificate = spawnSync(openssl, [
   "req", "-x509", "-newkey", "rsa:2048", "-nodes",
   "-keyout", keyPath, "-out", certPath,
   "-subj", "/CN=chatgpt.com", "-days", "1",
 ], { stdio: "ignore" });
-if (certificate.status !== 0) throw new Error("Unable to create the stale-DOM smoke certificate.");
+if (certificate.status !== 0) throw new Error("Unable to create the response-lifecycle smoke certificate.");
 
 const server = createServer(
   { key: await readFile(keyPath), cert: await readFile(certPath) },
   (request, response) => {
-    const path = request.url ?? "/";
-    if (path.startsWith("/backend-api/f/conversation")) {
+    const rawPath = request.url ?? "/";
+    const url = new URL(rawPath, "https://chatgpt.com");
+    if (url.pathname === "/backend-api/f/conversation" && url.searchParams.get("probe") === "json") {
+      response.writeHead(200, {
+        "content-type": "application/json",
+        "cache-control": "no-store",
+      });
+      response.end('{"ok":true,"kind":"not-a-response-stream"}');
+      return;
+    }
+    if (url.pathname === "/backend-api/f/conversation") {
       response.writeHead(200, {
         "content-type": "text/event-stream",
         "cache-control": "no-store",
@@ -66,7 +75,7 @@ const server = createServer(
       setTimeout(() => {
         response.write("data: [DONE]\n\n");
         response.end();
-      }, 250);
+      }, 1_200);
       return;
     }
     response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
@@ -78,7 +87,7 @@ await new Promise((resolvePromise, reject) => {
   server.listen(0, "127.0.0.1", resolvePromise);
 });
 const address = server.address();
-if (address === null || typeof address === "string") throw new Error("Unable to resolve the stale-DOM smoke server port.");
+if (address === null || typeof address === "string") throw new Error("Unable to resolve the response-lifecycle smoke server port.");
 
 const sleep = (milliseconds) => new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
 let launchSequence = 0;
@@ -246,15 +255,15 @@ try {
 
   secondBrowser = await launchBrowser();
   chatPage = await createPage(secondBrowser, `https://chatgpt.com/c/${CONVERSATION_ID}`);
-  await waitFor(async () => (await evaluate(chatPage, "document.readyState")) === "complete", "synthetic stale-DOM ChatGPT page");
+  await waitFor(async () => (await evaluate(chatPage, "document.readyState")) === "complete", "synthetic response-lifecycle ChatGPT page");
   queryPage = await createPage(secondBrowser, `chrome-extension://${secondBrowser.extensionId}/sidepanel/index.html`);
   await secondBrowser.browserClient.send("Target.activateTarget", { targetId: chatPage.targetId });
-  await waitFor(async () => (await evaluate(chatPage, "document.visibilityState")) === "visible", "visible stale-DOM monitored tab");
+  await waitFor(async () => (await evaluate(chatPage, "document.visibilityState")) === "visible", "visible monitored tab");
 
   const tab = await waitFor(async () => {
     const tabs = await evaluate(queryPage, "chrome.tabs.query({}).then((items) => items.map((item) => ({id:item.id,url:item.url,active:item.active,discarded:item.discarded,frozen:item.frozen,autoDiscardable:item.autoDiscardable})))");
     return tabs.find((candidate) => candidate.url?.includes(`/c/${CONVERSATION_ID}`)) ?? false;
-  }, "stale-DOM ChatGPT tab");
+  }, "response-lifecycle ChatGPT tab");
 
   await waitFor(async () => {
     const stored = await evaluate(queryPage, "chrome.storage.session.get('guardian:session-registry:runtime')");
@@ -265,9 +274,9 @@ try {
   await waitFor(async () => {
     const current = await evaluate(queryPage, `chrome.tabs.get(${tab.id}).then((item) => ({autoDiscardable:item.autoDiscardable}))`);
     return current.autoDiscardable === false;
-  }, "stale-DOM automatic-discard protection");
+  }, "automatic-discard protection");
 
-  await evaluate(queryPage, `chrome.runtime.sendMessage({type:'panel:history-clear',protocolVersion:2})`);
+  await evaluate(queryPage, "chrome.runtime.sendMessage({type:'panel:history-clear',protocolVersion:2})");
   await evaluate(chatPage, "document.querySelector('#prompt-textarea')?.focus(); true");
   await chatPage.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
   await chatPage.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
@@ -278,10 +287,24 @@ try {
     return session?.pendingResponse?.baselineAssistantDomMessageId === "assistant-old" ? session.pendingResponse : false;
   }, "manual-send response episode boundary");
 
+  const blank = await secondBrowser.browserClient.send("Target.createTarget", { url: "about:blank" });
+  await secondBrowser.browserClient.send("Target.activateTarget", { targetId: blank.targetId });
+  await waitFor(async () => (await evaluate(chatPage, "document.visibilityState")) === "hidden", "hidden monitored tab");
+
+  const probe = await evaluate(
+    chatPage,
+    "fetch('/backend-api/f/conversation?probe=json', {method:'POST', headers:{'content-type':'application/json'}, body:'{}'}).then((response) => response.json())",
+  );
+  if (probe?.ok !== true) throw new Error(`Synthetic non-SSE probe failed: ${JSON.stringify(probe)}`);
   await sleep(250);
-  const eventsAfterSend = await evaluate(queryPage, "chrome.storage.local.get('guardian:monitoring-history:events').then((stored) => stored['guardian:monitoring-history:events']?.events ?? [])");
-  if (eventsAfterSend.some((candidate) => candidate.at >= episode.startedAt)) {
-    throw new Error(`MANUAL_SEND reprocessed the previous assistant into a fresh event: ${JSON.stringify(eventsAfterSend)}`);
+
+  const transportAfterProbe = await evaluate(queryPage, "chrome.storage.session.get('guardian:response-transport:inflight').then((stored) => stored['guardian:response-transport:inflight']?.requests ?? [])");
+  if (transportAfterProbe.length !== 0) {
+    throw new Error(`Non-SSE probe incorrectly acquired response-stream authority: ${JSON.stringify(transportAfterProbe)}`);
+  }
+  const eventsAfterProbe = await evaluate(queryPage, "chrome.storage.local.get('guardian:monitoring-history:events').then((stored) => stored['guardian:monitoring-history:events']?.events ?? [])");
+  if (eventsAfterProbe.some((candidate) => candidate.at >= episode.startedAt)) {
+    throw new Error(`Non-SSE probe or MANUAL_SEND produced a premature event: ${JSON.stringify(eventsAfterProbe)}`);
   }
 
   await evaluate(chatPage, `(() => {
@@ -296,7 +319,7 @@ try {
     const stored = await evaluate(queryPage, "chrome.storage.session.get('guardian:session-registry:runtime')");
     const session = stored["guardian:session-registry:runtime"]?.sessions?.find((candidate) => candidate.conversationId === CONVERSATION_ID);
     return session?.observation?.latestAssistant === undefined ? session : false;
-  }, "new user turn outranking the previous assistant");
+  }, "new user turn outranking previous assistant");
 
   await evaluate(chatPage, `(() => {
     const conversation = document.querySelector('#conversation');
@@ -305,45 +328,62 @@ try {
     assistant.id = 'assistant-new';
     assistant.setAttribute('data-message-author-role', 'assistant');
     assistant.setAttribute('data-message-id', 'assistant-new');
-    assistant.textContent = '...';
+    assistant.textContent = 'partial';
     article.append(assistant);
     conversation?.append(article);
   })()`);
-  await waitFor(async () => {
+
+  const partialSession = await waitFor(async () => {
     const stored = await evaluate(queryPage, "chrome.storage.session.get('guardian:session-registry:runtime')");
     const session = stored["guardian:session-registry:runtime"]?.sessions?.find((candidate) => candidate.conversationId === CONVERSATION_ID);
-    return session?.observation?.latestAssistant?.domMessageId === "assistant-new" && session?.observation?.generation === "IDLE" ? session : false;
-  }, "fresh partial assistant with transient IDLE UI");
-
-  await sleep(250);
+    return session?.observation?.latestAssistant?.domMessageId === "assistant-new" &&
+      session?.observation?.latestAssistant?.normalizedText === "partial" &&
+      session?.observation?.generation === "GENERATING" &&
+      session?.observation?.stopControlPresent === false ? session : false;
+  }, "hidden partial assistant held as generating without Stop control");
+  if (partialSession.observation.responseCompletion !== undefined) {
+    throw new Error(`Partial hidden assistant carried completion evidence: ${JSON.stringify(partialSession.observation.responseCompletion)}`);
+  }
   const eventsDuringPartial = await evaluate(queryPage, "chrome.storage.local.get('guardian:monitoring-history:events').then((stored) => stored['guardian:monitoring-history:events']?.events ?? [])");
   if (eventsDuringPartial.some((candidate) => candidate.at >= episode.startedAt)) {
-    throw new Error(`Partial fresh assistant emitted a premature completion event: ${JSON.stringify(eventsDuringPartial)}`);
+    throw new Error(`Hidden transient IDLE/partial assistant produced a premature semantic/completion event: ${JSON.stringify(eventsDuringPartial)}`);
   }
 
   await evaluate(chatPage, `(() => {
-    const stop = document.createElement('button');
-    stop.id = 'stop';
-    stop.setAttribute('data-testid', 'stop-button');
-    stop.textContent = 'Stop generating';
-    document.body.append(stop);
+    globalThis.__rev9ResponseFetch = fetch('/backend-api/f/conversation', {
+      method:'POST',
+      headers:{'content-type':'application/json'},
+      body:'{}'
+    }).then((response) => response.text()).then((text) => ({done:true,text,visibility:document.visibilityState}));
+    return true;
   })()`);
-  await waitFor(async () => {
+
+  const inFlight = await waitFor(async () => {
+    const stored = await evaluate(queryPage, "chrome.storage.session.get('guardian:response-transport:inflight')");
+    const requests = stored["guardian:response-transport:inflight"]?.requests ?? [];
+    return requests.find((candidate) => candidate.tabId === tab.id) ?? false;
+  }, "verified browser-level ChatGPT SSE request");
+
+  await evaluate(chatPage, "document.querySelector('#assistant-new').textContent = 'partial response still streaming'; true");
+  const streamingSession = await waitFor(async () => {
     const stored = await evaluate(queryPage, "chrome.storage.session.get('guardian:session-registry:runtime')");
     const session = stored["guardian:session-registry:runtime"]?.sessions?.find((candidate) => candidate.conversationId === CONVERSATION_ID);
-    return session?.observation?.generation === "GENERATING" && session?.observation?.latestAssistant?.domMessageId === "assistant-new" ? session : false;
-  }, "current response generating observation");
+    return session?.observation?.latestAssistant?.normalizedText === "partial response still streaming" &&
+      session?.observation?.generation === "GENERATING" &&
+      session?.observation?.stopControlPresent === false ? session : false;
+  }, "changing hidden assistant remaining generating while SSE is open");
+  if (streamingSession.observation.responseCompletion !== undefined) {
+    throw new Error(`Open SSE carried premature completion evidence: ${JSON.stringify(streamingSession.observation.responseCompletion)}`);
+  }
 
-  const blank = await secondBrowser.browserClient.send("Target.createTarget", { url: "about:blank" });
-  await secondBrowser.browserClient.send("Target.activateTarget", { targetId: blank.targetId });
-  await waitFor(async () => (await evaluate(chatPage, "document.visibilityState")) === "hidden", "hidden stale-DOM monitored tab");
+  const eventsWhileStreamOpen = await evaluate(queryPage, "chrome.storage.local.get('guardian:monitoring-history:events').then((stored) => stored['guardian:monitoring-history:events']?.events ?? [])");
+  if (eventsWhileStreamOpen.some((candidate) => candidate.at >= episode.startedAt)) {
+    throw new Error(`Open SSE produced a premature event: ${JSON.stringify(eventsWhileStreamOpen)}`);
+  }
 
-  const fetchResult = await evaluate(
-    chatPage,
-    `fetch('/backend-api/f/conversation', {method:'POST', headers:{'content-type':'application/json'}, body:'{}'}).then((response) => response.text()).then(() => ({done:true,visibility:document.visibilityState,assistant:document.querySelector('#assistant-new')?.textContent,stop:document.querySelector('#stop') !== null}))`,
-  );
-  if (fetchResult?.done !== true || fetchResult.visibility !== "hidden" || fetchResult.assistant !== "..." || fetchResult.stop !== true) {
-    throw new Error(`Synthetic stream did not finish with the monitored DOM still stale and hidden: ${JSON.stringify(fetchResult)}`);
+  const fetchResult = await evaluate(chatPage, "globalThis.__rev9ResponseFetch");
+  if (fetchResult?.done !== true || fetchResult.visibility !== "hidden" || !String(fetchResult.text).includes("[DONE]")) {
+    throw new Error(`Synthetic SSE did not complete while hidden: ${JSON.stringify(fetchResult)}`);
   }
 
   const event = await waitFor(async () => {
@@ -351,35 +391,44 @@ try {
     return stored["guardian:monitoring-history:events"]?.events?.find(
       (candidate) => candidate.conversationId === CONVERSATION_ID && candidate.type === "RESPONSE_COMPLETE" && candidate.delivery?.browser === "DELIVERED",
     ) ?? false;
-  }, "RESPONSE_COMPLETE from hidden transport while rendered DOM stays stale", 6_000);
+  }, "single RESPONSE_COMPLETE from the verified hidden SSE completion", 6_000);
+
+  const allEvents = await evaluate(queryPage, "chrome.storage.local.get('guardian:monitoring-history:events').then((stored) => stored['guardian:monitoring-history:events']?.events ?? [])");
+  const responseEvents = allEvents.filter((candidate) => candidate.conversationId === CONVERSATION_ID && candidate.at >= episode.startedAt);
+  if (responseEvents.length !== 1 || responseEvents[0].id !== event.id) {
+    throw new Error(`Response lifecycle emitted duplicate/premature events: ${JSON.stringify(responseEvents)}`);
+  }
 
   const sessionState = await evaluate(queryPage, "chrome.storage.session.get('guardian:session-registry:runtime')");
   const session = sessionState["guardian:session-registry:runtime"]?.sessions?.find((candidate) => candidate.conversationId === CONVERSATION_ID);
   const observation = session?.observation;
   const diagnostic = session?.hiddenDiagnostic;
-  if (observation?.latestAssistant?.normalizedText !== "..." || observation?.latestAssistant?.textLength !== 3) {
-    throw new Error(`Transport completion incorrectly depended on a final assistant DOM: ${JSON.stringify(observation?.latestAssistant)}`);
+  if (observation?.latestAssistant?.normalizedText !== "partial response still streaming") {
+    throw new Error(`Network completion unexpectedly depended on final assistant DOM text: ${JSON.stringify(observation?.latestAssistant)}`);
   }
   if (observation?.responseCompletion?.visibility !== "hidden" || observation?.responseCompletion?.transport !== "CHATGPT_CONVERSATION_STREAM") {
-    throw new Error(`Hidden response transport completion evidence was not retained: ${JSON.stringify(observation?.responseCompletion)}`);
+    throw new Error(`Verified hidden response completion evidence was not retained: ${JSON.stringify(observation?.responseCompletion)}`);
   }
-  if (observation?.generation !== "GENERATING" || observation?.stopControlPresent !== true) {
-    throw new Error(`Stale generation UI did not remain intentionally unresolved: ${JSON.stringify({generation:observation?.generation,stop:observation?.stopControlPresent})}`);
+  if (observation?.generation !== "IDLE" || observation?.stopControlPresent !== false) {
+    throw new Error(`Verified network completion did not release the hidden generation hold: ${JSON.stringify({generation:observation?.generation,stop:observation?.stopControlPresent})}`);
   }
   if (diagnostic?.transportCompletedAt === undefined || diagnostic?.tabActivatedAt !== undefined || diagnostic?.visibleObservedAt !== undefined) {
-    throw new Error(`Diagnostic did not prove transport completion before activation: ${JSON.stringify(diagnostic)}`);
+    throw new Error(`Diagnostic did not prove verified completion before activation: ${JSON.stringify(diagnostic)}`);
+  }
+  if (diagnostic.transportCompletedAt < inFlight.startedAt) {
+    throw new Error(`Completion preceded its correlated SSE start: ${JSON.stringify({inFlight,diagnostic})}`);
   }
   if (event.delivery?.browserAt === undefined || event.delivery.browserAt < event.at) {
     throw new Error(`Browser delivery timing is incomplete: ${JSON.stringify(event.delivery)}`);
   }
   if (await evaluate(chatPage, "document.visibilityState") !== "hidden") {
-    throw new Error("Stale-DOM monitored tab was activated before the notification completed.");
+    throw new Error("Monitored tab was activated before the notification completed.");
   }
-  if (await evaluate(chatPage, "document.querySelector('#assistant-new')?.textContent") !== "...") {
-    throw new Error("Stale-DOM smoke accidentally installed final assistant content.");
+  if (await evaluate(chatPage, "document.querySelector('[data-testid=stop-button]') !== null") !== false) {
+    throw new Error("Smoke accidentally introduced a Stop control.");
   }
 
-  console.log(`Stale-DOM background monitoring passed: ${event.type}, browser=${event.delivery.browser}, transportAt=${diagnostic.transportCompletedAt}, browserAt=${event.delivery.browserAt}`);
+  console.log(`Rev9 hidden response lifecycle passed: ${event.type}, browser=${event.delivery.browser}, streamStart=${inFlight.startedAt}, transportAt=${diagnostic.transportCompletedAt}, browserAt=${event.delivery.browserAt}`);
 } finally {
   for (const client of [queryPage, chatPage, settingsPage]) {
     try { client?.close(); } catch { /* ignore cleanup */ }
