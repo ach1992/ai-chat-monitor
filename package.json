@@ -14,7 +14,8 @@
     "lint": "node scripts/lint.mjs",
     "test": "npm run build && node --test tests/*.test.mjs",
     "validate": "npm run typecheck && npm run lint && npm test",
-    "smoke:extension": "node scripts/smoke-extension.mjs"
+    "smoke:extension": "node scripts/smoke-extension.mjs",
+    "smoke:background": "node scripts/background-tab-smoke.mjs"
   },
   "devDependencies": {
     "typescript": "5.8.3"

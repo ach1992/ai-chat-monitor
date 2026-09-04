@@ -103,6 +103,27 @@ test("background-safe structural reading recovers canonical terminal status", as
   assert.equal(result.latestAssistant.domMessageId, "assistant-bg");
 });
 
+
+
+test("background structural reading replaces a flattened rendered status prefix", async () => {
+  const GuardianContent = await loadAdapter();
+  const document = makeDom(CANONICAL_STATUS);
+  document.assistant.innerText = `Finished. ${CANONICAL_STATUS}`;
+  const adapter = new GuardianContent.BrowserChatGPTAdapter(document, { pathname: "/c/chat-bg" });
+  const result = await adapter.observe(123);
+  assert.equal(result.latestAssistant.normalizedText, `Finished.\n${CANONICAL_STATUS}`);
+});
+
+test("background structural recovery restores a terminal line when textContent concatenates blocks", async () => {
+  const GuardianContent = await loadAdapter();
+  const document = makeDom(CANONICAL_STATUS);
+  document.assistant.textContent = `Finished.${CANONICAL_STATUS}`;
+  document.assistant.innerText = `Finished. ${CANONICAL_STATUS}`;
+  const adapter = new GuardianContent.BrowserChatGPTAdapter(document, { pathname: "/c/chat-bg" });
+  const result = await adapter.observe(123);
+  assert.equal(result.latestAssistant.normalizedText, `Finished.\n${CANONICAL_STATUS}`);
+});
+
 test("retired marker does not trigger background structural recovery", async () => {
   const GuardianContent = await loadAdapter();
   const adapter = new GuardianContent.BrowserChatGPTAdapter(makeDom(RETIRED_STATUS), { pathname: "/c/chat-bg" });

@@ -220,7 +220,8 @@ Every future candidate must retain repository-standard validation:
 - typecheck;
 - lint;
 - automated tests;
-- extension smoke test;
+- extension smoke test that proves the unpacked AI Chat Monitor service worker actually loaded;
+- real Chromium background-tab smoke test that keeps the monitored tab hidden, verifies terminal-status boundary preservation, confirms Browser notification creation, and confirms automatic-discard protection;
 - deterministic packaging;
 - ZIP layout/provenance verification;
 - exact candidate SHA identity in build metadata.
@@ -257,7 +258,9 @@ The v2.0.1 patch preserves all v2.0.0 acceptance requirements and additionally v
 
 ## v3.0.1 patch baseline
 
-The v3.0.1 patch preserves the v3 read-only product contract and adds a background-monitoring reliability invariant: while a hidden ChatGPT page remains runnable, DOM-triggered observations must not depend on throttled page timers; foreground observation retains its debounce behavior, and visibility changes trigger prompt catch-up. Actual browser freeze/discard remains a browser lifecycle boundary and is not claimed to be bypassed. The patch also refreshes the packaged 16/32/48/128 extension icon set without changing permissions or notification/provider authority.
+The v3.0.1 patch preserved the v3 read-only product contract and attempted to improve background monitoring by removing a page-timer dependency from hidden DOM observations. Post-release owner validation proved that this was incomplete: background `innerText` could retain/flatten the status prefix without a valid terminal-line boundary, preventing structural recovery, and content-agent recovery still depended too much on later Side Panel/tab activity when the MV3 background session was lost. Therefore v3.0.1 must not be used as evidence that inactive-tab monitoring is fully reliable.
+
+Current corrective invariant (Issue #83 Contract Revision 2): while a hidden ChatGPT page remains runnable, a canonical terminal status must survive background text extraction and reach monitoring/notification routing without tab activation; a content agent must self-reannounce after recoverable background-session loss; monitored tabs must opt out of automatic discard while monitoring is enabled and restore the prior tab setting afterward; frozen/discarded lifecycle state must be surfaced truthfully and reconnect immediately on resume. Actual frozen pages cannot execute content-script tasks until Chrome resumes them.
 
 ## Historical note
 

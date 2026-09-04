@@ -65,7 +65,13 @@ Exact tab/document/content-agent/page/route/conversation identity remains import
 
 The session registry rejects stale observations from replaced documents and keeps duplicate tabs isolated at the document level. Conversation identity is then used by monitoring to deduplicate provider work and notifications.
 
-A service-worker restart requires fresh page observations before current runtime state is trusted again. Restart must never restore any v1 send authority.
+A service-worker restart requires fresh page observations before current runtime state is trusted again. Restart must never restore any v1 send authority. A still-running content agent self-reannounces after a recoverable rejected/failed observation so session recovery does not depend on making that tab active or waiting for Side Panel polling.
+
+## Background-tab lifecycle resilience
+
+When monitoring is enabled for a conversation, the background runtime records the tab's prior `autoDiscardable` value and sets `autoDiscardable: false` to opt the monitored tab out of Chrome's automatic discard path. Disabling/resetting monitoring restores the prior value; tab removal forgets the transient restoration record. This does not claim to prevent every Chrome freeze policy. `frozen` and `discarded` are reported as explicit lifecycle state in Side Panel status/overview, and resume/un-discard transitions request an immediate content-agent reconnect.
+
+Hidden assistant text recovery does not trust mere `AI_CHAT_MONITOR_STATUS=` prefix presence in layout-derived `innerText`. If rendered text lacks a canonical terminal record but structural DOM text contains one, the adapter reconstructs the terminal-line boundary before downstream protocol validation. Code-block/ambiguity validation remains fail-closed.
 
 ## Monitoring domain
 

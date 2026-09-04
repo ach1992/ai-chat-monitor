@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,8 +28,7 @@ function findOnPath(command) {
 
 const browser = [
   process.env.CHROME_BIN,
-  "google-chrome-stable",
-  "google-chrome",
+  "google-chrome-for-testing",
   "chromium",
   "chromium-browser",
 ]
@@ -50,6 +49,7 @@ const browserArgs = [
   "--enable-logging=stderr",
   "--v=1",
   `--user-data-dir=${profilePath}`,
+  "--remote-debugging-port=0",
   `--disable-extensions-except=${extensionPath}`,
   `--load-extension=${extensionPath}`,
   "about:blank",
@@ -100,37 +100,53 @@ function terminateProcessGroup(signal) {
   }
 }
 
-async function verifyUnpackedLoad() {
-  const deadline = Date.now() + 5_000;
-
+async function devToolsPort() {
+  const portFile = resolve(profilePath, "DevToolsActivePort");
+  const deadline = Date.now() + 8_000;
   while (Date.now() < deadline) {
-    const loadFailure = stderrText().match(
-      /Extension error:.*Failed to load extension[^\n]*/i,
-    )?.[0];
-    if (loadFailure !== undefined) {
-      throw new Error(loadFailure);
-    }
-
     if (child.exitCode !== null) {
-      throw new Error(
-        `Browser exited during unpacked-extension smoke test (code ${child.exitCode}).\n${stderrTail()}`,
-      );
+      throw new Error(`Browser exited during unpacked-extension smoke test (code ${child.exitCode}).\n${stderrTail()}`);
     }
-
+    try {
+      const [rawPort] = (await readFile(portFile, "utf8")).trim().split("\n");
+      const port = Number(rawPort);
+      if (Number.isInteger(port) && port > 0) return port;
+    } catch { /* browser has not exposed DevTools yet */ }
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
   }
+  throw new Error(`Browser did not expose DevTools during unpacked-extension smoke test.\n${stderrTail()}`);
+}
 
-  const loadFailure = stderrText().match(
-    /Extension error:.*Failed to load extension[^\n]*/i,
-  )?.[0];
-  if (loadFailure !== undefined) {
-    throw new Error(loadFailure);
+async function verifyUnpackedLoad() {
+  const port = await devToolsPort();
+  const deadline = Date.now() + 8_000;
+  while (Date.now() < deadline) {
+    const loadFailure = stderrText().match(/Extension error:.*Failed to load extension[^\n]*/i)?.[0];
+    if (loadFailure !== undefined) throw new Error(loadFailure);
+    if (child.exitCode !== null) {
+      throw new Error(`Browser exited during unpacked-extension smoke test (code ${child.exitCode}).\n${stderrTail()}`);
+    }
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/json/list`);
+      if (response.ok) {
+        const targets = await response.json();
+        const worker = Array.isArray(targets)
+          ? targets.find((target) => target?.type === "service_worker" && /chrome-extension:\/\/[^/]+\/background\/worker\.js$/.test(target?.url ?? ""))
+          : undefined;
+        if (worker !== undefined) return worker.url;
+      }
+    } catch { /* DevTools target list is still starting */ }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
   }
+  throw new Error(
+    "The unpacked AI Chat Monitor service worker never loaded. " +
+    "Use Chromium or Chrome for Testing; current branded Google Chrome builds ignore --load-extension.",
+  );
 }
 
 try {
-  await verifyUnpackedLoad();
-  console.log("Chromium accepted the unpacked extension without load errors.");
+  const workerUrl = await verifyUnpackedLoad();
+  console.log(`Verified unpacked AI Chat Monitor service worker: ${workerUrl}`);
 } finally {
   terminateProcessGroup("SIGTERM");
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));

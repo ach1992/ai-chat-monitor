@@ -1,8 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Correct hidden/background terminal-status extraction when Chromium exposes a stale/flattened rendered status prefix: structural terminal evidence now restores the final-line boundary before the existing fail-closed parser runs.
+- Make a still-running content agent self-reannounce after recoverable MV3 background-session loss instead of waiting for active-tab/Side Panel reconnect behavior.
+- Protect monitored tabs from Chrome automatic discard while monitoring is enabled, restore the prior tab setting when monitoring stops, and surface frozen/discarded lifecycle state explicitly.
+- Replace the previous false-positive unpacked-extension smoke check with service-worker identity verification and add a real Chrome for Testing background-tab regression that proves hidden `TASK_COMPLETE` detection plus Browser notification delivery.
+
+Tracking: [Issue #83](https://github.com/ach1992/ai-chat-monitor/issues/83).
+
 ## 3.0.1 — 2026-09-04
 
-- Restored reliable read-only monitoring for hidden/background ChatGPT tabs by making DOM-triggered observations independent of throttled page timers while the page remains runnable.
+- Attempted to restore reliable read-only monitoring for hidden/background ChatGPT tabs by making DOM-triggered observations independent of throttled page timers while the page remains runnable. A post-release owner reproduction later proved this fix incomplete; see the Unreleased Issue #83 remediation above.
 - Added immediate observation catch-up on tab visibility changes while preserving the existing foreground debounce behavior.
 - Replaced the packaged 16/32/48/128 extension icons with the owner-provided AI Chat Monitor icon set.
 - Added regression coverage for hidden-tab scheduling, foreground debounce, and visibility catch-up; Browser and Telegram notification routing remain unchanged downstream of monitoring.

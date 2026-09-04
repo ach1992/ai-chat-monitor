@@ -230,6 +230,12 @@ function markerHealthText(runtime: MonitoringRuntimeStatus | undefined): string 
   }
 }
 
+function appendLifecycleBadge(row: HTMLElement, lifecycle: PanelStatusResponse["tabLifecycle"] | ManagedChatStatus["tabLifecycle"]): void {
+  if (lifecycle?.discarded === true) row.append(badge("Chrome discarded", "warn"));
+  else if (lifecycle?.frozen === true) row.append(badge("Chrome frozen", "warn"));
+  else if (lifecycle?.autoDiscardable === false) row.append(badge("Discard protection ON", "ok"));
+}
+
 function buildEventChecks(root: HTMLElement, target: Map<MonitoringEventType, HTMLInputElement>): void {
   root.replaceChildren();
   for (const event of MONITORING_EVENTS) {
@@ -354,7 +360,10 @@ function renderCurrentStatus(status: PanelStatusResponse | undefined, tab: chrom
   });
 
   heading.append(title, toggle);
+  const lifecycle = e("div", "meta-row");
+  appendLifecycleBadge(lifecycle, status.tabLifecycle);
   currentTabElement.append(heading);
+  if (lifecycle.childElementCount > 0) currentTabElement.append(lifecycle);
   markerHealth.textContent = markerHealthText(status.monitoringRuntime);
   markerHealth.dataset.tone = markerTone(status.monitoringRuntime?.markerHealth);
 }
@@ -375,6 +384,7 @@ function renderChatCard(chat: ManagedChatStatus): HTMLElement {
   const meta = e("div", "meta-row");
   meta.append(badge("Monitoring ON", "ok"));
   meta.append(badge(markerHealthText(chat.runtime), markerTone(chat.runtime?.markerHealth)));
+  appendLifecycleBadge(meta, chat.tabLifecycle);
   card.append(meta);
 
   const actions = e("div", "chat-actions");
@@ -569,11 +579,14 @@ async function refreshAll(manual = false): Promise<void> {
     renderOverview(data);
     renderCurrentStatus(tabStatus, tab);
     const monitored = data.chats.length;
+    const lifecyclePaused = data.chats.filter((chat) => chat.tabLifecycle?.runnable === false).length;
     statusElement.textContent = `${monitored} monitored conversation${monitored === 1 ? "" : "s"}`;
     detailsElement.textContent = monitored === 0
       ? "AI Chat Monitor is ready. Turn monitoring on from a ChatGPT tab to add it."
-      : "AI Chat Monitor is observing only; it has no ChatGPT mutation path.";
-    summaryCard.dataset.tone = monitored > 0 ? "ok" : "info";
+      : lifecyclePaused > 0
+        ? `${lifecyclePaused} monitored tab${lifecyclePaused === 1 ? " is" : "s are"} paused by Chrome (frozen/discarded); monitoring reconnects when Chrome resumes the tab.`
+        : "AI Chat Monitor is observing only; it has no ChatGPT mutation path.";
+    summaryCard.dataset.tone = lifecyclePaused > 0 ? "warn" : monitored > 0 ? "ok" : "info";
     if (manual) flashButton(refreshButton, "success", "Refreshed ✓", "Refresh");
   } catch (error) {
     statusElement.textContent = "Monitoring status unavailable";

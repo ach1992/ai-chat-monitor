@@ -132,6 +132,13 @@ export interface ContentAgentAck {
   controlEligibility?: ControlEligibility;
 }
 
+export interface TabLifecycleStatus {
+  autoDiscardable: boolean;
+  discarded: boolean;
+  frozen: boolean;
+  runnable: boolean;
+}
+
 export interface PanelStatusResponse {
   type: "background:status";
   protocolVersion: typeof PROTOCOL_VERSION;
@@ -142,6 +149,7 @@ export interface PanelStatusResponse {
   controlEligibility?: ControlEligibility;
   monitoringPolicy?: ResolvedMonitoringPolicy;
   monitoringRuntime?: MonitoringRuntimeStatus;
+  tabLifecycle?: TabLifecycleStatus;
   lastSeenAt?: number;
 }
 
@@ -156,6 +164,7 @@ export interface ManagedChatStatus {
   overrides?: ChatMonitoringPolicy;
   policy?: ResolvedMonitoringPolicy;
   runtime?: MonitoringRuntimeStatus;
+  tabLifecycle?: TabLifecycleStatus;
 }
 
 export interface RedactedProviderSettings {

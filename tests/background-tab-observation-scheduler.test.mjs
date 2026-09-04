@@ -36,7 +36,7 @@ async function loadContentAgent(initialVisibility) {
   const documentListeners = new Map();
   let nextTimerId = 1;
   let mutationCallback;
-  const state = { visibilityState: initialVisibility, observation: observation() };
+  const state = { visibilityState: initialVisibility, observation: observation(), rejectNextObservation: false };
 
   class FakeAdapter {
     currentRouteKey() { return "/c/chat-bg"; }
@@ -81,6 +81,15 @@ async function loadContentAgent(initialVisibility) {
       onMessage: { addListener() {} },
       async sendMessage(message) {
         sent.push(structuredClone(message));
+        if (message.type === "content:observation" && state.rejectNextObservation) {
+          state.rejectNextObservation = false;
+          return {
+            type: "background:error",
+            protocolVersion: 2,
+            code: "STALE_EVENT",
+            message: "Session event rejected: NO_SESSION.",
+          };
+        }
         return {
           type: "background:agent-ack",
           protocolVersion: 2,
@@ -118,6 +127,7 @@ async function loadContentAgent(initialVisibility) {
       mutationCallback([], undefined);
     },
     setVisibility(value) { state.visibilityState = value; },
+    rejectNextObservation() { state.rejectNextObservation = true; },
     fireDocumentEvent(type) {
       for (const listener of documentListeners.get(type) ?? []) listener({ type });
     },
@@ -168,4 +178,19 @@ test("visibility changes request an immediate catch-up observation", async () =>
   await flushAsyncWork();
 
   assert.equal(observationMessages(agent.sent).length, 1);
+});
+
+
+test("hidden agent self-heals a lost background session without tab activation", async () => {
+  const agent = await loadContentAgent("hidden");
+  agent.sent.length = 0;
+  agent.rejectNextObservation();
+
+  agent.mutation();
+  await flushAsyncWork();
+
+  assert.deepEqual(
+    agent.sent.map((message) => message.type),
+    ["content:observation", "content:hello", "content:observation"],
+  );
 });

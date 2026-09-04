@@ -40,6 +40,7 @@ namespace GuardianContent {
   const MAX_NORMALIZED_RESPONSE_CHARS = 12_000;
   const MAX_PAGE_TITLE_CHARS = 300;
   const STATUS_PREFIX = "AI_CHAT_MONITOR_STATUS=";
+  const TERMINAL_STATUS_LINE = /^AI_CHAT_MONITOR_STATUS=\{"decision":"(?:CONTINUE|HOLD_APPROVAL|HOLD_DECISION|HOLD_HUMAN_OPERATION|COMPLETE|PLATFORM_ERROR|RATE_LIMIT|UNSURE)"\}$/;
   const ASSISTANT_SELECTORS = ['[data-message-author-role="assistant"]', 'article[data-turn="assistant"]'] as const;
   const USER_SELECTORS = ['[data-message-author-role="user"]', 'article[data-turn="user"]'] as const;
   const TURN_SELECTOR = '[data-testid^="conversation-turn-"]';
@@ -169,6 +170,21 @@ namespace GuardianContent {
     return value.includes(STATUS_PREFIX);
   }
 
+  function hasCanonicalTerminalStatus(value: string): boolean {
+    const normalized = value.replace(/\r\n?/g, "\n").trimEnd();
+    const terminalLine = normalized.split("\n").at(-1)?.trim() ?? "";
+    return TERMINAL_STATUS_LINE.test(terminalLine);
+  }
+
+  function recoverStructuralTerminalStatus(value: string): string | undefined {
+    const markerIndex = value.lastIndexOf(STATUS_PREFIX);
+    if (markerIndex < 0) return undefined;
+    const marker = value.slice(markerIndex).trim();
+    if (!TERMINAL_STATUS_LINE.test(marker)) return undefined;
+    const body = value.slice(0, markerIndex).trimEnd();
+    return body.length === 0 ? marker : `${body}\n${marker}`;
+  }
+
   function elementText(element: Element): string {
     if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) return element.value;
 
@@ -178,9 +194,13 @@ namespace GuardianContent {
     const structural = element.textContent ?? "";
     let selected = rendered;
 
-    // Chromium may leave layout-derived innerText stale in background tabs while
-    // structural DOM text already contains the completed assistant response.
-    if (!containsStatusPrefix(rendered) && containsStatusPrefix(structural)) selected = structural;
+    // Chromium may leave layout-derived innerText stale or flatten the final line
+    // boundary in background tabs. Prefix presence alone is not enough. Recover
+    // a canonical terminal record from structural DOM text even when textContent
+    // concatenates adjacent blocks, then restore the terminal-line boundary. The
+    // parser still performs the authoritative ambiguity/code-fence validation.
+    const recoveredStructural = recoverStructuralTerminalStatus(structural);
+    if (!hasCanonicalTerminalStatus(rendered) && recoveredStructural !== undefined) selected = recoveredStructural;
 
     const querySelectorAll = (element as ParentNode).querySelectorAll;
     if (containsStatusPrefix(selected) && typeof querySelectorAll === "function") {

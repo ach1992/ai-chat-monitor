@@ -29,11 +29,17 @@ declare namespace chrome {
       active?: boolean;
       title?: string;
       url?: string;
+      autoDiscardable?: boolean;
+      discarded?: boolean;
+      frozen?: boolean;
     }
 
     interface TabChangeInfo {
       status?: "loading" | "complete";
       url?: string;
+      discarded?: boolean;
+      frozen?: boolean;
+      autoDiscardable?: boolean;
     }
 
     interface ActiveInfo {
@@ -72,7 +78,7 @@ declare namespace chrome {
 
     function update(
       tabId: number,
-      updateProperties: { active?: boolean },
+      updateProperties: { active?: boolean; autoDiscardable?: boolean },
     ): Promise<Tab>;
 
     function reload(tabId: number): Promise<void>;

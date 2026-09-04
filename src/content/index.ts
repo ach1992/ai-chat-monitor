@@ -32,6 +32,7 @@ namespace GuardianContentAgent {
   let observationMicrotaskQueued = false;
   let observationGeneration = 0;
   let outboundQueue: Promise<void> = Promise.resolve();
+  let reconnectInFlight: Promise<boolean> | undefined;
   let lastKeyboardFocusIntentAt: number | undefined;
 
   function nextSequence(): number { sequence += 1; return sequence; }
@@ -122,7 +123,7 @@ namespace GuardianContentAgent {
     const observedEpoch = pageEpoch;
     const observation = await adapter.observe();
     if (expectedGeneration !== observationGeneration || observedEpoch !== pageEpoch || observation.routeKey !== lastRouteKey) return;
-    await send({
+    const response = await send({
       type: "content:observation",
       protocolVersion: GuardianContent.PROTOCOL_VERSION,
       agentInstanceId,
@@ -131,6 +132,27 @@ namespace GuardianContentAgent {
       observation,
       sentAt: Date.now(),
     });
+    if (response?.type === "background:agent-ack" && response.accepted) return;
+
+    // MV3 service workers can restart independently of a still-running content
+    // script. If the background registry lost this exact document, do not wait
+    // for Side Panel polling or tab activation to repair the session. Reannounce
+    // once, then immediately resample the latest DOM state after a successful ack.
+    const recoverable = response === undefined || (response.type === "background:error" && response.code === "STALE_EVENT");
+    if (!recoverable) return;
+    const recovered = await ensureAgentReconnected();
+    if (recovered) scheduleObservation(0);
+  }
+
+  async function ensureAgentReconnected(): Promise<boolean> {
+    if (reconnectInFlight !== undefined) return reconnectInFlight;
+    const operation = reconnectAgent();
+    reconnectInFlight = operation;
+    try {
+      return await operation;
+    } finally {
+      if (reconnectInFlight === operation) reconnectInFlight = undefined;
+    }
   }
 
   function scheduleObservation(delayMs = 300): void {
