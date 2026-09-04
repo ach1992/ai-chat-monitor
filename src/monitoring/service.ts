@@ -23,7 +23,7 @@ import type {
   ProviderProfileMutation,
   ProviderSettingsState,
 } from "../providers/types.js";
-import type { PageObservation } from "../shared/observation.js";
+import type { PageObservation, ResponseCompletionEvidence } from "../shared/observation.js";
 import { createDurableStorage, createEphemeralStorage } from "../storage/index.js";
 import { MonitoringHistoryRepository, type MonitoringHistoryState } from "./history.js";
 import { MonitoringPolicyRepository, type MonitoringPolicyPersistence } from "./policy.js";
@@ -74,6 +74,11 @@ interface GenerationProgress {
 interface LastAssistantIdentity {
   fingerprint: string;
   domMessageId?: string;
+}
+
+interface EventEmissionOptions {
+  identity?: string;
+  at?: number;
 }
 
 export interface MonitoringServiceStatus {
@@ -179,6 +184,14 @@ function cacheState(value: ResolutionCacheState | undefined): ResolutionCacheSta
   };
 }
 
+export function monitoringEventIdentity(session: SessionView, runtime: MonitoringRuntimeStatus): string {
+  return session.observation?.latestAssistant?.domMessageId ?? runtime.assistantFingerprint ?? `${session.pageEpoch}:${session.routeKey}`;
+}
+
+function deliverySucceeded(event: MonitoringEvent): boolean {
+  return event.delivery?.browser === "DELIVERED" || event.delivery?.sound === "DELIVERED" || event.delivery?.telegram === "DELIVERED";
+}
+
 export class MonitoringService {
   readonly #policies: MonitoringPolicyRepository;
   readonly #history: MonitoringHistoryRepository;
@@ -257,8 +270,11 @@ export class MonitoringService {
       return;
     }
 
+    const completion = observation.responseCompletion;
+
     if (observation.generation === "GENERATING") {
       await this.#handleGenerating(session, policy, state);
+      await this.#maybeEmitTransportCompletion(session, policy, state, completion);
       return;
     }
     this.#generation.delete(conversationId);
@@ -282,6 +298,7 @@ export class MonitoringService {
       };
       this.#runtime.set(session.tabId, runtime);
       if (pageEvent !== undefined) await this.#emitEvent(session, policy, runtime, pageEvent);
+      await this.#maybeEmitTransportCompletion(session, policy, state, completion);
       return;
     }
 
@@ -318,6 +335,7 @@ export class MonitoringService {
     };
     this.#runtime.set(session.tabId, runtime);
     await this.#emitEvent(session, policy, runtime, eventType);
+    await this.#maybeEmitTransportCompletion(session, policy, state, completion);
   }
 
   async updateChat(tabId: number, expectedConversationId: string, patch: ChatMonitoringPolicyPatch): Promise<ResolvedMonitoringPolicy> {
@@ -582,20 +600,57 @@ export class MonitoringService {
     });
   }
 
+  async #maybeEmitTransportCompletion(
+    session: SessionView,
+    policy: ResolvedMonitoringPolicy,
+    state: MonitoringPageState,
+    completion: ResponseCompletionEvidence | undefined,
+  ): Promise<void> {
+    if (completion?.visibility !== "hidden") return;
+    const conversationId = session.conversationId;
+    if (conversationId === undefined) return;
+
+    const alreadyDelivered = this.#history.snapshot(200).some((event) =>
+      event.conversationId === conversationId &&
+      event.at >= completion.completedAt &&
+      deliverySucceeded(event),
+    );
+    if (alreadyDelivered) return;
+
+    const runtime: MonitoringRuntimeStatus = {
+      tabId: session.tabId,
+      conversationId,
+      enabled: true,
+      generation: session.observation?.generation,
+      pageState: state,
+      blockingReasons: [...(session.observation?.blocking.reasons ?? [])],
+      semanticSource: "UNKNOWN",
+      markerHealth: "MISSING",
+      lastEvent: "RESPONSE_COMPLETE",
+      updatedAt: Date.now(),
+    };
+    this.#runtime.set(session.tabId, runtime);
+    await this.#emitEvent(session, policy, runtime, "RESPONSE_COMPLETE", {
+      identity: `transport:${session.documentId}:${completion.serial}`,
+      at: completion.completedAt,
+    });
+  }
+
   async #emitEvent(
     session: SessionView,
     policy: ResolvedMonitoringPolicy,
     runtime: MonitoringRuntimeStatus,
     type: MonitoringEventType,
+    options: EventEmissionOptions = {},
   ): Promise<void> {
     const conversationId = runtime.conversationId;
     if (conversationId === undefined) return;
-    const assistantIdentity = runtime.assistantFingerprint ?? session.observation?.latestAssistant?.domMessageId ?? session.routeKey;
-    const id = `monitor:${conversationId}:${assistantIdentity}:${type}`.slice(0, 500);
+    const identity = options.identity ?? monitoringEventIdentity(session, runtime);
+    const id = `monitor:${conversationId}:${identity}:${type}`.slice(0, 500);
     const presentation = eventPresentation(type);
     const event: MonitoringEvent = {
       id,
-      at: Date.now(),
+      at: options.at ?? Date.now(),
       tabId: session.tabId,
       conversationId,
       type,
