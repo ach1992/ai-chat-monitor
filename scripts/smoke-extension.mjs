@@ -10,6 +10,7 @@ const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const extensionPath = await realpath(resolve(repoRoot, "dist"));
 await verifyManifestAssets(extensionPath);
 const profilePath = await mkdtemp(resolve(tmpdir(), "ai-chat-monitor-chrome-"));
+const DEVTOOLS_STARTUP_TIMEOUT_MS = 20_000;
 
 function findOnPath(command) {
   if (command.includes("/")) {
@@ -102,7 +103,8 @@ function terminateProcessGroup(signal) {
 
 async function devToolsPort() {
   const portFile = resolve(profilePath, "DevToolsActivePort");
-  const deadline = Date.now() + 8_000;
+  const startedAt = Date.now();
+  const deadline = startedAt + DEVTOOLS_STARTUP_TIMEOUT_MS;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
       throw new Error(`Browser exited during unpacked-extension smoke test (code ${child.exitCode}).\n${stderrTail()}`);
@@ -114,7 +116,11 @@ async function devToolsPort() {
     } catch { /* browser has not exposed DevTools yet */ }
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
   }
-  throw new Error(`Browser did not expose DevTools during unpacked-extension smoke test.\n${stderrTail()}`);
+  const elapsedMs = Date.now() - startedAt;
+  throw new Error(
+    `Browser did not expose DevTools within ${DEVTOOLS_STARTUP_TIMEOUT_MS} ms during unpacked-extension smoke test ` +
+    `(elapsed=${elapsedMs} ms, exitCode=${String(child.exitCode)}, portFileExists=${existsSync(portFile)}).\n${stderrTail()}`,
+  );
 }
 
 async function verifyUnpackedLoad() {
