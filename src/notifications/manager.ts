@@ -210,8 +210,10 @@ export class NotificationManager {
       try {
         await this.#browser.send(notification);
         report.browser = "DELIVERED";
+        report.browserAt = this.#now();
       } catch {
         report.browser = "FAILED";
+        report.browserAt = this.#now();
         failed = true;
       }
     }
@@ -220,8 +222,10 @@ export class NotificationManager {
       try {
         await this.#sound.send(notification);
         report.sound = "DELIVERED";
+        report.soundAt = this.#now();
       } catch {
         report.sound = "FAILED";
+        report.soundAt = this.#now();
         failed = true;
       }
     }
@@ -229,6 +233,7 @@ export class NotificationManager {
     let settings: TelegramSettingsState | undefined;
     try { settings = await this.#settings.load(); } catch {
       report.telegram = "FAILED";
+      report.telegramAt = this.#now();
       failed = true;
     }
 
@@ -237,9 +242,11 @@ export class NotificationManager {
       try {
         await this.#telegram.send(settings.botToken, settings.destination, telegramNotificationText(notification));
         report.telegram = "DELIVERED";
+        report.telegramAt = this.#now();
         await this.#saveHealth({ status: "HEALTHY", checkedAt: this.#now() }, identity);
       } catch (error) {
         report.telegram = "FAILED";
+        report.telegramAt = this.#now();
         failed = true;
         const code = error instanceof TelegramDeliveryError ? error.code : "API_ERROR";
         await this.#saveHealth({ status: "ERROR", checkedAt: this.#now(), code }, identity);

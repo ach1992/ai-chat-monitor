@@ -58,6 +58,45 @@ test("observation validates bounded response metadata and read-only action hints
   assert.equal(isContentObservation({ ...base, type: "content:observation", observation: { ...observation, visibility: "background-ish" } }), false);
   assert.equal(isContentObservation({ ...base, type: "content:observation", observation: { ...observation, stopControlPresent: true } }), true);
   assert.equal(isContentObservation({ ...base, type: "content:observation", observation: { ...observation, stopControlPresent: "yes" } }), false);
+  assert.equal(isContentObservation({
+    ...base,
+    type: "content:observation",
+    observation: {
+      ...observation,
+      responseCompletion: {
+        serial: 1,
+        transport: "CHATGPT_CONVERSATION_STREAM",
+        visibility: "hidden",
+        completedAt: 190,
+      },
+    },
+  }), true);
+  assert.equal(isContentObservation({
+    ...base,
+    type: "content:observation",
+    observation: {
+      ...observation,
+      responseCompletion: {
+        serial: 0,
+        transport: "CHATGPT_CONVERSATION_STREAM",
+        visibility: "hidden",
+        completedAt: 190,
+      },
+    },
+  }), false);
+  assert.equal(isContentObservation({
+    ...base,
+    type: "content:observation",
+    observation: {
+      ...observation,
+      responseCompletion: {
+        serial: 1,
+        transport: "OTHER",
+        visibility: "hidden",
+        completedAt: 190,
+      },
+    },
+  }), false);
   assert.equal(
     isContentObservation({
       ...base,

@@ -16,15 +16,21 @@ export type HiddenMarkerHealth = "DETECTED" | "MISSING" | "MALFORMED";
 export interface HiddenMonitoringDiagnosticSnapshot {
   backgroundedAt: number;
   foregroundedAt?: number;
+  tabActivatedAt?: number;
+  visibleObservedAt?: number;
   baselineAssistantFingerprint?: string;
   baselineAssistantTextLength?: number;
   hiddenObservationCount: number;
+  firstHiddenObservationAt?: number;
   lastHiddenObservationAt?: number;
+  firstAssistantChangeAt?: number;
+  firstMarkerDetectedAt?: number;
   hiddenAssistantTextLength?: number;
   assistantChanged: boolean;
   hiddenGeneration?: GenerationState;
   hiddenStopControlPresent?: boolean;
   hiddenMarkerHealth?: HiddenMarkerHealth;
+  transportCompletedAt?: number;
 }
 
 export interface AgentRegistration {
@@ -147,16 +153,22 @@ function validHiddenDiagnostic(value: unknown): value is HiddenMonitoringDiagnos
     typeof candidate.backgroundedAt === "number" &&
     Number.isFinite(candidate.backgroundedAt) &&
     validOptionalFinite(candidate.foregroundedAt) &&
+    validOptionalFinite(candidate.tabActivatedAt) &&
+    validOptionalFinite(candidate.visibleObservedAt) &&
     validOptionalFingerprint(candidate.baselineAssistantFingerprint) &&
     validOptionalNonNegativeInteger(candidate.baselineAssistantTextLength) &&
     Number.isInteger(candidate.hiddenObservationCount) &&
     (candidate.hiddenObservationCount as number) >= 0 &&
+    validOptionalFinite(candidate.firstHiddenObservationAt) &&
     validOptionalFinite(candidate.lastHiddenObservationAt) &&
+    validOptionalFinite(candidate.firstAssistantChangeAt) &&
+    validOptionalFinite(candidate.firstMarkerDetectedAt) &&
     validOptionalNonNegativeInteger(candidate.hiddenAssistantTextLength) &&
     typeof candidate.assistantChanged === "boolean" &&
     validOptionalGeneration(candidate.hiddenGeneration) &&
     (candidate.hiddenStopControlPresent === undefined || typeof candidate.hiddenStopControlPresent === "boolean") &&
-    validOptionalMarkerHealth(candidate.hiddenMarkerHealth)
+    validOptionalMarkerHealth(candidate.hiddenMarkerHealth) &&
+    validOptionalFinite(candidate.transportCompletedAt)
   );
 }
 
@@ -348,12 +360,16 @@ export class SessionRegistry {
       const changedNow = existingBaselineFingerprint !== undefined &&
         currentFingerprint !== undefined &&
         currentFingerprint !== existingBaselineFingerprint;
+      const markerDetectedNow = event.markerHealth === "DETECTED";
       hiddenDiagnostic = {
         ...prior,
         ...(baselineFingerprint === undefined ? {} : { baselineAssistantFingerprint: baselineFingerprint }),
         ...(baselineTextLength === undefined ? {} : { baselineAssistantTextLength: baselineTextLength }),
         hiddenObservationCount: prior.hiddenObservationCount + 1,
+        ...(prior.firstHiddenObservationAt === undefined ? { firstHiddenObservationAt: event.observation.observedAt } : {}),
         lastHiddenObservationAt: event.observation.observedAt,
+        ...(changedNow && prior.firstAssistantChangeAt === undefined ? { firstAssistantChangeAt: event.observation.observedAt } : {}),
+        ...(markerDetectedNow && prior.firstMarkerDetectedAt === undefined ? { firstMarkerDetectedAt: event.observation.observedAt } : {}),
         assistantChanged: prior.assistantChanged || changedNow,
         hiddenGeneration: event.observation.generation,
         ...(event.observation.stopControlPresent === undefined
@@ -362,8 +378,31 @@ export class SessionRegistry {
         ...(event.markerHealth === undefined ? {} : { hiddenMarkerHealth: event.markerHealth }),
         ...(assistant?.textLength === undefined ? {} : { hiddenAssistantTextLength: assistant.textLength }),
       };
-    } else if (hiddenDiagnostic !== undefined && hiddenDiagnostic.foregroundedAt === undefined) {
-      hiddenDiagnostic = { ...hiddenDiagnostic, foregroundedAt: event.observation.observedAt };
+    }
+
+    const responseCompletion = event.observation.responseCompletion;
+    if (responseCompletion?.visibility === "hidden") {
+      const assistant = session.observation?.latestAssistant;
+      const prior = hiddenDiagnostic ?? {
+        backgroundedAt: responseCompletion.completedAt,
+        ...(assistant?.fingerprint === undefined ? {} : { baselineAssistantFingerprint: assistant.fingerprint }),
+        ...(assistant?.textLength === undefined ? {} : { baselineAssistantTextLength: assistant.textLength }),
+        hiddenObservationCount: 0,
+        assistantChanged: false,
+      };
+      hiddenDiagnostic = {
+        ...prior,
+        transportCompletedAt: responseCompletion.completedAt,
+      };
+    }
+
+    if (event.observation.visibility === "visible" && hiddenDiagnostic !== undefined) {
+      const visibleObservedAt = hiddenDiagnostic.visibleObservedAt ?? event.observation.observedAt;
+      hiddenDiagnostic = {
+        ...hiddenDiagnostic,
+        visibleObservedAt,
+        foregroundedAt: hiddenDiagnostic.foregroundedAt ?? visibleObservedAt,
+      };
     }
 
     const next: SessionSnapshot = {
@@ -425,17 +464,16 @@ export class SessionRegistry {
     if (session === undefined || hiddenDiagnostic === undefined || !Number.isFinite(at)) return false;
     this.#sessions.set(tabId, {
       ...session,
-      hiddenDiagnostic: { ...hiddenDiagnostic, foregroundedAt: at },
+      hiddenDiagnostic: {
+        ...hiddenDiagnostic,
+        tabActivatedAt: hiddenDiagnostic.tabActivatedAt ?? at,
+        foregroundedAt: hiddenDiagnostic.foregroundedAt ?? at,
+      },
     });
     return true;
   }
 
   invalidateTab(tabId: number): void {
-    // A tabs.onUpdated("loading") event does not identify which exact document caused it.
-    // Drop the live session so stale observations fail closed, but do not tombstone the
-    // document here: the same exact content agent may already have registered before the
-    // loading callback is delivered and must be allowed to reconnect. True document
-    // replacement is still retired by registerAgent when a newer document takes over.
     this.#sessions.delete(tabId);
   }
 

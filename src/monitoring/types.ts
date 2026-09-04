@@ -81,7 +81,7 @@ export interface MonitoringRuntimeStatus {
   tabId: number;
   conversationId?: string;
   enabled: boolean;
-  generation?: GenerationState;
+  generation?: GenerationState | undefined;
   pageState: MonitoringPageState;
   blockingReasons: BlockingReason[];
   semanticDecision?: ConversationProtocolDecision;

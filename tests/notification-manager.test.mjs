@@ -145,7 +145,14 @@ test("browser, sound, and inherited Telegram can coexist for one monitoring even
   });
 
   const report = await manager.deliver(notification({ soundEnabled: true }));
-  assert.deepEqual(report, { browser: "DELIVERED", sound: "DELIVERED", telegram: "DELIVERED" });
+  assert.deepEqual(report, {
+    browser: "DELIVERED",
+    sound: "DELIVERED",
+    telegram: "DELIVERED",
+    browserAt: 42,
+    soundAt: 42,
+    telegramAt: 42,
+  });
   assert.equal(browser.length, 1);
   assert.equal(sound.length, 1);
   assert.equal(telegram.length, 1);
@@ -182,7 +189,13 @@ test("notification channel failure is isolated from monitoring state", async () 
     () => manager.deliver(notification()),
     (error) => {
       assert.equal(error instanceof NotificationDeliveryError, true);
-      assert.deepEqual(error.report, { browser: "DELIVERED", sound: "NOT_REQUESTED", telegram: "FAILED" });
+      assert.deepEqual(error.report, {
+        browser: "DELIVERED",
+        sound: "NOT_REQUESTED",
+        telegram: "FAILED",
+        browserAt: 99,
+        telegramAt: 99,
+      });
       return true;
     },
   );
@@ -196,13 +209,19 @@ test("Browser channel failure is reported without losing other channel outcomes"
     settings,
     browser: { async send() { throw new Error("browser unavailable"); } },
     telegram: { async send() { throw new Error("Telegram must not be used"); } },
+    now: () => 77,
   });
 
   await assert.rejects(
     () => manager.deliver(notification()),
     (error) => {
       assert.equal(error instanceof NotificationDeliveryError, true);
-      assert.deepEqual(error.report, { browser: "FAILED", sound: "NOT_REQUESTED", telegram: "NOT_REQUESTED" });
+      assert.deepEqual(error.report, {
+        browser: "FAILED",
+        sound: "NOT_REQUESTED",
+        telegram: "NOT_REQUESTED",
+        browserAt: 77,
+      });
       return true;
     },
   );

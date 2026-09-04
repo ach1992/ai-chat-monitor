@@ -21,8 +21,25 @@ namespace GuardianContentAgent {
     protocolVersion: 2;
   }
 
+  interface ResponseCompletionEvidence {
+    serial: number;
+    transport: "CHATGPT_CONVERSATION_STREAM";
+    visibility: "visible" | "hidden";
+    completedAt: number;
+  }
+
+  interface ExtendedResourceTiming extends PerformanceResourceTiming {
+    contentType?: string;
+  }
+
   const FOCUS_INTENT_WINDOW_MS = 1_500;
   const PERIODIC_OBSERVATION_MS = 15_000;
+  const CHAT_RESPONSE_STREAM_PATHS = new Set([
+    "/backend-api/f/conversation",
+    "/backend-api/f/conversation/resume",
+    "/backend-api/conversation",
+    "/backend-anon/f/conversation",
+  ]);
   const adapter = new GuardianContent.BrowserChatGPTAdapter(document, location);
   const agentInstanceId = crypto.randomUUID();
   let pageEpoch = 1;
@@ -34,6 +51,8 @@ namespace GuardianContentAgent {
   let outboundQueue: Promise<void> = Promise.resolve();
   let reconnectInFlight: Promise<boolean> | undefined;
   let lastKeyboardFocusIntentAt: number | undefined;
+  let responseCompletionSerial = 0;
+  let pendingResponseCompletion: ResponseCompletionEvidence | undefined;
 
   function nextSequence(): number { sequence += 1; return sequence; }
 
@@ -90,6 +109,7 @@ namespace GuardianContentAgent {
     pageEpoch += 1;
     lastRouteKey = nextRouteKey;
     observationGeneration += 1;
+    pendingResponseCompletion = undefined;
     if (observationTimer !== undefined) {
       clearTimeout(observationTimer);
       observationTimer = undefined;
@@ -121,8 +141,12 @@ namespace GuardianContentAgent {
 
   async function observe(expectedGeneration: number): Promise<void> {
     const observedEpoch = pageEpoch;
-    const observation = await adapter.observe();
-    if (expectedGeneration !== observationGeneration || observedEpoch !== pageEpoch || observation.routeKey !== lastRouteKey) return;
+    const sampled = await adapter.observe();
+    if (expectedGeneration !== observationGeneration || observedEpoch !== pageEpoch || sampled.routeKey !== lastRouteKey) return;
+    const completion = pendingResponseCompletion;
+    const observation = completion === undefined
+      ? sampled
+      : { ...sampled, responseCompletion: structuredClone(completion) };
     const response = await send({
       type: "content:observation",
       protocolVersion: GuardianContent.PROTOCOL_VERSION,
@@ -132,12 +156,13 @@ namespace GuardianContentAgent {
       observation,
       sentAt: Date.now(),
     });
-    if (response?.type === "background:agent-ack" && response.accepted) return;
+    if (response?.type === "background:agent-ack" && response.accepted) {
+      if (completion !== undefined && pendingResponseCompletion?.serial === completion.serial) {
+        pendingResponseCompletion = undefined;
+      }
+      return;
+    }
 
-    // MV3 service workers can restart independently of a still-running content
-    // script. If the background registry lost this exact document, do not wait
-    // for Side Panel polling or tab activation to repair the session. Reannounce
-    // once, then immediately resample the latest DOM state after a successful ack.
     const recoverable = response === undefined || (response.type === "background:error" && response.code === "STALE_EVENT");
     if (!recoverable) return;
     const recovered = await ensureAgentReconnected();
@@ -162,10 +187,6 @@ namespace GuardianContentAgent {
       observationTimer = undefined;
     }
 
-    // Chrome throttles timer callbacks in background tabs. DOM mutations still reach
-    // the content script while a hidden page remains runnable, so coalesce those
-    // mutations in a microtask instead of making monitoring depend on a throttled
-    // setTimeout. Foreground tabs keep the existing debounce behavior.
     if (document.visibilityState === "hidden") {
       if (observationMicrotaskQueued) return;
       observationMicrotaskQueued = true;
@@ -199,6 +220,40 @@ namespace GuardianContentAgent {
       interaction,
       sentAt: Date.now(),
     });
+    scheduleObservation(0);
+  }
+
+  function responseStreamResource(entry: PerformanceResourceTiming): boolean {
+    if (entry.entryType !== "resource") return false;
+    if (entry.initiatorType !== "fetch" && entry.initiatorType !== "xmlhttprequest") return false;
+    try {
+      const url = new URL(entry.name, location.href);
+      if (url.origin !== location.origin || !CHAT_RESPONSE_STREAM_PATHS.has(url.pathname)) return false;
+    } catch {
+      return false;
+    }
+    const status = entry.responseStatus;
+    if (typeof status === "number" && status !== 0 && (status < 200 || status >= 300)) return false;
+    const contentType = (entry as ExtendedResourceTiming).contentType;
+    if (typeof contentType === "string" && contentType.length > 0 && contentType !== "text/event-stream") return false;
+    return Number.isFinite(entry.responseEnd) && entry.responseEnd > 0;
+  }
+
+  function responseCompletedAt(entry: PerformanceResourceTiming): number {
+    const absolute = performance.timeOrigin + entry.responseEnd;
+    return Number.isFinite(absolute) && absolute > 0 ? Math.round(absolute) : Date.now();
+  }
+
+  function recordResponseCompletion(entry: PerformanceResourceTiming): void {
+    const nextRouteKey = adapter.currentRouteKey();
+    if (nextRouteKey !== lastRouteKey) return;
+    responseCompletionSerial += 1;
+    pendingResponseCompletion = {
+      serial: responseCompletionSerial,
+      transport: "CHATGPT_CONVERSATION_STREAM",
+      visibility: document.visibilityState === "hidden" ? "hidden" : "visible",
+      completedAt: responseCompletedAt(entry),
+    };
     scheduleObservation(0);
   }
 
@@ -241,6 +296,19 @@ namespace GuardianContentAgent {
     attributes: true,
     attributeFilter: ["aria-label", "aria-busy", "data-testid", "data-message-author-role", "disabled"],
   });
+
+  if (typeof PerformanceObserver === "function") {
+    try {
+      const transportObserver = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          if (entry instanceof PerformanceResourceTiming && responseStreamResource(entry)) recordResponseCompletion(entry);
+        }
+      });
+      transportObserver.observe({ type: "resource" });
+    } catch {
+      // Resource timing is advisory completion evidence. DOM monitoring remains the fallback.
+    }
+  }
 
   for (const eventName of ["beforeinput", "input", "paste", "compositionstart"] as const) {
     document.addEventListener(eventName, (event) => {

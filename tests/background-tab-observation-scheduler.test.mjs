@@ -36,6 +36,7 @@ async function loadContentAgent(initialVisibility) {
   const documentListeners = new Map();
   let nextTimerId = 1;
   let mutationCallback;
+  let resourceCallback;
   const state = { visibilityState: initialVisibility, observation: observation(), rejectNextObservation: false };
 
   class FakeAdapter {
@@ -51,6 +52,24 @@ async function loadContentAgent(initialVisibility) {
 
   class FakeMutationObserver {
     constructor(callback) { mutationCallback = callback; }
+    observe() {}
+  }
+
+  class FakePerformanceResourceTiming {
+    constructor(overrides = {}) {
+      Object.assign(this, {
+        entryType: "resource",
+        name: "https://chatgpt.com/backend-api/f/conversation",
+        initiatorType: "fetch",
+        responseEnd: 250,
+        responseStatus: 200,
+        contentType: "text/event-stream",
+      }, overrides);
+    }
+  }
+
+  class FakePerformanceObserver {
+    constructor(callback) { resourceCallback = callback; }
     observe() {}
   }
 
@@ -105,12 +124,15 @@ async function loadContentAgent(initialVisibility) {
   const context = {
     GuardianContent: { PROTOCOL_VERSION: 2, BrowserChatGPTAdapter: FakeAdapter },
     MutationObserver: FakeMutationObserver,
+    PerformanceObserver: FakePerformanceObserver,
+    PerformanceResourceTiming: FakePerformanceResourceTiming,
+    URL,
     chrome,
     crypto: { randomUUID: () => "agent-test" },
     Date,
     document,
-    location: { pathname: "/c/chat-bg" },
-    performance: { now: () => 0 },
+    location: { href: "https://chatgpt.com/c/chat-bg", origin: "https://chatgpt.com", pathname: "/c/chat-bg" },
+    performance: { now: () => 0, timeOrigin: 1_000 },
     Promise,
     queueMicrotask,
     structuredClone,
@@ -126,7 +148,13 @@ async function loadContentAgent(initialVisibility) {
       assert.equal(typeof mutationCallback, "function");
       mutationCallback([], undefined);
     },
+    resource(overrides = {}) {
+      assert.equal(typeof resourceCallback, "function");
+      const entry = new FakePerformanceResourceTiming(overrides);
+      resourceCallback({ getEntries: () => [entry] }, undefined);
+    },
     setVisibility(value) { state.visibilityState = value; },
+    setObservation(value) { state.observation = structuredClone(value); },
     rejectNextObservation() { state.rejectNextObservation = true; },
     fireDocumentEvent(type) {
       for (const listener of documentListeners.get(type) ?? []) listener({ type });
@@ -141,6 +169,10 @@ async function loadContentAgent(initialVisibility) {
 
 function observationMessages(sent) {
   return sent.filter((message) => message.type === "content:observation");
+}
+
+function completionObservations(sent) {
+  return observationMessages(sent).filter((message) => message.observation?.responseCompletion !== undefined);
 }
 
 test("hidden-tab DOM mutations produce observations without timer callbacks", async () => {
@@ -180,7 +212,6 @@ test("visibility changes request an immediate catch-up observation", async () =>
   assert.equal(observationMessages(agent.sent).length, 1);
 });
 
-
 test("hidden agent self-heals a lost background session without tab activation", async () => {
   const agent = await loadContentAgent("hidden");
   agent.sent.length = 0;
@@ -193,4 +224,46 @@ test("hidden agent self-heals a lost background session without tab activation",
     agent.sent.map((message) => message.type),
     ["content:observation", "content:hello", "content:observation"],
   );
+});
+
+test("conversation transport completion is bound to a hidden observation even when assistant DOM stays stale", async () => {
+  const agent = await loadContentAgent("hidden");
+  agent.sent.length = 0;
+  agent.setObservation({
+    ...observation(),
+    generation: "IDLE",
+    latestAssistant: {
+      normalizedText: "old",
+      textLength: 3,
+      fingerprint: "b".repeat(64),
+      domMessageId: "assistant-old",
+    },
+  });
+
+  agent.resource();
+  await flushAsyncWork();
+
+  const completions = completionObservations(agent.sent);
+  assert.equal(completions.length, 1);
+  assert.equal(completions[0].observation.latestAssistant.normalizedText, "old");
+  assert.equal(completions[0].observation.latestAssistant.textLength, 3);
+  assert.deepEqual(completions[0].observation.responseCompletion, {
+    serial: 1,
+    transport: "CHATGPT_CONVERSATION_STREAM",
+    visibility: "hidden",
+    completedAt: 1_250,
+  });
+});
+
+test("transport observer ignores prepare, cross-origin, non-stream, and failed resources", async () => {
+  const agent = await loadContentAgent("hidden");
+  agent.sent.length = 0;
+
+  agent.resource({ name: "https://chatgpt.com/backend-api/f/conversation/prepare" });
+  agent.resource({ name: "https://example.com/backend-api/f/conversation" });
+  agent.resource({ contentType: "application/json" });
+  agent.resource({ responseStatus: 500 });
+  await flushAsyncWork();
+
+  assert.equal(completionObservations(agent.sent).length, 0);
 });

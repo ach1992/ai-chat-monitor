@@ -142,14 +142,20 @@ export interface TabLifecycleStatus {
 export interface HiddenMonitoringDiagnosticView {
   backgroundedAt: number;
   foregroundedAt?: number;
+  tabActivatedAt?: number;
+  visibleObservedAt?: number;
   baselineAssistantTextLength?: number;
   hiddenObservationCount: number;
+  firstHiddenObservationAt?: number;
   lastHiddenObservationAt?: number;
+  firstAssistantChangeAt?: number;
+  firstMarkerDetectedAt?: number;
   hiddenAssistantTextLength?: number;
   assistantChanged: boolean;
   hiddenGeneration?: PageObservation["generation"];
   hiddenStopControlPresent?: boolean;
   hiddenMarkerHealth?: MonitoringRuntimeStatus["markerHealth"];
+  transportCompletedAt?: number;
 }
 
 export interface PanelStatusResponse {
