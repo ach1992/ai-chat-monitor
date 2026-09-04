@@ -21,6 +21,13 @@ namespace GuardianContentAgent {
     protocolVersion: 2;
   }
 
+  interface ResponseCompletionEvidence {
+    serial: number;
+    transport: "CHATGPT_CONVERSATION_STREAM";
+    visibility: "visible" | "hidden";
+    completedAt: number;
+  }
+
   const FOCUS_INTENT_WINDOW_MS = 1_500;
   const PERIODIC_OBSERVATION_MS = 15_000;
   const CHAT_RESPONSE_STREAM_PATHS = new Set([
@@ -40,6 +47,8 @@ namespace GuardianContentAgent {
   let outboundQueue: Promise<void> = Promise.resolve();
   let reconnectInFlight: Promise<boolean> | undefined;
   let lastKeyboardFocusIntentAt: number | undefined;
+  let responseCompletionSerial = 0;
+  let pendingResponseCompletion: ResponseCompletionEvidence | undefined;
 
   function nextSequence(): number { sequence += 1; return sequence; }
 
@@ -96,6 +105,7 @@ namespace GuardianContentAgent {
     pageEpoch += 1;
     lastRouteKey = nextRouteKey;
     observationGeneration += 1;
+    pendingResponseCompletion = undefined;
     if (observationTimer !== undefined) {
       clearTimeout(observationTimer);
       observationTimer = undefined;
@@ -127,8 +137,12 @@ namespace GuardianContentAgent {
 
   async function observe(expectedGeneration: number): Promise<void> {
     const observedEpoch = pageEpoch;
-    const observation = await adapter.observe();
-    if (expectedGeneration !== observationGeneration || observedEpoch !== pageEpoch || observation.routeKey !== lastRouteKey) return;
+    const sampled = await adapter.observe();
+    if (expectedGeneration !== observationGeneration || observedEpoch !== pageEpoch || sampled.routeKey !== lastRouteKey) return;
+    const completion = pendingResponseCompletion;
+    const observation = completion === undefined
+      ? sampled
+      : { ...sampled, responseCompletion: structuredClone(completion) };
     const response = await send({
       type: "content:observation",
       protocolVersion: GuardianContent.PROTOCOL_VERSION,
@@ -138,7 +152,12 @@ namespace GuardianContentAgent {
       observation,
       sentAt: Date.now(),
     });
-    if (response?.type === "background:agent-ack" && response.accepted) return;
+    if (response?.type === "background:agent-ack" && response.accepted) {
+      if (completion !== undefined && pendingResponseCompletion?.serial === completion.serial) {
+        pendingResponseCompletion = undefined;
+      }
+      return;
+    }
 
     // MV3 service workers can restart independently of a still-running content
     // script. If the background registry lost this exact document, do not wait
@@ -229,34 +248,17 @@ namespace GuardianContentAgent {
     return Number.isFinite(absolute) && absolute > 0 ? Math.round(absolute) : Date.now();
   }
 
-  async function emitResponseComplete(entry: PerformanceResourceTiming): Promise<void> {
+  function recordResponseCompletion(entry: PerformanceResourceTiming): void {
     const nextRouteKey = adapter.currentRouteKey();
-    if (nextRouteKey !== lastRouteKey) {
-      const navigated = await emitNavigation(nextRouteKey);
-      if (!navigated) return;
-    }
-    const conversationId = adapter.currentConversationId();
-    const sentAt = Date.now();
-    const response = await send({
-      type: "content:response-complete",
-      protocolVersion: GuardianContent.PROTOCOL_VERSION,
-      agentInstanceId,
-      pageEpoch,
-      sequence: nextSequence(),
-      routeKey: adapter.currentRouteKey(),
-      ...(conversationId === undefined ? {} : { conversationId }),
+    if (nextRouteKey !== lastRouteKey) return;
+    responseCompletionSerial += 1;
+    pendingResponseCompletion = {
+      serial: responseCompletionSerial,
       transport: "CHATGPT_CONVERSATION_STREAM",
       visibility: document.visibilityState === "hidden" ? "hidden" : "visible",
       completedAt: responseCompletedAt(entry),
-      sentAt,
-    });
-    const recoverable = response === undefined || (response.type === "background:error" && response.code === "STALE_EVENT");
-    if (recoverable) {
-      const recovered = await ensureAgentReconnected();
-      if (recovered) scheduleObservation(0);
-    } else {
-      scheduleObservation(0);
-    }
+    };
+    scheduleObservation(0);
   }
 
   function consumeRecentKeyboardFocusIntent(now: number): boolean {
@@ -303,7 +305,7 @@ namespace GuardianContentAgent {
     try {
       const transportObserver = new PerformanceObserver((list) => {
         for (const entry of list.getEntries()) {
-          if (entry instanceof PerformanceResourceTiming && responseStreamResource(entry)) void emitResponseComplete(entry);
+          if (entry instanceof PerformanceResourceTiming && responseStreamResource(entry)) recordResponseCompletion(entry);
         }
       });
       transportObserver.observe({ type: "resource" });
