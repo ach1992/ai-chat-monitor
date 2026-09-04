@@ -29,6 +29,7 @@ namespace GuardianContentAgent {
   let sequence = 0;
   let lastRouteKey = adapter.currentRouteKey();
   let observationTimer: number | undefined;
+  let observationMicrotaskQueued = false;
   let observationGeneration = 0;
   let outboundQueue: Promise<void> = Promise.resolve();
   let lastKeyboardFocusIntentAt: number | undefined;
@@ -134,8 +135,27 @@ namespace GuardianContentAgent {
 
   function scheduleObservation(delayMs = 300): void {
     observationGeneration += 1;
+    if (observationTimer !== undefined) {
+      clearTimeout(observationTimer);
+      observationTimer = undefined;
+    }
+
+    // Chrome throttles timer callbacks in background tabs. DOM mutations still reach
+    // the content script while a hidden page remains runnable, so coalesce those
+    // mutations in a microtask instead of making monitoring depend on a throttled
+    // setTimeout. Foreground tabs keep the existing debounce behavior.
+    if (document.visibilityState === "hidden") {
+      if (observationMicrotaskQueued) return;
+      observationMicrotaskQueued = true;
+      queueMicrotask(() => {
+        observationMicrotaskQueued = false;
+        const expectedGeneration = observationGeneration;
+        void observe(expectedGeneration);
+      });
+      return;
+    }
+
     const expectedGeneration = observationGeneration;
-    if (observationTimer !== undefined) clearTimeout(observationTimer);
     observationTimer = window.setTimeout(() => {
       observationTimer = undefined;
       void observe(expectedGeneration);
@@ -231,6 +251,10 @@ namespace GuardianContentAgent {
 
   window.addEventListener("popstate", checkRoute);
   window.addEventListener("hashchange", checkRoute);
+  document.addEventListener("visibilitychange", () => {
+    checkRoute();
+    scheduleObservation(0);
+  });
   window.setInterval(checkRoute, 500);
   window.setInterval(() => scheduleObservation(0), PERIODIC_OBSERVATION_MS);
   void announceAgent().then(() => scheduleObservation(0));
