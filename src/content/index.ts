@@ -28,6 +28,10 @@ namespace GuardianContentAgent {
     completedAt: number;
   }
 
+  interface ExtendedResourceTiming extends PerformanceResourceTiming {
+    contentType?: string;
+  }
+
   const FOCUS_INTENT_WINDOW_MS = 1_500;
   const PERIODIC_OBSERVATION_MS = 15_000;
   const CHAT_RESPONSE_STREAM_PATHS = new Set([
@@ -159,10 +163,6 @@ namespace GuardianContentAgent {
       return;
     }
 
-    // MV3 service workers can restart independently of a still-running content
-    // script. If the background registry lost this exact document, do not wait
-    // for Side Panel polling or tab activation to repair the session. Reannounce
-    // once, then immediately resample the latest DOM state after a successful ack.
     const recoverable = response === undefined || (response.type === "background:error" && response.code === "STALE_EVENT");
     if (!recoverable) return;
     const recovered = await ensureAgentReconnected();
@@ -187,10 +187,6 @@ namespace GuardianContentAgent {
       observationTimer = undefined;
     }
 
-    // Chrome throttles timer callbacks in background tabs. DOM mutations still reach
-    // the content script while a hidden page remains runnable, so coalesce those
-    // mutations in a microtask instead of making monitoring depend on a throttled
-    // setTimeout. Foreground tabs keep the existing debounce behavior.
     if (document.visibilityState === "hidden") {
       if (observationMicrotaskQueued) return;
       observationMicrotaskQueued = true;
@@ -238,7 +234,7 @@ namespace GuardianContentAgent {
     }
     const status = entry.responseStatus;
     if (typeof status === "number" && status !== 0 && (status < 200 || status >= 300)) return false;
-    const contentType = entry.contentType;
+    const contentType = (entry as ExtendedResourceTiming).contentType;
     if (typeof contentType === "string" && contentType.length > 0 && contentType !== "text/event-stream") return false;
     return Number.isFinite(entry.responseEnd) && entry.responseEnd > 0;
   }
