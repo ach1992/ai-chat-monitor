@@ -171,8 +171,8 @@ function observationMessages(sent) {
   return sent.filter((message) => message.type === "content:observation");
 }
 
-function responseCompleteMessages(sent) {
-  return sent.filter((message) => message.type === "content:response-complete");
+function completionObservations(sent) {
+  return observationMessages(sent).filter((message) => message.observation?.responseCompletion !== undefined);
 }
 
 test("hidden-tab DOM mutations produce observations without timer callbacks", async () => {
@@ -226,7 +226,7 @@ test("hidden agent self-heals a lost background session without tab activation",
   );
 });
 
-test("conversation transport completion is emitted while hidden even when assistant DOM stays stale", async () => {
+test("conversation transport completion is bound to a hidden observation even when assistant DOM stays stale", async () => {
   const agent = await loadContentAgent("hidden");
   agent.sent.length = 0;
   agent.setObservation({
@@ -243,24 +243,16 @@ test("conversation transport completion is emitted while hidden even when assist
   agent.resource();
   await flushAsyncWork();
 
-  const completions = responseCompleteMessages(agent.sent);
+  const completions = completionObservations(agent.sent);
   assert.equal(completions.length, 1);
-  assert.deepEqual(
-    {
-      routeKey: completions[0].routeKey,
-      conversationId: completions[0].conversationId,
-      transport: completions[0].transport,
-      visibility: completions[0].visibility,
-      completedAt: completions[0].completedAt,
-    },
-    {
-      routeKey: "/c/chat-bg",
-      conversationId: "chat-bg",
-      transport: "CHATGPT_CONVERSATION_STREAM",
-      visibility: "hidden",
-      completedAt: 1_250,
-    },
-  );
+  assert.equal(completions[0].observation.latestAssistant.normalizedText, "old");
+  assert.equal(completions[0].observation.latestAssistant.textLength, 3);
+  assert.deepEqual(completions[0].observation.responseCompletion, {
+    serial: 1,
+    transport: "CHATGPT_CONVERSATION_STREAM",
+    visibility: "hidden",
+    completedAt: 1_250,
+  });
 });
 
 test("transport observer ignores prepare, cross-origin, non-stream, and failed resources", async () => {
@@ -273,5 +265,5 @@ test("transport observer ignores prepare, cross-origin, non-stream, and failed r
   agent.resource({ responseStatus: 500 });
   await flushAsyncWork();
 
-  assert.equal(responseCompleteMessages(agent.sent).length, 0);
+  assert.equal(completionObservations(agent.sent).length, 0);
 });
