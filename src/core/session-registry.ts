@@ -16,15 +16,28 @@ export type HiddenMarkerHealth = "DETECTED" | "MISSING" | "MALFORMED";
 export interface HiddenMonitoringDiagnosticSnapshot {
   backgroundedAt: number;
   foregroundedAt?: number;
+  tabActivatedAt?: number;
+  visibleObservedAt?: number;
   baselineAssistantFingerprint?: string;
   baselineAssistantTextLength?: number;
   hiddenObservationCount: number;
+  firstHiddenObservationAt?: number;
   lastHiddenObservationAt?: number;
+  firstAssistantChangeAt?: number;
+  firstMarkerDetectedAt?: number;
   hiddenAssistantTextLength?: number;
   assistantChanged: boolean;
   hiddenGeneration?: GenerationState;
   hiddenStopControlPresent?: boolean;
   hiddenMarkerHealth?: HiddenMarkerHealth;
+  transportCompletedAt?: number;
+}
+
+export interface ResponseCompletionSnapshot {
+  sequence: number;
+  completedAt: number;
+  visibility: "visible" | "hidden";
+  transport: "CHATGPT_CONVERSATION_STREAM";
 }
 
 export interface AgentRegistration {
@@ -69,6 +82,20 @@ export interface InteractionEvent {
   sentAt: number;
 }
 
+export interface ResponseCompletionEvent {
+  tabId: number;
+  documentId: string;
+  agentInstanceId: string;
+  pageEpoch: number;
+  sequence: number;
+  routeKey: string;
+  conversationId?: string;
+  transport: "CHATGPT_CONVERSATION_STREAM";
+  visibility: "visible" | "hidden";
+  completedAt: number;
+  sentAt: number;
+}
+
 export interface SessionSnapshot {
   tabId: number;
   documentId: string;
@@ -82,6 +109,7 @@ export interface SessionSnapshot {
   lastUserInteractionAt?: number;
   observation?: PageObservation;
   lastObservationVisibility?: PageObservation["visibility"];
+  lastResponseCompletion?: ResponseCompletionSnapshot;
   hiddenDiagnostic?: HiddenMonitoringDiagnosticSnapshot;
 }
 
@@ -147,16 +175,33 @@ function validHiddenDiagnostic(value: unknown): value is HiddenMonitoringDiagnos
     typeof candidate.backgroundedAt === "number" &&
     Number.isFinite(candidate.backgroundedAt) &&
     validOptionalFinite(candidate.foregroundedAt) &&
+    validOptionalFinite(candidate.tabActivatedAt) &&
+    validOptionalFinite(candidate.visibleObservedAt) &&
     validOptionalFingerprint(candidate.baselineAssistantFingerprint) &&
     validOptionalNonNegativeInteger(candidate.baselineAssistantTextLength) &&
     Number.isInteger(candidate.hiddenObservationCount) &&
     (candidate.hiddenObservationCount as number) >= 0 &&
+    validOptionalFinite(candidate.firstHiddenObservationAt) &&
     validOptionalFinite(candidate.lastHiddenObservationAt) &&
+    validOptionalFinite(candidate.firstAssistantChangeAt) &&
+    validOptionalFinite(candidate.firstMarkerDetectedAt) &&
     validOptionalNonNegativeInteger(candidate.hiddenAssistantTextLength) &&
     typeof candidate.assistantChanged === "boolean" &&
     validOptionalGeneration(candidate.hiddenGeneration) &&
     (candidate.hiddenStopControlPresent === undefined || typeof candidate.hiddenStopControlPresent === "boolean") &&
-    validOptionalMarkerHealth(candidate.hiddenMarkerHealth)
+    validOptionalMarkerHealth(candidate.hiddenMarkerHealth) &&
+    validOptionalFinite(candidate.transportCompletedAt)
+  );
+}
+
+function validResponseCompletion(value: unknown): value is ResponseCompletionSnapshot {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Partial<ResponseCompletionSnapshot>;
+  return (
+    Number.isInteger(candidate.sequence) && (candidate.sequence as number) >= 1 &&
+    typeof candidate.completedAt === "number" && Number.isFinite(candidate.completedAt) && candidate.completedAt > 0 &&
+    (candidate.visibility === "visible" || candidate.visibility === "hidden") &&
+    candidate.transport === "CHATGPT_CONVERSATION_STREAM"
   );
 }
 
@@ -176,7 +221,8 @@ function validSnapshot(session: SessionSnapshot): boolean {
     session.routeKey.length > 0 &&
     Number.isFinite(session.registeredAt) &&
     Number.isFinite(session.lastSeenAt) &&
-    validOptionalVisibility(session.lastObservationVisibility)
+    validOptionalVisibility(session.lastObservationVisibility) &&
+    (session.lastResponseCompletion === undefined || validResponseCompletion(session.lastResponseCompletion))
   );
 }
 
@@ -279,6 +325,9 @@ export class SessionRegistry {
       ...(sameSessionIdentity && existing.lastObservationVisibility !== undefined
         ? { lastObservationVisibility: existing.lastObservationVisibility }
         : {}),
+      ...(sameSessionIdentity && existing.lastResponseCompletion !== undefined
+        ? { lastResponseCompletion: structuredClone(existing.lastResponseCompletion) }
+        : {}),
       ...(sameSessionIdentity && existing.lastUserInteractionAt !== undefined
         ? { lastUserInteractionAt: existing.lastUserInteractionAt }
         : {}),
@@ -348,12 +397,16 @@ export class SessionRegistry {
       const changedNow = existingBaselineFingerprint !== undefined &&
         currentFingerprint !== undefined &&
         currentFingerprint !== existingBaselineFingerprint;
+      const markerDetectedNow = event.markerHealth === "DETECTED";
       hiddenDiagnostic = {
         ...prior,
         ...(baselineFingerprint === undefined ? {} : { baselineAssistantFingerprint: baselineFingerprint }),
         ...(baselineTextLength === undefined ? {} : { baselineAssistantTextLength: baselineTextLength }),
         hiddenObservationCount: prior.hiddenObservationCount + 1,
+        ...(prior.firstHiddenObservationAt === undefined ? { firstHiddenObservationAt: event.observation.observedAt } : {}),
         lastHiddenObservationAt: event.observation.observedAt,
+        ...(changedNow && prior.firstAssistantChangeAt === undefined ? { firstAssistantChangeAt: event.observation.observedAt } : {}),
+        ...(markerDetectedNow && prior.firstMarkerDetectedAt === undefined ? { firstMarkerDetectedAt: event.observation.observedAt } : {}),
         assistantChanged: prior.assistantChanged || changedNow,
         hiddenGeneration: event.observation.generation,
         ...(event.observation.stopControlPresent === undefined
@@ -362,8 +415,13 @@ export class SessionRegistry {
         ...(event.markerHealth === undefined ? {} : { hiddenMarkerHealth: event.markerHealth }),
         ...(assistant?.textLength === undefined ? {} : { hiddenAssistantTextLength: assistant.textLength }),
       };
-    } else if (hiddenDiagnostic !== undefined && hiddenDiagnostic.foregroundedAt === undefined) {
-      hiddenDiagnostic = { ...hiddenDiagnostic, foregroundedAt: event.observation.observedAt };
+    } else if (hiddenDiagnostic !== undefined) {
+      const visibleObservedAt = hiddenDiagnostic.visibleObservedAt ?? event.observation.observedAt;
+      hiddenDiagnostic = {
+        ...hiddenDiagnostic,
+        visibleObservedAt,
+        foregroundedAt: hiddenDiagnostic.foregroundedAt ?? visibleObservedAt,
+      };
     }
 
     const next: SessionSnapshot = {
@@ -389,6 +447,45 @@ export class SessionRegistry {
       lastSequence: event.sequence,
       lastSeenAt: event.sentAt,
       lastUserInteractionAt: event.sentAt,
+    };
+    this.#sessions.set(event.tabId, next);
+    return { accepted: true, session: this.#view(next) };
+  }
+
+  applyResponseCompletion(event: ResponseCompletionEvent): SessionMutationResult {
+    const session = this.#sessions.get(event.tabId);
+    const reject = this.#sameEpochReject(session, event);
+    if (reject !== undefined) return { accepted: false, reason: reject };
+    if (session === undefined) return { accepted: false, reason: "NO_SESSION" };
+    if (event.routeKey !== session.routeKey || !optionalStringEquals(event.conversationId, session.conversationId)) {
+      return { accepted: false, reason: "IDENTITY_MISMATCH" };
+    }
+
+    let hiddenDiagnostic = session.hiddenDiagnostic;
+    if (event.visibility === "hidden") {
+      const assistant = session.observation?.latestAssistant;
+      const prior = hiddenDiagnostic ?? {
+        backgroundedAt: event.completedAt,
+        ...(assistant?.fingerprint === undefined ? {} : { baselineAssistantFingerprint: assistant.fingerprint }),
+        ...(assistant?.textLength === undefined ? {} : { baselineAssistantTextLength: assistant.textLength }),
+        hiddenObservationCount: 0,
+        assistantChanged: false,
+      };
+      hiddenDiagnostic = { ...prior, transportCompletedAt: event.completedAt };
+    }
+
+    const completion: ResponseCompletionSnapshot = {
+      sequence: event.sequence,
+      completedAt: event.completedAt,
+      visibility: event.visibility,
+      transport: event.transport,
+    };
+    const next: SessionSnapshot = {
+      ...session,
+      lastSequence: event.sequence,
+      lastSeenAt: event.sentAt,
+      lastResponseCompletion: completion,
+      ...(hiddenDiagnostic === undefined ? {} : { hiddenDiagnostic }),
     };
     this.#sessions.set(event.tabId, next);
     return { accepted: true, session: this.#view(next) };
@@ -425,7 +522,11 @@ export class SessionRegistry {
     if (session === undefined || hiddenDiagnostic === undefined || !Number.isFinite(at)) return false;
     this.#sessions.set(tabId, {
       ...session,
-      hiddenDiagnostic: { ...hiddenDiagnostic, foregroundedAt: at },
+      hiddenDiagnostic: {
+        ...hiddenDiagnostic,
+        tabActivatedAt: hiddenDiagnostic.tabActivatedAt ?? at,
+        foregroundedAt: hiddenDiagnostic.foregroundedAt ?? at,
+      },
     });
     return true;
   }
@@ -467,7 +568,7 @@ export class SessionRegistry {
 
   #sameEpochReject(
     session: SessionSnapshot | undefined,
-    event: Pick<ObservationEvent | InteractionEvent, "documentId" | "agentInstanceId" | "pageEpoch" | "sequence">,
+    event: Pick<ObservationEvent | InteractionEvent | ResponseCompletionEvent, "documentId" | "agentInstanceId" | "pageEpoch" | "sequence">,
   ): SessionEventRejectReason | undefined {
     const identityReject = this.#identityReject(session, event);
     if (identityReject !== undefined) return identityReject;
