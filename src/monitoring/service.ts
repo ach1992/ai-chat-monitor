@@ -8,7 +8,7 @@ import {
 } from "../classification/conversation-protocol.js";
 import type { ClassificationResult } from "../classification/types.js";
 import type { SessionView } from "../core/session-registry.js";
-import { defaultNotificationManager } from "../notifications/manager.js";
+import { defaultNotificationManager, NotificationDeliveryError } from "../notifications/manager.js";
 import { fetchProviderModelCatalog } from "../providers/catalog.js";
 import { createProviderManager } from "../providers/manager.js";
 import {
@@ -614,8 +614,9 @@ export class MonitoringService {
 
     const browserEnabled = policy.browserEvents.includes(type);
     const soundEnabled = policy.soundEvents.includes(type);
+    let delivery: MonitoringEvent["delivery"];
     try {
-      await defaultNotificationManager().deliver({
+      delivery = await defaultNotificationManager().deliver({
         id,
         event: type,
         title: presentation.title,
@@ -625,8 +626,16 @@ export class MonitoringService {
         conversationId,
         tabId: session.tabId,
       });
-    } catch {
-      // Delivery failures are observational and never alter monitoring state.
+    } catch (error) {
+      if (error instanceof NotificationDeliveryError) delivery = error.report;
+    }
+    if (delivery !== undefined) {
+      const deliveryAt = Date.now();
+      event.delivery = delivery;
+      event.deliveryAt = deliveryAt;
+      try { await this.#history.updateDelivery(event.id, delivery, deliveryAt); } catch {
+        // Delivery diagnostics are best effort and never alter monitoring state.
+      }
     }
   }
 

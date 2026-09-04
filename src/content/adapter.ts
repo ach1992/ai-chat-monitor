@@ -20,6 +20,7 @@ namespace GuardianContent {
     pageTitle?: string;
     visibility: "visible" | "hidden";
     generation: GenerationState;
+    stopControlPresent: boolean;
     latestUser?: {
       normalizedText: string;
       textLength: number;
@@ -353,6 +354,7 @@ namespace GuardianContent {
         ...(pageTitle.length === 0 ? {} : { pageTitle }),
         visibility: this.#document.visibilityState === "hidden" ? "hidden" : "visible",
         generation,
+        stopControlPresent: stopControl !== undefined,
         composer: {
           present: composer !== undefined,
           hasText: normalizeAssistantText(composerText).length > 0,

@@ -1,4 +1,4 @@
-import type { PageObservation } from "../shared/observation.js";
+import type { GenerationState, PageObservation } from "../shared/observation.js";
 
 export type ControlEligibility = "OWNER" | "MIRROR" | "NONE";
 
@@ -10,6 +10,22 @@ export type SessionEventRejectReason =
   | "FUTURE_EPOCH"
   | "STALE_SEQUENCE"
   | "IDENTITY_MISMATCH";
+
+export type HiddenMarkerHealth = "DETECTED" | "MISSING" | "MALFORMED";
+
+export interface HiddenMonitoringDiagnosticSnapshot {
+  backgroundedAt: number;
+  foregroundedAt?: number;
+  baselineAssistantFingerprint?: string;
+  baselineAssistantTextLength?: number;
+  hiddenObservationCount: number;
+  lastHiddenObservationAt?: number;
+  hiddenAssistantTextLength?: number;
+  assistantChanged: boolean;
+  hiddenGeneration?: GenerationState;
+  hiddenStopControlPresent?: boolean;
+  hiddenMarkerHealth?: HiddenMarkerHealth;
+}
 
 export interface AgentRegistration {
   tabId: number;
@@ -40,6 +56,7 @@ export interface ObservationEvent {
   pageEpoch: number;
   sequence: number;
   observation: PageObservation;
+  markerHealth?: HiddenMarkerHealth;
   sentAt: number;
 }
 
@@ -64,6 +81,8 @@ export interface SessionSnapshot {
   lastSeenAt: number;
   lastUserInteractionAt?: number;
   observation?: PageObservation;
+  lastObservationVisibility?: PageObservation["visibility"];
+  hiddenDiagnostic?: HiddenMonitoringDiagnosticSnapshot;
 }
 
 export interface SessionView extends SessionSnapshot {
@@ -97,6 +116,50 @@ function cloneSnapshot(snapshot: SessionSnapshot): SessionSnapshot {
   return structuredClone(snapshot);
 }
 
+function validOptionalFinite(value: unknown): boolean {
+  return value === undefined || (typeof value === "number" && Number.isFinite(value));
+}
+
+function validOptionalNonNegativeInteger(value: unknown): boolean {
+  return value === undefined || (Number.isInteger(value) && (value as number) >= 0);
+}
+
+function validOptionalFingerprint(value: unknown): boolean {
+  return value === undefined || (typeof value === "string" && /^[a-f0-9]{64}$/.test(value));
+}
+
+function validOptionalGeneration(value: unknown): boolean {
+  return value === undefined || value === "IDLE" || value === "GENERATING" || value === "UNKNOWN";
+}
+
+function validOptionalVisibility(value: unknown): boolean {
+  return value === undefined || value === "visible" || value === "hidden";
+}
+
+function validOptionalMarkerHealth(value: unknown): boolean {
+  return value === undefined || value === "DETECTED" || value === "MISSING" || value === "MALFORMED";
+}
+
+function validHiddenDiagnostic(value: unknown): value is HiddenMonitoringDiagnosticSnapshot {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Partial<HiddenMonitoringDiagnosticSnapshot>;
+  return (
+    typeof candidate.backgroundedAt === "number" &&
+    Number.isFinite(candidate.backgroundedAt) &&
+    validOptionalFinite(candidate.foregroundedAt) &&
+    validOptionalFingerprint(candidate.baselineAssistantFingerprint) &&
+    validOptionalNonNegativeInteger(candidate.baselineAssistantTextLength) &&
+    Number.isInteger(candidate.hiddenObservationCount) &&
+    (candidate.hiddenObservationCount as number) >= 0 &&
+    validOptionalFinite(candidate.lastHiddenObservationAt) &&
+    validOptionalNonNegativeInteger(candidate.hiddenAssistantTextLength) &&
+    typeof candidate.assistantChanged === "boolean" &&
+    validOptionalGeneration(candidate.hiddenGeneration) &&
+    (candidate.hiddenStopControlPresent === undefined || typeof candidate.hiddenStopControlPresent === "boolean") &&
+    validOptionalMarkerHealth(candidate.hiddenMarkerHealth)
+  );
+}
+
 function validSnapshot(session: SessionSnapshot): boolean {
   return (
     Number.isInteger(session.tabId) &&
@@ -112,7 +175,8 @@ function validSnapshot(session: SessionSnapshot): boolean {
     typeof session.routeKey === "string" &&
     session.routeKey.length > 0 &&
     Number.isFinite(session.registeredAt) &&
-    Number.isFinite(session.lastSeenAt)
+    Number.isFinite(session.lastSeenAt) &&
+    validOptionalVisibility(session.lastObservationVisibility)
   );
 }
 
@@ -130,6 +194,9 @@ export class SessionRegistry {
     for (const stored of state.sessions) {
       if (!validSnapshot(stored)) continue;
       const session = cloneSnapshot(stored);
+      if (session.hiddenDiagnostic !== undefined && !validHiddenDiagnostic(session.hiddenDiagnostic)) {
+        delete session.hiddenDiagnostic;
+      }
       if (options.invalidateObservations === true) {
         delete session.observation;
       }
@@ -191,6 +258,11 @@ export class SessionRegistry {
     const sameDocumentAgent =
       existing?.documentId === registration.documentId &&
       existing.agentInstanceId === registration.agentInstanceId;
+    const sameSessionIdentity =
+      sameDocumentAgent &&
+      existing.pageEpoch === registration.pageEpoch &&
+      existing.routeKey === registration.routeKey &&
+      optionalStringEquals(existing.conversationId, registration.conversationId);
     const snapshot: SessionSnapshot = {
       tabId: registration.tabId,
       documentId: registration.documentId,
@@ -201,6 +273,18 @@ export class SessionRegistry {
       registeredAt: sameDocumentAgent ? existing.registeredAt : registration.sentAt,
       lastSeenAt: registration.sentAt,
       ...(registration.conversationId === undefined ? {} : { conversationId: registration.conversationId }),
+      ...(sameSessionIdentity && existing.observation !== undefined
+        ? { observation: cloneObservation(existing.observation) }
+        : {}),
+      ...(sameSessionIdentity && existing.lastObservationVisibility !== undefined
+        ? { lastObservationVisibility: existing.lastObservationVisibility }
+        : {}),
+      ...(sameSessionIdentity && existing.lastUserInteractionAt !== undefined
+        ? { lastUserInteractionAt: existing.lastUserInteractionAt }
+        : {}),
+      ...(sameSessionIdentity && existing.hiddenDiagnostic !== undefined
+        ? { hiddenDiagnostic: structuredClone(existing.hiddenDiagnostic) }
+        : {}),
     };
 
     this.#sessions.set(registration.tabId, snapshot);
@@ -243,11 +327,52 @@ export class SessionRegistry {
       return { accepted: false, reason: "IDENTITY_MISMATCH" };
     }
 
+    let hiddenDiagnostic = session.hiddenDiagnostic;
+    if (event.observation.visibility === "hidden") {
+      const prior = hiddenDiagnostic ?? {
+        backgroundedAt: event.observation.observedAt,
+        ...(session.observation?.latestAssistant?.fingerprint === undefined
+          ? {}
+          : { baselineAssistantFingerprint: session.observation.latestAssistant.fingerprint }),
+        ...(session.observation?.latestAssistant?.textLength === undefined
+          ? {}
+          : { baselineAssistantTextLength: session.observation.latestAssistant.textLength }),
+        hiddenObservationCount: 0,
+        assistantChanged: false,
+      };
+      const assistant = event.observation.latestAssistant;
+      const currentFingerprint = assistant?.fingerprint;
+      const existingBaselineFingerprint = prior.baselineAssistantFingerprint;
+      const baselineFingerprint = existingBaselineFingerprint ?? currentFingerprint;
+      const baselineTextLength = prior.baselineAssistantTextLength ?? assistant?.textLength;
+      const changedNow = existingBaselineFingerprint !== undefined &&
+        currentFingerprint !== undefined &&
+        currentFingerprint !== existingBaselineFingerprint;
+      hiddenDiagnostic = {
+        ...prior,
+        ...(baselineFingerprint === undefined ? {} : { baselineAssistantFingerprint: baselineFingerprint }),
+        ...(baselineTextLength === undefined ? {} : { baselineAssistantTextLength: baselineTextLength }),
+        hiddenObservationCount: prior.hiddenObservationCount + 1,
+        lastHiddenObservationAt: event.observation.observedAt,
+        assistantChanged: prior.assistantChanged || changedNow,
+        hiddenGeneration: event.observation.generation,
+        ...(event.observation.stopControlPresent === undefined
+          ? {}
+          : { hiddenStopControlPresent: event.observation.stopControlPresent }),
+        ...(event.markerHealth === undefined ? {} : { hiddenMarkerHealth: event.markerHealth }),
+        ...(assistant?.textLength === undefined ? {} : { hiddenAssistantTextLength: assistant.textLength }),
+      };
+    } else if (hiddenDiagnostic !== undefined && hiddenDiagnostic.foregroundedAt === undefined) {
+      hiddenDiagnostic = { ...hiddenDiagnostic, foregroundedAt: event.observation.observedAt };
+    }
+
     const next: SessionSnapshot = {
       ...session,
       lastSequence: event.sequence,
       lastSeenAt: event.sentAt,
       observation: cloneObservation(event.observation),
+      ...(event.observation.visibility === undefined ? {} : { lastObservationVisibility: event.observation.visibility }),
+      ...(hiddenDiagnostic === undefined ? {} : { hiddenDiagnostic }),
     };
     this.#sessions.set(event.tabId, next);
     return { accepted: true, session: this.#view(next) };
@@ -267,6 +392,42 @@ export class SessionRegistry {
     };
     this.#sessions.set(event.tabId, next);
     return { accepted: true, session: this.#view(next) };
+  }
+
+  markBackgrounded(tabId: number, at: number): boolean {
+    const session = this.#sessions.get(tabId);
+    if (session === undefined || !Number.isFinite(at)) return false;
+    if (
+      session.observation?.visibility === "hidden" &&
+      session.hiddenDiagnostic !== undefined &&
+      session.hiddenDiagnostic.foregroundedAt === undefined
+    ) {
+      return false;
+    }
+    const assistant = session.observation?.latestAssistant;
+    const next: SessionSnapshot = {
+      ...session,
+      hiddenDiagnostic: {
+        backgroundedAt: at,
+        ...(assistant?.fingerprint === undefined ? {} : { baselineAssistantFingerprint: assistant.fingerprint }),
+        ...(assistant?.textLength === undefined ? {} : { baselineAssistantTextLength: assistant.textLength }),
+        hiddenObservationCount: 0,
+        assistantChanged: false,
+      },
+    };
+    this.#sessions.set(tabId, next);
+    return true;
+  }
+
+  markForegrounded(tabId: number, at: number): boolean {
+    const session = this.#sessions.get(tabId);
+    const hiddenDiagnostic = session?.hiddenDiagnostic;
+    if (session === undefined || hiddenDiagnostic === undefined || !Number.isFinite(at)) return false;
+    this.#sessions.set(tabId, {
+      ...session,
+      hiddenDiagnostic: { ...hiddenDiagnostic, foregroundedAt: at },
+    });
+    return true;
   }
 
   invalidateTab(tabId: number): void {

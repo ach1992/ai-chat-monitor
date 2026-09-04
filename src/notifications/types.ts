@@ -34,6 +34,14 @@ export interface NotificationChannel {
   send(notification: GuardianNotification): Promise<void>;
 }
 
+export type NotificationDeliveryState = "NOT_REQUESTED" | "DELIVERED" | "FAILED";
+
+export interface NotificationDeliveryReport {
+  browser: NotificationDeliveryState;
+  sound: NotificationDeliveryState;
+  telegram: NotificationDeliveryState;
+}
+
 export type TelegramEventMode = "INHERIT" | "CUSTOM";
 
 export type TelegramHealthStatus = "NEVER_TESTED" | "HEALTHY" | "ERROR";

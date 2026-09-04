@@ -19,6 +19,7 @@ declare namespace chrome {
     const lastError: { message?: string } | undefined;
 
     function getURL(path: string): string;
+    function getManifest(): { version: string };
     function sendMessage<TResponse = unknown>(message: unknown): Promise<TResponse>;
   }
 
@@ -44,6 +45,7 @@ declare namespace chrome {
 
     interface ActiveInfo {
       tabId: number;
+      windowId: number;
     }
 
     interface RemovedEvent {
@@ -110,7 +112,6 @@ declare namespace chrome {
       openPanelOnActionClick?: boolean;
     }
 
-    function getOptions(options: { tabId?: number }): Promise<PanelOptions>;
     function setOptions(options: PanelOptions): Promise<void>;
     function setPanelBehavior(behavior: PanelBehavior): Promise<void>;
   }

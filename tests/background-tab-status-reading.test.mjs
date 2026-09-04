@@ -123,8 +123,12 @@ test("canonical terminal status outranks a stale Stop control only while hidden"
     { pathname: "/c/chat-bg" },
   );
 
-  assert.equal((await hiddenAdapter.observe(123)).generation, "IDLE");
-  assert.equal((await visibleAdapter.observe(123)).generation, "GENERATING");
+  const hiddenResult = await hiddenAdapter.observe(123);
+  const visibleResult = await visibleAdapter.observe(123);
+  assert.equal(hiddenResult.generation, "IDLE");
+  assert.equal(hiddenResult.stopControlPresent, true);
+  assert.equal(visibleResult.generation, "GENERATING");
+  assert.equal(visibleResult.stopControlPresent, true);
 });
 
 

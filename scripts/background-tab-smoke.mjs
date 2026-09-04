@@ -242,11 +242,18 @@ try {
   chatPage = await createPage(secondBrowser, `https://chatgpt.com/c/${CONVERSATION_ID}`);
   await waitFor(async () => (await evaluate(chatPage, "document.readyState")) === "complete", "synthetic ChatGPT page");
   queryPage = await createPage(secondBrowser, `chrome-extension://${secondBrowser.extensionId}/sidepanel/index.html`);
+  await secondBrowser.browserClient.send("Target.activateTarget", { targetId: chatPage.targetId });
+  await waitFor(async () => (await evaluate(chatPage, "document.visibilityState")) === "visible", "visible monitored tab before background transition");
 
   const tab = await waitFor(async () => {
     const tabs = await evaluate(queryPage, "chrome.tabs.query({}).then((items) => items.map((item) => ({id:item.id,url:item.url,active:item.active,discarded:item.discarded,frozen:item.frozen,autoDiscardable:item.autoDiscardable})))");
     return tabs.find((candidate) => candidate.url?.includes(`/c/${CONVERSATION_ID}`)) ?? false;
   }, "synthetic ChatGPT tab");
+
+  await waitFor(async () => {
+    const options = await evaluate(queryPage, `chrome.sidePanel.getOptions({tabId:${tab.id}})`);
+    return options.enabled === true && options.path === "sidepanel/index.html";
+  }, "tab-scoped Side Panel enablement for ChatGPT");
 
   const session = await waitFor(async () => {
     const stored = await evaluate(queryPage, "chrome.storage.session.get('guardian:session-registry:runtime')");
@@ -264,6 +271,14 @@ try {
   const blank = await secondBrowser.browserClient.send("Target.createTarget", { url: "about:blank" });
   await secondBrowser.browserClient.send("Target.activateTarget", { targetId: blank.targetId });
   await waitFor(async () => (await evaluate(chatPage, "document.visibilityState")) === "hidden", "hidden monitored tab");
+  const blankTab = await waitFor(async () => {
+    const tabs = await evaluate(queryPage, "chrome.tabs.query({}).then((items) => items.filter((item) => item.active === true).map((item) => ({id:item.id})))");
+    return tabs.find((candidate) => candidate.id !== tab.id) ?? false;
+  }, "active unsupported tab id");
+  await waitFor(async () => {
+    const options = await evaluate(queryPage, `chrome.sidePanel.getOptions({tabId:${blankTab.id}})`);
+    return options.enabled === false;
+  }, "tab-scoped Side Panel disablement for unsupported tab");
 
   // Remove the Side Panel page entirely before forcing the MV3 worker down. The
   // hidden content agent must be the component that wakes the replacement worker;
@@ -302,14 +317,20 @@ try {
   const event = await waitFor(async () => {
     const stored = await evaluate(queryPage, "chrome.storage.local.get('guardian:monitoring-history:events')");
     return stored["guardian:monitoring-history:events"]?.events?.find(
-      (candidate) => candidate.conversationId === CONVERSATION_ID && candidate.type === "TASK_COMPLETE",
+      (candidate) =>
+        candidate.conversationId === CONVERSATION_ID &&
+        candidate.type === "TASK_COMPLETE" &&
+        candidate.delivery !== undefined &&
+        candidate.deliveryAt !== undefined,
     ) ?? false;
   }, "TASK_COMPLETE event while the monitored tab remains hidden", 6_000);
 
   const updatedSession = await evaluate(queryPage, "chrome.storage.session.get('guardian:session-registry:runtime')");
-  const observation = updatedSession["guardian:session-registry:runtime"]?.sessions?.find(
+  const updatedSessionEntry = updatedSession["guardian:session-registry:runtime"]?.sessions?.find(
     (candidate) => candidate.conversationId === CONVERSATION_ID,
-  )?.observation;
+  );
+  const observation = updatedSessionEntry?.observation;
+  const hiddenDiagnostic = updatedSessionEntry?.hiddenDiagnostic;
   if (observation?.latestAssistant?.normalizedText !== `Task done.\n${STATUS_LINE}`) {
     throw new Error(`Hidden observation lost the terminal status boundary: ${JSON.stringify(observation?.latestAssistant?.normalizedText)}`);
   }
@@ -325,6 +346,18 @@ try {
   if (observation?.generation !== "IDLE") {
     throw new Error(`Canonical hidden terminal status did not outrank the stale Stop control: ${JSON.stringify(observation?.generation)}`);
   }
+  if (hiddenDiagnostic?.hiddenObservationCount < 1 || hiddenDiagnostic?.lastHiddenObservationAt === undefined) {
+    throw new Error(`Hidden diagnostic did not retain background observation evidence: ${JSON.stringify(hiddenDiagnostic)}`);
+  }
+  if (hiddenDiagnostic?.assistantChanged !== true || hiddenDiagnostic?.hiddenMarkerHealth !== "DETECTED") {
+    throw new Error(`Hidden diagnostic did not capture assistant/marker transition: ${JSON.stringify(hiddenDiagnostic)}`);
+  }
+  if (hiddenDiagnostic?.hiddenStopControlPresent !== true || hiddenDiagnostic?.foregroundedAt !== undefined) {
+    throw new Error(`Hidden diagnostic lost stale-Stop or hidden-only boundary evidence: ${JSON.stringify(hiddenDiagnostic)}`);
+  }
+  if (/normalizedText|Task done|Please finish/.test(JSON.stringify(hiddenDiagnostic))) {
+    throw new Error("Hidden diagnostic retained transcript content instead of bounded metadata.");
+  }
   const staleStopStillPresent = await evaluate(chatPage, "document.querySelector('#stop') !== null");
   if (staleStopStillPresent !== true) {
     throw new Error("Background smoke must retain the stale Stop control through TASK_COMPLETE.");
@@ -338,28 +371,17 @@ try {
     throw new Error(`Unexpected monitored-tab lifecycle state: ${JSON.stringify(tabAfter)}`);
   }
 
-  const notifications = await evaluate(queryPage, "chrome.notifications.getAll()");
-  if (notifications[event.id] !== true) {
-    // Some CI Linux images have no desktop notification daemon. In that case
-    // Chrome accepts notification creation but getAll() retains no active items.
-    // Distinguish that environment limitation from an AI Chat Monitor delivery
-    // regression by creating a control notification through the same Chrome API.
-    const controlId = await evaluate(
-      queryPage,
-      `chrome.notifications.create("ai-chat-monitor-smoke-control", {type:"basic",iconUrl:chrome.runtime.getURL("assets/icon-128.png"),title:"Smoke control",message:"Notification registry capability check",priority:0})`,
-    );
-    const controlNotifications = await evaluate(queryPage, "chrome.notifications.getAll()");
-    if (controlNotifications[controlId] === true) {
-      throw new Error("Chrome retained the control notification but not the TASK_COMPLETE notification.");
-    }
-    const permissionLevel = await evaluate(queryPage, "chrome.notifications.getPermissionLevel()");
-    if (permissionLevel !== "granted") {
-      throw new Error(`Chrome notifications permission is not granted: ${permissionLevel}`);
-    }
-    console.log("Chrome notification registry is unavailable in this CI desktop environment; TASK_COMPLETE routing remains covered by the notification-manager regression suite.");
+  if (event.delivery.browser !== "DELIVERED") {
+    throw new Error(`Browser notification delivery did not resolve successfully: ${JSON.stringify(event.delivery)}`);
+  }
+  if (event.delivery.sound !== "NOT_REQUESTED" || event.delivery.telegram !== "NOT_REQUESTED") {
+    throw new Error(`Unexpected smoke notification routing: ${JSON.stringify(event.delivery)}`);
+  }
+  if (hiddenDiagnostic?.foregroundedAt !== undefined) {
+    throw new Error(`Delivery evidence was not completed while the monitored tab remained hidden: ${JSON.stringify({deliveryAt:event.deliveryAt,foregroundedAt:hiddenDiagnostic.foregroundedAt})}`);
   }
 
-  console.log(`Background-tab monitoring passed in real Chromium: ${event.type}, notification=${event.id}`);
+  console.log(`Background-tab monitoring passed in real Chromium: ${event.type}, browser=${event.delivery.browser}, deliveryAt=${event.deliveryAt}`);
 } finally {
   for (const client of [queryPage, chatPage, settingsPage]) {
     try { client?.close(); } catch { /* ignore cleanup */ }

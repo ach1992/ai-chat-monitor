@@ -139,6 +139,19 @@ export interface TabLifecycleStatus {
   runnable: boolean;
 }
 
+export interface HiddenMonitoringDiagnosticView {
+  backgroundedAt: number;
+  foregroundedAt?: number;
+  baselineAssistantTextLength?: number;
+  hiddenObservationCount: number;
+  lastHiddenObservationAt?: number;
+  hiddenAssistantTextLength?: number;
+  assistantChanged: boolean;
+  hiddenGeneration?: PageObservation["generation"];
+  hiddenStopControlPresent?: boolean;
+  hiddenMarkerHealth?: MonitoringRuntimeStatus["markerHealth"];
+}
+
 export interface PanelStatusResponse {
   type: "background:status";
   protocolVersion: typeof PROTOCOL_VERSION;
@@ -150,6 +163,7 @@ export interface PanelStatusResponse {
   monitoringPolicy?: ResolvedMonitoringPolicy;
   monitoringRuntime?: MonitoringRuntimeStatus;
   tabLifecycle?: TabLifecycleStatus;
+  hiddenDiagnostic?: HiddenMonitoringDiagnosticView;
   lastSeenAt?: number;
 }
 
@@ -167,6 +181,7 @@ export interface ManagedChatStatus {
   policy?: ResolvedMonitoringPolicy;
   runtime?: MonitoringRuntimeStatus;
   tabLifecycle?: TabLifecycleStatus;
+  hiddenDiagnostic?: HiddenMonitoringDiagnosticView;
 }
 
 export interface RedactedProviderSettings {

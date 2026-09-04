@@ -84,6 +84,18 @@ test("Side Panel exposes monitoring, compact protocol setup, notifications, prov
   assert.match(script, /Monitoring continues in the background across tabs/);
   assert.match(script, /Observer: no page observation yet/);
   assert.match(script, /Page state:/);
+  assert.match(script, /Background trace: no hidden observation/);
+  assert.match(script, /marker detected, no event before return/);
+  assert.match(script, /observer alive, assistant snapshot unchanged/);
+  assert.match(script, /delivery completed after return/);
+  assert.match(script, /delivery failed/);
+  assert.match(script, /delivered while hidden/);
+  assert.match(script, /hiddenEvent: \{/);
+  assert.match(script, /deliveryAt/);
+  assert.match(script, /Copy diagnostics/);
+  assert.match(script, /Privacy-safe background diagnostics copied/);
+  assert.match(script, /buildVersion/);
+  assert.doesNotMatch(script, /diagnostic:[\s\S]*normalizedText/);
   assert.match(script, /chrome\.tabs\.onActivated\.addListener/);
   assert.match(script, /refreshPending = true/);
   assert.match(script, /void refreshAll\(pendingManual\)/);

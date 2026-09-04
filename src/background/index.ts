@@ -41,6 +41,8 @@ import {
   type SessionMutationResult,
   type SessionRegistryState,
 } from "../core/session-registry.js";
+import { inspectConversationStatusMarker } from "../classification/conversation-protocol.js";
+import { toHiddenMonitoringDiagnosticView } from "./hidden-diagnostics.js";
 import { isPanelMonitoringChatsReset, type MonitoringChatsResetResponse } from "../monitoring/reset-protocol.js";
 import { MonitoringService } from "../monitoring/service.js";
 import { MonitoredTabLifecycle, type MonitoredTabLifecycleState } from "./tab-lifecycle.js";
@@ -58,6 +60,7 @@ const registryStorage = createEphemeralStorage<SessionRegistryState>("session-re
 const tabLifecycleStorage = createEphemeralStorage<MonitoredTabLifecycleState>("tab-lifecycle");
 let registry = new SessionRegistry();
 let mutationQueue: Promise<void> = Promise.resolve();
+const activeTabByWindow = new Map<number, number>();
 
 const durableStorageReady = restrictDurableStorageToTrustedContexts();
 const monitoring = new MonitoringService((tabId) => registry.getTab(tabId), durableStorageReady);
@@ -167,6 +170,20 @@ async function mutateRegistry(operation: (current: SessionRegistry) => SessionMu
   });
 }
 
+async function mutateRegistryMetadata(operation: (current: SessionRegistry) => boolean): Promise<void> {
+  await registryReady;
+  await enqueueMutation(async () => {
+    const previous = registry.exportState();
+    if (!operation(registry)) return;
+    try {
+      await registryStorage.set(REGISTRY_KEY, registry.exportState());
+    } catch (error) {
+      registry = SessionRegistry.fromState(previous);
+      throw error;
+    }
+  });
+}
+
 async function mutateTabLifecycle(tabId: number, kind: "invalidate" | "remove"): Promise<void> {
   await registryReady;
   await enqueueMutation(async () => {
@@ -251,6 +268,9 @@ async function handleObservation(message: ContentObservation, sender: chrome.run
       pageEpoch: message.pageEpoch,
       sequence: message.sequence,
       observation: message.observation,
+      ...(message.observation.visibility === "hidden"
+        ? { markerHealth: inspectConversationStatusMarker(message.observation.latestAssistant?.normalizedText ?? "").health }
+        : {}),
       sentAt: message.sentAt,
     }));
     if (!result.accepted) return staleEvent(result.reason);
@@ -289,6 +309,7 @@ async function handlePanelStatusRequest(tabId: number, sender: chrome.runtime.Me
     const session = registry.getTab(tabId);
     const status = await monitoring.status(tabId);
     const tabLifecycle = await readTabLifecycle(tabId);
+    const hiddenDiagnostic = toHiddenMonitoringDiagnosticView(session?.hiddenDiagnostic);
     const response: PanelStatusResponse = {
       type: "background:status",
       protocolVersion: PROTOCOL_VERSION,
@@ -303,6 +324,7 @@ async function handlePanelStatusRequest(tabId: number, sender: chrome.runtime.Me
       ...(status.policy === undefined ? {} : { monitoringPolicy: status.policy }),
       ...(status.runtime === undefined ? {} : { monitoringRuntime: status.runtime }),
       ...(tabLifecycle === undefined ? {} : { tabLifecycle }),
+      ...(hiddenDiagnostic === undefined ? {} : { hiddenDiagnostic }),
     };
     return response;
   } catch {
@@ -332,6 +354,7 @@ async function handleOverview(sender: chrome.runtime.MessageSender): Promise<Gua
       if (overrides?.enabled !== true) continue;
       const status = await monitoring.status(session.tabId);
       const tabLifecycle = await readTabLifecycle(session.tabId);
+      const hiddenDiagnostic = toHiddenMonitoringDiagnosticView(session.hiddenDiagnostic);
       chats.push({
         tabId: session.tabId,
         conversationId: session.conversationId,
@@ -345,6 +368,7 @@ async function handleOverview(sender: chrome.runtime.MessageSender): Promise<Gua
         ...(status.policy === undefined ? {} : { policy: status.policy }),
         ...(status.runtime === undefined ? {} : { runtime: status.runtime }),
         ...(tabLifecycle === undefined ? {} : { tabLifecycle }),
+        ...(hiddenDiagnostic === undefined ? {} : { hiddenDiagnostic }),
       });
     }
     const response: PanelOverviewResponse = {
@@ -538,9 +562,46 @@ chrome.notifications.onClicked.addListener((notificationId) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
+  for (const [windowId, activeTabId] of activeTabByWindow) {
+    if (activeTabId === tabId) activeTabByWindow.delete(windowId);
+  }
   void mutateTabLifecycle(tabId, "remove");
   void tabLifecycle.forget(tabId);
 });
+
+async function inferVisiblePreviousTab(windowId: number, nextTabId: number): Promise<number | undefined> {
+  await registryReady;
+  const candidates = registry.list()
+    .filter((session) =>
+      session.tabId !== nextTabId &&
+      (session.observation?.visibility === "visible" || session.lastObservationVisibility === "visible"),
+    )
+    .sort((left, right) => right.lastSeenAt - left.lastSeenAt);
+  for (const session of candidates) {
+    try {
+      const tab = await chrome.tabs.get(session.tabId);
+      if (tab.windowId === windowId) return session.tabId;
+    } catch {
+      // A closed/unavailable candidate cannot establish the prior active tab.
+    }
+  }
+  return undefined;
+}
+
+async function recordActiveTabTransition({ tabId, windowId }: chrome.tabs.ActiveInfo): Promise<void> {
+  const at = Date.now();
+  let previousTabId = activeTabByWindow.get(windowId);
+  if (previousTabId === undefined || previousTabId === tabId) {
+    previousTabId = await inferVisiblePreviousTab(windowId, tabId);
+  }
+  activeTabByWindow.set(windowId, tabId);
+  if (previousTabId !== undefined && previousTabId !== tabId) {
+    await mutateRegistryMetadata((current) => current.markBackgrounded(previousTabId, at)).catch(() => undefined);
+  }
+  await mutateRegistryMetadata((current) => current.markForegrounded(tabId, at)).catch(() => undefined);
+}
+
+chrome.tabs.onActivated.addListener((activeInfo) => { void recordActiveTabTransition(activeInfo); });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.url !== undefined && !supportedChatGptUrl(changeInfo.url)) {

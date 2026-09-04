@@ -2,8 +2,8 @@
 
 Status:
 
-- **GitHub release:** `v3.0.2` published and artifact-verified, but post-release owner validation found remaining inactive-tab reliability/diagnostic gaps tracked by Issue #83 Contract Revisions 3–5.
-- **Unreleased candidate:** source version `3.0.3` contains Issue #83 corrections/diagnostics but is not a published release and remains gated on owner live validation.
+- **GitHub release:** `v3.0.2` published and artifact-verified, but post-release owner validation and later unreleased-candidate validation still reproduce the inactive-tab failure tracked through Issue #83 Contract Revision 6.
+- **Unreleased candidate:** source version `3.0.3` contains independently validated safeguards/fixes, restored tab-scoped Side Panel behavior, and privacy-safe diagnostics, but the real owner background-monitoring outcome is still unproven and remains gated on live validation.
 - **Chrome Web Store:** not submitted or published; production action deferred. Do not submit v3.0.2 or an unvalidated 3.0.3 candidate as the resolved background-reliability build.
 
 This document tracks engineering and disclosure readiness for a future Chrome Web Store submission. The published GitHub release does not itself authorize Store upload, submission, visibility changes, or publication.
