@@ -2,139 +2,120 @@
 
 ## Overview
 
-v3.0.0 preserves the read-only monitoring architecture. The extension observes supported ChatGPT pages, derives normalized runtime and semantic state, and emits deduplicated monitoring events to user-selected notification channels.
+AI Chat Monitor is a Chromium Manifest V3 extension that observes supported ChatGPT conversations, derives normalized runtime and semantic state, and emits deduplicated monitoring events to user-selected Browser, local Sound, and outbound Telegram channels.
 
-There is no ChatGPT write path in the current architecture.
+There is no ChatGPT write/control path in the current architecture.
 
 ```text
-ChatGPT DOM
-   |
-   v
-content adapter (observation only)
-   |
-   v
-session registry / stale-document protection
-   |
-   v
-monitoring service
-   |-- page-state resolver
-   |-- status-marker parser
-   |-- deterministic classifier
-   |-- optional provider fallback
-   |-- response/episode deduplication
-   |-- bounded monitoring history
-   |
-   +--> Browser notifications
-   +--> local Sound
-   +--> Telegram outbound alerts
-   +--> Side Panel status/diagnostics
+ChatGPT DOM -----------------------> content adapter / content agent
+                                         |
+ChatGPT SSE lifecycle --> webRequest ----+----> session registry
+                                              |
+                                              v
+                                       monitoring service
+                                       |-- page-state resolver
+                                       |-- terminal status parser
+                                       |-- deterministic classifier
+                                       |-- optional provider fallback
+                                       |-- response/episode dedupe
+                                       |-- bounded history
+                                              |
+                    +-------------------------+-------------------------+
+                    |                         |                         |
+               Browser alert             local Sound            Telegram outbound
 ```
 
 ## Trust and authority model
 
 ### ChatGPT page
 
-The ChatGPT page and its content are untrusted inputs. The content script may observe supported DOM/runtime signals but must not expose any command that mutates the composer or activates a conversation control.
+The page, DOM, and chat content are untrusted inputs. Content scripts may observe supported state but expose no command that writes the composer or activates Send, Retry, Continue generating, Regenerate, Stop, confirmation, verification, or other conversation controls.
 
 ### Content adapter
 
-`src/content/adapter.ts` normalizes page observations such as:
+`src/content/adapter.ts` normalizes:
 
-- document visibility (`visible` / `hidden`) and observation time;
-- generation state;
-- latest assistant/user turn identity and bounded normalized text;
-- page confidence;
-- blocker reasons;
+- document visibility and observation time;
+- generation/Stop-control state;
+- latest assistant/user identity and bounded normalized text;
+- page confidence and blocker reasons;
 - Retry/action state;
-- conversation/route identity inputs.
+- conversation/route identity.
 
-The adapter has no send/continue/retry authority.
+Assistant and user candidates from alternate supported selectors are resolved in actual DOM order. Selector-group order is never treated as conversation chronology.
 
-Assistant and user candidates that match multiple supported ChatGPT DOM selector shapes are deduplicated and resolved in actual document order before selecting the latest turn. Selector-group insertion order is never used as conversation chronology.
+A hidden exact canonical terminal `AI_CHAT_MONITOR_STATUS={...}` may outrank a stale Stop control because the marker is explicit terminal evidence. Visible tabs retain normal Stop-control semantics; malformed, duplicate, unsupported, or code-rendered markers never take this path.
 
 ### Content agent
 
-`src/content/index.ts` reports observations and lifecycle identity to the background runtime. It may respond to read/reconnect/status-oriented extension messages, but the current protocol must contain no guarded-send or composer-mutation command.
+`src/content/index.ts` reports observations and user-interaction boundaries to the background runtime. A trusted `MANUAL_SEND` opens a local pending-response boundary immediately so the previous assistant cannot be reused before ChatGPT commits the new turn.
+
+While a response is pending and the document is hidden, transient adapter `IDLE` / missing Stop state is observational only. Unless an exact terminal marker, a verified matching response-stream completion, an abort/Stop, or a blocking/retry state ends the hold, the content agent reports the response as `GENERATING`. This prevents semantic classification of partial hidden text.
+
+The content agent contains no `PerformanceObserver`/`PerformanceResourceTiming` completion authority. Owner evidence proved generic resource timing can complete long before the actual assistant response begins changing.
+
+### Browser response transport observer
+
+`src/background/response-transport.ts` uses non-blocking `chrome.webRequest` on the existing ChatGPT host scope. It grants network completion authority only to a request that satisfies all of these conditions:
+
+- supported ChatGPT origin and exact conversation-response path;
+- `xmlhttprequest`, top frame, and a document identity;
+- `POST`;
+- successful `2xx` response;
+- response `Content-Type` beginning with `text/event-stream`.
+
+The observer correlates by `requestId`, `tabId`, `documentId`, and timestamps. Bounded in-flight records are kept in `chrome.storage.session` so MV3 worker restart does not turn another request into completion evidence. `onCompleted` completes only the matching request/document. `onErrorOccurred` retires the request without fabricating completion. Terminal events retire their stored identity even when a navigation mismatch prevents delivery.
+
+The observer does not read request bodies, response bodies, cookies, or Authorization headers. It does not request `webRequestBlocking` and cannot block, redirect, cancel, or rewrite ChatGPT requests.
+
+See [Revision 9 browser response lifecycle](REV9_BROWSER_RESPONSE_LIFECYCLE.md).
 
 ### Background runtime
 
-The service worker owns durable coordination, monitoring policy, optional provider settings, notification routing, Telegram settings, and bounded event history.
-
-No background message may authorize a ChatGPT page mutation.
+The service worker owns session coordination, monitoring policy, browser response correlation, optional provider settings, notification routing, Telegram settings, lifecycle protection, and bounded event history. No background message authorizes ChatGPT mutation.
 
 ## Session and stale-observation protection
 
-Exact tab/document/content-agent/page/route/conversation identity remains important even though automatic sending was removed.
+Exact tab/document/content-agent/page/route/conversation identity rejects observations from replaced documents and keeps duplicate tabs isolated at the document level. Conversation/response identity deduplicates provider work and notification delivery.
 
-The session registry rejects stale observations from replaced documents and keeps duplicate tabs isolated at the document level. Conversation identity is then used by monitoring to deduplicate provider work and notifications.
-
-A service-worker restart requires fresh page observations before current runtime state is trusted again. Restart must never restore any v1 send authority. A still-running content agent self-reannounces after a recoverable rejected/failed observation so session recovery does not depend on making that tab active or waiting for Side Panel polling.
+A service-worker restart requires fresh page evidence before observation state is trusted again. A still-running content agent self-reannounces after a recoverable rejected/failed observation, independent of Side Panel polling. In-flight response-stream correlation is separately persisted in session storage with exact request/document identity.
 
 ## Background-tab lifecycle resilience
 
-When monitoring is enabled for a conversation, the background runtime records the tab's prior `autoDiscardable` value and sets `autoDiscardable: false` to opt the monitored tab out of Chrome's automatic discard path. Disabling/resetting monitoring restores the prior value; tab removal forgets the transient restoration record. This does not claim to prevent every Chrome freeze policy. `frozen` and `discarded` are reported as explicit lifecycle state in Side Panel status/overview, and resume/un-discard transitions request an immediate content-agent reconnect.
+When monitoring is enabled, the runtime records the tab's prior `autoDiscardable` value and sets `autoDiscardable: false`. Disabling/resetting monitoring restores the prior value. `frozen` and `discarded` remain explicit lifecycle diagnostics; the product does not claim to bypass Chrome lifecycle suspension.
 
-Hidden assistant text recovery does not trust mere `AI_CHAT_MONITOR_STATUS=` prefix presence in layout-derived `innerText`. If rendered text lacks a canonical terminal record but structural DOM text contains one, the adapter reconstructs the terminal-line boundary before downstream protocol validation. Code-block/ambiguity validation remains fail-closed.
+Hidden DOM observation is independent of throttled page timers. Structural terminal-marker recovery handles hidden `innerText` lag without accepting code-block/ambiguous marker text. These defenses remain useful but are independent from Revision 9 completion authority.
 
-A hidden ChatGPT tab may also retain its transient Stop control after structural assistant DOM already contains the exact canonical terminal status. In that hidden-only case the canonical terminal record is explicit completion evidence and the adapter reports the observation as idle despite the stale Stop control. Visible tabs keep normal Stop-control semantics, and malformed/code-fenced status text cannot take this path.
-
-The inactive-tab browser regression deliberately closes the Side Panel and force-terminates the extension service worker while the monitored ChatGPT-origin tab remains hidden. A passing run requires the hidden content agent itself to wake a replacement worker and persist the terminal monitoring event before any extension page is reopened.
+Most importantly, hidden UI `IDLE` and absence of the Stop control are not completion proof. A runnable hidden tab can keep producing assistant changes while those UI signals look idle. Response completion instead uses an exact marker or the correlated browser SSE lifecycle described above.
 
 ## Monitoring domain
 
-Primary monitoring domain files:
+Primary files:
 
 - `src/monitoring/types.ts`
 - `src/monitoring/policy.ts`
 - `src/monitoring/history.ts`
 - `src/monitoring/service.ts`
 
-### Policy
+Monitoring policy schema version is `2`. It contains per-chat enablement, Browser/Sound event selection, generation-stall threshold, and focused-chat low-priority suppression. Legacy v1 send-related settings are never restored.
 
-Monitoring policy schema version is `2`.
+Runtime state separates page state, blocker reasons, generation state, semantic decision/source, marker health, assistant identity, and latest event.
 
-Policy contains:
+Semantic source values are `UI`, `STATUS_MARKER`, `RULE`, `PROVIDER`, and `UNKNOWN`.
 
-- per-chat Monitoring enabled/disabled;
-- Browser event selection;
-- Sound event selection;
-- generation-stall threshold;
-- focused-chat low-priority suppression preference.
+### Stable-response resolution order
 
-Legacy v1 policy is read only for migration. `OFF` becomes disabled; `OBSERVE`, `NOTIFY_ONLY`, and `AUTO` become monitoring enabled. Send-related settings are not restored.
+Once the current response has legitimate completion/stability authority, `MonitoringService` resolves:
 
-### Runtime status
-
-Runtime separates:
-
-- page state;
-- blocker reasons;
-- generation state;
-- semantic decision;
-- semantic source;
-- marker health;
-- assistant response identity;
-- latest monitoring event.
-
-Semantic source values:
-
-- `UI`
-- `STATUS_MARKER`
-- `RULE`
-- `PROVIDER`
-- `UNKNOWN`
-
-### Resolution order
-
-`MonitoringService` resolves stable assistant state in this order:
-
-1. high-confidence UI/page blocker state;
+1. high-confidence UI/page blocker evidence;
 2. canonical terminal status marker;
-3. strong deterministic local classifier;
+3. strong deterministic local rules;
 4. optional configured provider fallback;
-5. `UNSURE`/unknown.
+5. `UNSURE` / unknown.
 
-Known UI blocker evidence cannot be overridden by provider interpretation.
+Known blocker evidence cannot be overridden by provider interpretation.
+
+For verified hidden network completion, a meaningful configured semantic event may be retained/delivered normally. If semantic resolution is uncertain and no semantic event was delivered, one generic `RESPONSE_COMPLETE` fallback may be delivered for that response episode. Non-delivered diagnostic history does not constitute a second user notification.
 
 ## Status marker parser
 
@@ -144,116 +125,52 @@ Canonical prefix:
 AI_CHAT_MONITOR_STATUS=
 ```
 
-The parser accepts exactly one standalone terminal record with one supported `decision` field. It rejects ambiguous/malformed cases, including:
-
-- trailing content;
-- multiple markers;
-- unsupported decisions;
-- extra JSON fields;
-- marker text embedded in Markdown backtick or tilde code fences;
-- marker text embedded in block quotes, tables, inline code, or other non-standalone containers.
-
-Missing marker is a normal fallback condition.
+The parser accepts exactly one standalone terminal record with one supported `decision` field. It rejects trailing content, multiple markers, unsupported decisions, extra JSON fields, and marker text embedded in code fences, block quotes, tables, inline code, or other non-standalone containers. Missing marker is a normal fallback condition.
 
 ## Deterministic and provider classification
 
-The existing conservative classifier remains useful as a semantic fallback.
+The conservative local classifier remains semantic fallback. Optional providers include OpenRouter, NaraRouter, and generic HTTPS OpenAI-compatible Chat Completions endpoints.
 
-Provider classification is optional. Supported profile transport includes OpenRouter, NaraRouter, and generic HTTPS OpenAI-compatible Chat Completions endpoints.
+Before provider transfer, context is bounded/minimized and secret-redacted. Provider output is advisory only and cannot produce a page action. Results are cached/deduplicated by conversation/assistant identity.
 
-Before provider transfer, context is bounded/minimized and secret-redacted. Provider output is advisory only and can never produce a page action.
+## Monitoring events and notifications
 
-Resolution results are cached/deduplicated by conversation/assistant-response identity to avoid duplicate provider work across duplicate/background tabs.
+`MonitoringHistoryRepository` provides bounded durable event identity/deduplication. Channels are independently configurable:
 
-## Monitoring events
+- Browser: `chrome.notifications`;
+- Sound: Manifest V3 offscreen document;
+- Telegram: outbound-only Bot API delivery with bounded event metadata.
 
-Core event types live in `src/monitoring/types.ts` and include response completion, continuation-ready, human gates, task complete, page/runtime blockers, provider failure, generation stall, and repeated response diagnostics.
-
-`MonitoringHistoryRepository` provides bounded durable deduplication. Event identity includes conversation, assistant/route identity, and event type.
-
-The monitoring service selects one primary useful event for a stable response rather than emitting overlapping response-complete + semantic notifications for the same observation.
-
-## Notifications
-
-### Browser
-
-Uses `chrome.notifications`. Browser delivery is event-selectable and observational.
-
-### Sound
-
-Uses `src/offscreen/audio.html` and `src/offscreen/audio.ts` through a Manifest V3 offscreen document. Sound routing is event-selectable and deduplicated with the event.
-
-### Telegram
-
-Telegram is outbound-only. The notification manager sends bounded event-oriented metadata using the user-supplied bot token/destination. Dynamic text is escaped for Telegram HTML. Delivery failures update sanitized health/diagnostic state but do not alter monitoring semantics.
-
-### Failure isolation
-
-Notification-channel failures must not mutate ChatGPT state and must not convert a known monitoring state into another decision.
+Notification failures never mutate ChatGPT state or semantic authority.
 
 ## Side Panel
 
-The Side Panel is the user-control and observability surface. Availability remains tab-scoped: supported ChatGPT tabs receive a tab-specific Side Panel option and unsupported tabs are disabled, allowing Chrome to preserve open/closed panel behavior per tab. This UI scoping is not monitoring authority. Side Panel polling does not reconnect content agents; content/background lifecycle recovery is independent of whether the panel is open.
+Side Panel availability is tab-scoped for supported ChatGPT tabs. It exposes monitoring ON/OFF, page/semantic state, marker health, Browser/Sound defaults, protocol copy text, provider and Telegram settings, bounded history, lifecycle state, and privacy-safe hidden-attempt diagnostics.
 
-Current responsibilities:
-
-- current-tab Monitoring ON/OFF;
-- current page/semantic state and source;
-- marker health;
-- per-monitored-chat observer evidence: last observation age, `hidden`/`visible` state, generation state, Chrome lifecycle state, and a privacy-safe hidden-attempt trace for observation count/timing, assistant-change evidence, Stop presence, marker health, hidden event timing, and Browser/Sound/Telegram delivery outcome/timing;
-- Browser/Sound defaults;
-- status-protocol copy text;
-- provider profile management/readiness;
-- Telegram configuration/health;
-- bounded recent event history.
-
-The Side Panel may write extension configuration and the system clipboard only from explicit user actions. It does not write to ChatGPT.
+Side Panel polling is not monitoring/reconnect authority. The panel may change extension configuration and copy text only from explicit user actions; it never writes to ChatGPT.
 
 ## Storage
 
-Trusted extension storage is namespaced by domain.
+Durable trusted storage includes monitoring policy/history, provider profiles/secrets, and Telegram settings/secrets.
 
-Durable examples:
-
-- monitoring policy;
-- monitoring history;
-- provider profiles/secrets;
-- Telegram settings/secrets.
-
-Ephemeral/session-scoped examples:
-
-- semantic-resolution cache used for duplicate-work reduction.
-
-Full chat transcripts are not intentionally stored in monitoring history. Secrets must never be included in event/audit payloads.
+Session/ephemeral state includes semantic-resolution cache, hidden diagnostics, lifecycle restoration metadata, and bounded in-flight response-request correlation. Full chat transcripts are not intentionally stored in monitoring history, and network payloads/credential headers are not stored by response correlation.
 
 ## Permissions
 
 Required manifest permissions:
 
-- `storage` — policy, secrets, bounded history/state;
+- `storage` — policy, secrets, bounded history/state, and session response correlation;
 - `sidePanel` — management UI;
 - `notifications` — Browser alerts;
 - `offscreen` — local sound;
-- `clipboardWrite` — explicit copy buttons for status-protocol setup text.
+- `clipboardWrite` — explicit protocol Copy buttons;
+- `webRequest` — non-blocking lifecycle observation of narrowly filtered ChatGPT SSE responses.
 
-Persistent host permissions are limited to supported ChatGPT origins. Broad HTTPS access is optional so user-selected provider origins can be granted at runtime.
+`webRequestBlocking` is not requested. Persistent host permissions remain limited to `https://chatgpt.com/*` and `https://chat.openai.com/*`. Broad HTTPS host permission remains optional for user-selected provider origins.
 
 ## Removed v1 architecture
 
-The following legacy concepts are not part of current runtime authority:
-
-- automation coordinator;
-- guarded-send protocol;
-- composer mutation;
-- send verification;
-- continuation text/delay/cooldown;
-- protocol bootstrap/self-check turns;
-- status-specific automatic response turns;
-- automatic control OWNER/MIRROR semantics;
-- guarded-write journal authority;
-- hard automatic-continuation fuse.
-
-Historical files/tests may remain only as deleted diff/history or clearly historical documentation.
+Current runtime has no automation coordinator, guarded-send protocol, composer mutation, send verification, automatic Retry/Continue, continuation text/delay/cooldown, protocol bootstrap/self-check turns, automatic control OWNER/MIRROR semantics, write-journal authority, or hard auto-continuation fuse.
 
 ## Validation architecture
 
@@ -264,9 +181,12 @@ npm run typecheck
 npm run lint
 npm test
 npm run smoke:extension
+npm run smoke:background
 npm run package
 ```
 
-CI checks out the exact PR candidate SHA, verifies identity, runs validation/smoke/package, validates the extension ZIP structure, checks that no TypeScript/source-map/environment file leaked into the artifact, verifies `build-info.json` source SHA, and uploads the package artifacts.
+CI checks out the exact candidate SHA, validates identity, runs source tests, verifies the unpacked service worker, runs real Chromium hidden-tab regressions, packages deterministically, validates ZIP structure/provenance, and uploads artifacts.
 
-Static regression coverage must continue to enforce the absence of ChatGPT write commands/runtime mutation paths.
+Revision 9's Chromium regression explicitly rejects a same-endpoint non-SSE request, keeps a hidden changing assistant `GENERATING` without a Stop control, keeps the response unresolved while the SSE is open, and accepts completion only from the matching SSE terminal lifecycle while the tab remains hidden.
+
+Static regression coverage must continue enforcing the absence of ChatGPT write/control paths and `webRequestBlocking`.

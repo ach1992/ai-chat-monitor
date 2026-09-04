@@ -1,6 +1,6 @@
 # AI Chat Monitor Privacy Policy
 
-Last updated: August 30, 2026
+Last updated: September 5, 2026
 
 AI Chat Monitor is a Chromium extension whose single purpose is to monitor user-selected ChatGPT Web conversations and notify the user about response completion, attention states, semantic work state, and platform/runtime conditions. It is read-only with respect to ChatGPT: it does not write to the ChatGPT composer, activate ChatGPT conversation controls, or create conversation turns.
 
@@ -14,6 +14,7 @@ To monitor a selected ChatGPT conversation, the extension may read and process l
 - the latest relevant user and assistant text needed for bounded semantic classification;
 - response fingerprints, DOM message identity, generation state, visible blocker/action state, and related monitoring metadata;
 - the optional terminal `AI_CHAT_MONITOR_STATUS={...}` marker;
+- bounded ChatGPT response-request lifecycle metadata used only to determine when the currently monitored response has actually finished;
 - local monitoring policy, notification preferences, provider configuration, Telegram configuration, and bounded diagnostics/history.
 
 Chat content is treated as untrusted input.
@@ -26,11 +27,20 @@ Trusted extension storage may contain:
 - optional provider profiles, including API credentials;
 - optional Telegram bot token/destination and sanitized delivery health;
 - bounded monitoring-event metadata needed for deduplication and diagnostics;
-- bounded runtime/cache identity used to avoid duplicate classification or notifications.
+- bounded runtime/cache identity used to avoid duplicate classification or notifications;
+- while a ChatGPT response request is in flight, only bounded correlation metadata such as request identity, tab/document identity, and timestamps required to match the request's start and completion.
 
 Monitoring history does **not** intentionally store full ChatGPT transcripts or credentials. Provider credentials and Telegram bot tokens are not rendered back in ordinary Side Panel status output after saving.
 
 Legacy automatic-send/write-journal authority is not restored or migrated into current monitoring authority.
+
+## Read-only ChatGPT network lifecycle observation
+
+The `webRequest` permission is used only on the persistent ChatGPT host permissions already listed below. Its purpose is to observe the lifecycle of the current ChatGPT conversation response at browser level when background-tab UI signals such as the Stop control are stale or absent.
+
+AI Chat Monitor accepts only a bounded response-stream shape for completion correlation: a top-frame ChatGPT conversation request using `POST`, a successful response status, and `Content-Type: text/event-stream`. It correlates that request using bounded request/tab/document identity and timestamps.
+
+AI Chat Monitor does not read request bodies, response bodies, cookies, or authorization headers through this permission. It does not use `webRequestBlocking`, does not alter, redirect, cancel, or rewrite ChatGPT requests, and does not persist network payload content.
 
 ## Optional AI provider transfer
 
@@ -67,6 +77,8 @@ Persistent host access is limited to supported ChatGPT origins:
 - `https://chatgpt.com/*`
 - `https://chat.openai.com/*`
 
+These persistent host permissions cover both the read-only page observation content script and the bounded `webRequest` response-lifecycle observation described above.
+
 The manifest also declares optional HTTPS host permission so a user can configure an arbitrary HTTPS OpenAI-compatible provider whose origin is not known at install time. AI Chat Monitor requests the exact selected provider origin at runtime where required.
 
 Telegram access is requested for the Telegram Bot API origin only when Telegram is configured.
@@ -78,6 +90,7 @@ AI Chat Monitor has no ChatGPT mutation authority. The extension runtime must no
 - write to the composer;
 - click Send, Retry, Continue generating, Regenerate, Stop, confirmation, verification, or other ChatGPT conversation controls;
 - generate or inject self-check/bootstrap/recovery turns;
+- alter, redirect, cancel, or rewrite ChatGPT network requests;
 - treat provider or Telegram output as browser mutation authority;
 - bypass platform/account limits, authentication, verification, CAPTCHAs, confirmations, approvals, or safety controls.
 

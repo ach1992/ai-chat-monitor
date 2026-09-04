@@ -21,6 +21,28 @@ namespace GuardianContentAgent {
     protocolVersion: 2;
   }
 
+  interface ResponseStreamStartedMessage {
+    type: "background:response-stream-started";
+    protocolVersion: 2;
+    requestId: string;
+    startedAt: number;
+  }
+
+  interface ResponseStreamCompletedMessage {
+    type: "background:response-stream-completed";
+    protocolVersion: 2;
+    requestId: string;
+    startedAt: number;
+    completedAt: number;
+  }
+
+  interface ResponseStreamAbortedMessage {
+    type: "background:response-stream-aborted";
+    protocolVersion: 2;
+    requestId: string;
+    startedAt: number;
+  }
+
   interface ResponseCompletionEvidence {
     serial: number;
     transport: "CHATGPT_CONVERSATION_STREAM";
@@ -28,18 +50,15 @@ namespace GuardianContentAgent {
     completedAt: number;
   }
 
-  interface ExtendedResourceTiming extends PerformanceResourceTiming {
-    contentType?: string;
+  interface ActiveResponseStream {
+    requestId: string;
+    startedAt: number;
   }
 
   const FOCUS_INTENT_WINDOW_MS = 1_500;
   const PERIODIC_OBSERVATION_MS = 15_000;
-  const CHAT_RESPONSE_STREAM_PATHS = new Set([
-    "/backend-api/f/conversation",
-    "/backend-api/f/conversation/resume",
-    "/backend-api/conversation",
-    "/backend-anon/f/conversation",
-  ]);
+  const STATUS_PREFIX = "AI_CHAT_MONITOR_STATUS=";
+  const TERMINAL_STATUS_LINE = /^AI_CHAT_MONITOR_STATUS=\{"decision":"(?:CONTINUE|HOLD_APPROVAL|HOLD_DECISION|HOLD_HUMAN_OPERATION|COMPLETE|PLATFORM_ERROR|RATE_LIMIT|UNSURE)"\}$/;
   const adapter = new GuardianContent.BrowserChatGPTAdapter(document, location);
   const agentInstanceId = crypto.randomUUID();
   let pageEpoch = 1;
@@ -53,6 +72,8 @@ namespace GuardianContentAgent {
   let lastKeyboardFocusIntentAt: number | undefined;
   let responseCompletionSerial = 0;
   let pendingResponseCompletion: ResponseCompletionEvidence | undefined;
+  let activeResponseStream: ActiveResponseStream | undefined;
+  let responsePending = false;
 
   function nextSequence(): number { sequence += 1; return sequence; }
 
@@ -76,6 +97,60 @@ namespace GuardianContentAgent {
 
   function isPanelAgentReconnectMessage(value: unknown): value is PanelAgentReconnectMessage {
     return isRecord(value) && value.type === "panel:agent-reconnect" && value.protocolVersion === GuardianContent.PROTOCOL_VERSION;
+  }
+
+  function validStreamIdentity(
+    value: Record<string, unknown>,
+  ): value is Record<string, unknown> & { requestId: string; startedAt: number } {
+    return (
+      typeof value.requestId === "string" && value.requestId.length > 0 &&
+      typeof value.startedAt === "number" && Number.isFinite(value.startedAt) && value.startedAt > 0
+    );
+  }
+
+  function isResponseStreamStartedMessage(value: unknown): value is ResponseStreamStartedMessage {
+    return isRecord(value) &&
+      value.type === "background:response-stream-started" &&
+      value.protocolVersion === GuardianContent.PROTOCOL_VERSION &&
+      validStreamIdentity(value);
+  }
+
+  function isResponseStreamCompletedMessage(value: unknown): value is ResponseStreamCompletedMessage {
+    return isRecord(value) &&
+      value.type === "background:response-stream-completed" &&
+      value.protocolVersion === GuardianContent.PROTOCOL_VERSION &&
+      validStreamIdentity(value) &&
+      typeof value.completedAt === "number" && Number.isFinite(value.completedAt) &&
+      value.completedAt >= value.startedAt;
+  }
+
+  function isResponseStreamAbortedMessage(value: unknown): value is ResponseStreamAbortedMessage {
+    return isRecord(value) &&
+      value.type === "background:response-stream-aborted" &&
+      value.protocolVersion === GuardianContent.PROTOCOL_VERSION &&
+      validStreamIdentity(value);
+  }
+
+  function hasCanonicalTerminalStatus(value: string): boolean {
+    const normalized = value.replace(/\r\n?/g, "\n").trimEnd();
+    let occurrences = 0;
+    let offset = 0;
+    while (offset < normalized.length) {
+      const index = normalized.indexOf(STATUS_PREFIX, offset);
+      if (index < 0) break;
+      occurrences += 1;
+      if (occurrences > 1) return false;
+      offset = index + STATUS_PREFIX.length;
+    }
+    if (occurrences !== 1) return false;
+    return TERMINAL_STATUS_LINE.test(normalized.split("\n").at(-1)?.trim() ?? "");
+  }
+
+  function shouldHoldHiddenGeneration(observation: GuardianContent.PageObservation): boolean {
+    if (!responsePending || observation.visibility !== "hidden") return false;
+    if (observation.blocking.blocked || observation.actions.retryAvailable) return false;
+    const assistantText = observation.latestAssistant?.normalizedText ?? "";
+    return !hasCanonicalTerminalStatus(assistantText);
   }
 
   function agentProbeResponse(): Record<string, unknown> {
@@ -110,6 +185,8 @@ namespace GuardianContentAgent {
     lastRouteKey = nextRouteKey;
     observationGeneration += 1;
     pendingResponseCompletion = undefined;
+    activeResponseStream = undefined;
+    responsePending = false;
     if (observationTimer !== undefined) {
       clearTimeout(observationTimer);
       observationTimer = undefined;
@@ -143,10 +220,13 @@ namespace GuardianContentAgent {
     const observedEpoch = pageEpoch;
     const sampled = await adapter.observe();
     if (expectedGeneration !== observationGeneration || observedEpoch !== pageEpoch || sampled.routeKey !== lastRouteKey) return;
+    const held = shouldHoldHiddenGeneration(sampled)
+      ? { ...sampled, generation: "GENERATING" as const }
+      : sampled;
     const completion = pendingResponseCompletion;
     const observation = completion === undefined
-      ? sampled
-      : { ...sampled, responseCompletion: structuredClone(completion) };
+      ? held
+      : { ...held, responseCompletion: structuredClone(completion) };
     const response = await send({
       type: "content:observation",
       protocolVersion: GuardianContent.PROTOCOL_VERSION,
@@ -211,6 +291,15 @@ namespace GuardianContentAgent {
   }
 
   function emitUserInteraction(interaction: InteractionKind): void {
+    if (interaction === "MANUAL_SEND") {
+      responsePending = true;
+      activeResponseStream = undefined;
+      pendingResponseCompletion = undefined;
+    } else if (interaction === "STOP_GENERATION") {
+      responsePending = false;
+      activeResponseStream = undefined;
+      pendingResponseCompletion = undefined;
+    }
     void send({
       type: "content:user-interaction",
       protocolVersion: GuardianContent.PROTOCOL_VERSION,
@@ -220,40 +309,6 @@ namespace GuardianContentAgent {
       interaction,
       sentAt: Date.now(),
     });
-    scheduleObservation(0);
-  }
-
-  function responseStreamResource(entry: PerformanceResourceTiming): boolean {
-    if (entry.entryType !== "resource") return false;
-    if (entry.initiatorType !== "fetch" && entry.initiatorType !== "xmlhttprequest") return false;
-    try {
-      const url = new URL(entry.name, location.href);
-      if (url.origin !== location.origin || !CHAT_RESPONSE_STREAM_PATHS.has(url.pathname)) return false;
-    } catch {
-      return false;
-    }
-    const status = entry.responseStatus;
-    if (typeof status === "number" && status !== 0 && (status < 200 || status >= 300)) return false;
-    const contentType = (entry as ExtendedResourceTiming).contentType;
-    if (typeof contentType === "string" && contentType.length > 0 && contentType !== "text/event-stream") return false;
-    return Number.isFinite(entry.responseEnd) && entry.responseEnd > 0;
-  }
-
-  function responseCompletedAt(entry: PerformanceResourceTiming): number {
-    const absolute = performance.timeOrigin + entry.responseEnd;
-    return Number.isFinite(absolute) && absolute > 0 ? Math.round(absolute) : Date.now();
-  }
-
-  function recordResponseCompletion(entry: PerformanceResourceTiming): void {
-    const nextRouteKey = adapter.currentRouteKey();
-    if (nextRouteKey !== lastRouteKey) return;
-    responseCompletionSerial += 1;
-    pendingResponseCompletion = {
-      serial: responseCompletionSerial,
-      transport: "CHATGPT_CONVERSATION_STREAM",
-      visibility: document.visibilityState === "hidden" ? "hidden" : "visible",
-      completedAt: responseCompletedAt(entry),
-    };
     scheduleObservation(0);
   }
 
@@ -285,6 +340,41 @@ namespace GuardianContentAgent {
       });
       return true;
     }
+    if (isResponseStreamStartedMessage(message)) {
+      if (activeResponseStream === undefined || message.startedAt >= activeResponseStream.startedAt) {
+        activeResponseStream = { requestId: message.requestId, startedAt: message.startedAt };
+        responsePending = true;
+        pendingResponseCompletion = undefined;
+        scheduleObservation(0);
+      }
+      sendResponse({ type: "content:response-stream-ack", protocolVersion: GuardianContent.PROTOCOL_VERSION });
+      return false;
+    }
+    if (isResponseStreamCompletedMessage(message)) {
+      if (activeResponseStream !== undefined && activeResponseStream.requestId !== message.requestId) return false;
+      responseCompletionSerial += 1;
+      pendingResponseCompletion = {
+        serial: responseCompletionSerial,
+        transport: "CHATGPT_CONVERSATION_STREAM",
+        visibility: document.visibilityState === "hidden" ? "hidden" : "visible",
+        completedAt: message.completedAt,
+      };
+      activeResponseStream = undefined;
+      responsePending = false;
+      scheduleObservation(0);
+      sendResponse({ type: "content:response-stream-ack", protocolVersion: GuardianContent.PROTOCOL_VERSION });
+      return false;
+    }
+    if (isResponseStreamAbortedMessage(message)) {
+      if (activeResponseStream?.requestId === message.requestId) {
+        activeResponseStream = undefined;
+        responsePending = false;
+        pendingResponseCompletion = undefined;
+        scheduleObservation(0);
+      }
+      sendResponse({ type: "content:response-stream-ack", protocolVersion: GuardianContent.PROTOCOL_VERSION });
+      return false;
+    }
     return false;
   });
 
@@ -296,19 +386,6 @@ namespace GuardianContentAgent {
     attributes: true,
     attributeFilter: ["aria-label", "aria-busy", "data-testid", "data-message-author-role", "disabled"],
   });
-
-  if (typeof PerformanceObserver === "function") {
-    try {
-      const transportObserver = new PerformanceObserver((list) => {
-        for (const entry of list.getEntries()) {
-          if (entry instanceof PerformanceResourceTiming && responseStreamResource(entry)) recordResponseCompletion(entry);
-        }
-      });
-      transportObserver.observe({ type: "resource" });
-    } catch {
-      // Resource timing is advisory completion evidence. DOM monitoring remains the fallback.
-    }
-  }
 
   for (const eventName of ["beforeinput", "input", "paste", "compositionstart"] as const) {
     document.addEventListener(eventName, (event) => {

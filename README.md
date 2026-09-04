@@ -2,7 +2,7 @@
 
 AI Chat Monitor is a Chromium Manifest V3 extension that **monitors selected ChatGPT conversations without controlling them**. It observes page/runtime state, resolves an optional semantic work status, and sends configurable Browser, local sound, and Telegram notifications.
 
-**Current published release: [v3.0.2](https://github.com/ach1992/ai-chat-monitor/releases/tag/v3.0.2).** Post-release owner validation found remaining inactive-tab reliability gaps, so v3.0.2 must not be treated as the resolved background-monitoring build. Current unreleased `3.0.3` source, tracked by [Issue #83](https://github.com/ach1992/ai-chat-monitor/issues/83), now correlates completion authority to the current response episode so a newly sent prompt cannot re-use the previous completed assistant turn as a fresh completion event, while preserving the independently useful hidden-tab, lifecycle, MV3 recovery, diagnostics, tab-scoped Side Panel, and read-only safeguards. Exact integrated owner validation is still required before a v3.0.3 release.
+**Current published release: [v3.0.2](https://github.com/ach1992/ai-chat-monitor/releases/tag/v3.0.2).** Post-release owner validation found remaining inactive-tab reliability gaps, so v3.0.2 must not be treated as the resolved background-monitoring build. Current unreleased `3.0.3` source, tracked by [Issue #83](https://github.com/ach1992/ai-chat-monitor/issues/83), now uses Revision 9 response-lifecycle correlation: a hidden response cannot be completed merely because ChatGPT exposes no Stop control or reports transient `IDLE`, and generic page `PerformanceResourceTiming` no longer grants completion authority. Hidden completion instead requires exact terminal status evidence or a positively correlated ChatGPT SSE lifecycle observed by the browser. Exact integrated owner validation is still required before a v3.0.3 release.
 
 ## Single purpose
 
@@ -53,7 +53,6 @@ AI_CHAT_MONITOR_STATUS={"decision":"<VALUE>"}
 
 The marker must be outside code fences, inline code, JSON/code payloads, block quotes, tables, and other format-specific output containers, with nothing after it. If the user requires an exact/exclusive output format, the assistant should omit the marker for that reply.
 
-
 The Side Panel contains two copyable setup texts:
 
 1. **Custom Instructions / Personalization** for compatible normal replies across chats.
@@ -63,9 +62,18 @@ AI Chat Monitor never sends either setup text itself.
 
 See [Conversation status protocol](docs/CONVERSATION_STATUS_PROTOCOL.md).
 
-## Resolution order
+## Response completion and semantic resolution
 
-For a stable monitored response AI Chat Monitor resolves state in this order:
+For a visible stable response, normal high-confidence UI lifecycle remains useful. For a hidden response, absence of the Stop control or transient `IDLE` is not completion proof.
+
+Revision 9 accepts hidden response completion only from:
+
+1. a valid exact terminal status marker on the current assistant turn; or
+2. a browser-observed ChatGPT conversation response that is positively identified as a successful top-frame `POST` SSE request and reaches matching completion.
+
+A trusted manual Send opens the current response episode immediately, so the previous completed assistant cannot be replayed as the new response. While that response is hidden and still pending, partial assistant changes remain `GENERATING` even when ChatGPT does not expose a Stop control.
+
+Once a response has legitimate completion/stability authority, semantic state resolves in this order:
 
 1. high-confidence page/UI blocker evidence;
 2. valid terminal status marker;
@@ -74,6 +82,8 @@ For a stable monitored response AI Chat Monitor resolves state in this order:
 5. `UNKNOWN` / `UNSURE`.
 
 Known page blockers outrank model/provider interpretation.
+
+See [Revision 9 browser response lifecycle](docs/REV9_BROWSER_RESPONSE_LIFECYCLE.md).
 
 ## Notifications and deduplication
 
@@ -117,7 +127,7 @@ The breaking product-contract change began at `v2.0.0`; `v2.0.1` is a compatible
 
 ## Requirements
 
-- Chrome/Chromium 114+ or a compatible Chromium browser with Manifest V3 Side Panel support.
+- Chrome/Chromium 114+ or a compatible Chromium browser with Manifest V3 Side Panel and `webRequest` support.
 - Node.js 22+ for development/building.
 - An API key only when optional provider fallback is configured.
 - A Telegram bot token/destination only when Telegram alerts are configured.
@@ -140,7 +150,7 @@ npm run package
 - `artifacts/SHA256SUMS.txt`
 - `artifacts/build-info.json`
 
-The CI workflow validates the exact candidate SHA, downloads a pinned Chrome for Testing build, proves the unpacked AI Chat Monitor service worker actually loaded, runs the real hidden/background-tab smoke regression, verifies the ZIP layout/provenance, and uploads the `artifacts/` directory as a GitHub Actions artifact. Branded Google Chrome builds no longer honor the command-line unpacked-extension flags used by these automated smoke tests, so local smoke runs should point `CHROME_BIN` at Chrome for Testing or Chromium.
+The CI workflow validates the exact candidate SHA, downloads a pinned Chrome for Testing build, proves the unpacked AI Chat Monitor service worker actually loaded, runs the real hidden/background-tab regressions, verifies the ZIP layout/provenance, and uploads the `artifacts/` directory as a GitHub Actions artifact. Revision 9's browser regression deliberately keeps the monitored tab hidden without a Stop control, rejects a same-endpoint non-SSE request as completion evidence, keeps a changing partial assistant unresolved while an SSE is open, and accepts only the matching SSE completion. Branded Google Chrome builds no longer honor the command-line unpacked-extension flags used by these automated smoke tests, so local smoke runs should point `CHROME_BIN` at Chrome for Testing or Chromium.
 
 ## Load an unpacked build
 
@@ -155,7 +165,7 @@ The CI workflow validates the exact candidate SHA, downloads a pinned Chrome for
 
 ### Updating an existing unpacked installation
 
-To preserve extension/storage identity, replace the files in the same unpacked folder, then use **Reload** in `chrome://extensions`. Do not remove/re-add the extension unless you intentionally want a fresh extension identity/storage state.
+To preserve extension/storage identity, replace the files in the same unpacked folder, then use **Reload** in `chrome://extensions`. Do not remove/re-add the extension unless you intentionally want a fresh extension identity/storage state. Revision 9 adds the required non-blocking `webRequest` permission; if Chromium asks you to approve the updated permission for the unpacked extension, approve it before testing the candidate.
 
 ## Optional AI providers
 
@@ -184,7 +194,8 @@ Saved bot tokens are not rendered back by the Side Panel.
 
 ## Privacy and permissions
 
-- Persistent page access is limited to supported ChatGPT origins.
+- Persistent page/network access is limited to supported ChatGPT origins.
+- Required non-blocking `webRequest` is used only to correlate a narrowly filtered successful ChatGPT `POST` SSE response with its completion while background UI signals are unreliable. AI Chat Monitor does not use `webRequestBlocking` and does not read request bodies, response bodies, cookies, or Authorization headers through this path.
 - Broad optional HTTPS host permission exists only so a user can configure an arbitrary HTTPS OpenAI-compatible provider; AI Chat Monitor requests the selected origin at runtime.
 - Provider API keys and Telegram bot tokens remain in trusted extension storage.
 - Monitoring history stores bounded metadata/fingerprints/diagnostics, not full chat transcripts or credentials.
@@ -200,6 +211,7 @@ See [PRIVACY.md](PRIVACY.md) for the complete current policy.
 - [Conversation status protocol](docs/CONVERSATION_STATUS_PROTOCOL.md)
 - [Revision 7 background monitoring](docs/REV7_BACKGROUND_MONITORING.md)
 - [Revision 8 response-episode correlation](docs/REV8_RESPONSE_EPISODE.md)
+- [Revision 9 browser response lifecycle](docs/REV9_BROWSER_RESPONSE_LIFECYCLE.md)
 - [Privacy policy](PRIVACY.md)
 - [Chrome Web Store listing copy](docs/CHROME_WEB_STORE_LISTING.md)
 - [Store readiness](docs/STORE_READINESS.md)
@@ -208,13 +220,13 @@ See [PRIVACY.md](PRIVACY.md) for the complete current policy.
 
 ## Release state
 
-`v3.0.2` is the current artifact-verified published GitHub release, but it must not be treated as proof that inactive-tab monitoring is fully resolved. Current source is `3.0.3` (unreleased) with Issue #83 response-episode, hidden-completion, lifecycle, and diagnostic corrections; GitHub Release `v3.0.3` remains gated on owner validation in the real logged-in Chrome environment.
+`v3.0.2` is the current artifact-verified published GitHub release, but it must not be treated as proof that inactive-tab monitoring is fully resolved. Current source is `3.0.3` (unreleased) with Issue #83 Revision 9 response-lifecycle correlation plus the retained independent hidden-DOM, lifecycle, MV3-recovery, response-episode, and diagnostic safeguards. The Revision 9 Chrome-for-Testing regression passes, but GitHub Release `v3.0.3` remains gated on owner validation of the exact integrated artifact in the real logged-in Chrome environment.
 
-- Release target commit: `51cc8b6b1bac484309f4cc7537e183917d94fdc0`
-- Release ZIP: `ai-chat-monitor-3.0.2.zip`
-- Packaged runtime files: `49`
-- Release ZIP SHA-256: `0e9d535777d57fd04b0506cbc7ff0635d8fc320fab1ac9b9068ede9432c32a94`
-- Exact-main release CI: `33889768839` — PASS
+- Published release target commit: `51cc8b6b1bac484309f4cc7537e183917d94fdc0`
+- Published release ZIP: `ai-chat-monitor-3.0.2.zip`
+- Published runtime files: `49`
+- Published release ZIP SHA-256: `0e9d535777d57fd04b0506cbc7ff0635d8fc320fab1ac9b9068ede9432c32a94`
+- Published exact-main release CI: `33889768839` — PASS
 - Published release: [AI Chat Monitor v3.0.2](https://github.com/ach1992/ai-chat-monitor/releases/tag/v3.0.2)
 
 Chrome Web Store submission/publication is a separate production action and has **not** been performed. See [Store readiness](docs/STORE_READINESS.md) before any future Store submission.

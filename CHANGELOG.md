@@ -15,9 +15,16 @@
 - After owner validation of the integrated transport-completion candidate exposed an early false `RESPONSE_COMPLETE`, establish a persisted response-episode boundary at trusted `MANUAL_SEND` so the previous completed assistant/marker cannot be reprocessed as the new response's completion evidence before ChatGPT commits the next turn.
 - Stop user-interaction messages from directly running semantic/completion resolution against the unchanged prior observation, while preserving page-state blocker/error notifications and the strictly read-only ChatGPT boundary.
 - Require a demonstrably fresh assistant after a response starts; a fresh assistant observed in a transient `IDLE` state is not treated as complete unless it carries exact terminal semantic evidence, the current episode was actually observed generating, or bounded transport-completion evidence is correlated to that response episode.
-- Reserve generic `RESPONSE_COMPLETE` for the explicit bounded transport-completion fallback instead of using it as the default result of an otherwise ambiguous idle semantic resolution. Correlate hidden transport completion and deduplication to the current response episode.
-- Strengthen the Chrome-for-Testing response regression to model the full live race: previous completed assistant, trusted manual send, unchanged old assistant, new user ahead of the old assistant, fresh partial assistant with transient `IDLE`, current-response `GENERATING`, then hidden transport completion while final assistant DOM remains intentionally stale. No early completion event is allowed.
-- Document the Revision 8 response-episode evidence model and keep Issue #83/open owner validation as the final acceptance gate before any v3.0.3 GitHub Release.
+- Reserve generic `RESPONSE_COMPLETE` for explicit completion fallback instead of using it as the default result of an otherwise ambiguous idle semantic resolution. Correlate hidden completion and deduplication to the current response episode.
+- Strengthen the Chrome-for-Testing response regression to model the live race: previous completed assistant, trusted manual send, unchanged old assistant, new user ahead of the old assistant, fresh partial assistant with transient `IDLE`, current-response `GENERATING`, then hidden completion while final assistant DOM remains intentionally stale. No early completion notification is allowed.
+- After the next owner reproduction, retire content-side `PerformanceResourceTiming` as response-completion authority: a live diagnostic recorded transport completion only 131 ms after backgrounding but roughly 57 seconds before the first assistant DOM change, proving that a same-endpoint page resource can be unrelated to the assistant response being generated.
+- Treat hidden `IDLE` / missing Stop as non-authoritative while the current response is pending. Owner diagnostics showed the tab remained runnable and produced 93/13 hidden observations while assistant text changed and ChatGPT still exposed `IDLE` with no Stop control.
+- Add non-blocking `chrome.webRequest` response-lifecycle correlation on the existing ChatGPT host scope. Only supported top-frame `POST` conversation requests with `2xx` status and `Content-Type: text/event-stream` acquire completion authority, correlated by request/tab/document identity and timestamps.
+- Persist only bounded in-flight request identity/timing in `chrome.storage.session`. Do not read request bodies, response bodies, cookies, Authorization headers, or transcript payloads; do not request `webRequestBlocking` or any network mutation authority.
+- Hold a pending hidden response as `GENERATING` from trusted `MANUAL_SEND` / verified stream start until exact terminal marker, matching SSE completion, matching abort/explicit Stop, or blocking/retry state. This prevents early semantic classification of partial hidden assistant text.
+- Replace the prior background response smoke with a real Chromium Revision 9 regression that rejects a same-endpoint JSON `POST`, keeps a changing hidden assistant unresolved without any Stop control while SSE is open, and permits delivery only after matching SSE completion while the tab remains hidden.
+- Revision 9 pre-documentation candidate `36c040a948a920c3a3aa55009bd1db48f4dbdcbb` passed CI `33927680435`: 161/161 tests, unpacked extension identity, existing hidden terminal-marker regression, Revision 9 hidden response-lifecycle regression, package verification, and artifact upload. The modeled response produced exactly one delivered Browser notification after verified SSE completion.
+- Document Revision 9 completion authority, privacy, Store permission rationale, and the continued owner-validation gate. Synthetic Chrome remains regression evidence only; Issue #83 stays open until the exact integrated artifact passes the real first-after-Reload and never-return-to-tab tests.
 
 Tracking: [Issue #83](https://github.com/ach1992/ai-chat-monitor/issues/83).
 
@@ -48,7 +55,6 @@ Tracking: [Issue #85](https://github.com/ach1992/ai-chat-monitor/issues/85), [Is
 - Added regression coverage proving retired product markers are not recognized and background-tab recovery responds only to the new marker.
 
 Tracking: [Issue #80](https://github.com/ach1992/ai-chat-monitor/issues/80).
-
 
 ## 2.0.1 — 2026-08-23
 
@@ -125,7 +131,7 @@ Tracking: [PR #62](https://github.com/ach1992/ai-chat-monitor/pull/62).
 - Reworked the one-time conversation protocol into a readable multiline prompt that explicitly preserves the current project's direction, scope, priority, and plan.
 - Preserved those line breaks when AI Chat Monitor writes into ChatGPT's contenteditable composer.
 - Added exact status-specific automatic replies: autonomous continuation for `CONTINUE`, one bounded recheck for `PLATFORM_ERROR`/`RATE_LIMIT`, one reclassification request for `UNSURE`, and no message for HOLD or `COMPLETE`.
-- Prevented recovery and uncertainty replies from repeating within the same human-interaction epoch while retaining identity, OWNER/MIRROR, human-precedence, no-blind-retry, stagnation, and hard-fuse safeguards.
+- Prevented recovery and uncertainty replies from repeating within the same human-interaction epoch while retaining identity, OWNER/MIRROR, human-precedence, no-blind-retry, stagnation detection, and hard-fuse safeguards.
 
 Tracking: [Issue #57](https://github.com/ach1992/ai-chat-monitor/issues/57).
 
