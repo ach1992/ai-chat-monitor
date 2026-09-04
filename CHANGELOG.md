@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.0.1 — 2026-09-04
+
+- Restored reliable read-only monitoring for hidden/background ChatGPT tabs by making DOM-triggered observations independent of throttled page timers while the page remains runnable.
+- Added immediate observation catch-up on tab visibility changes while preserving the existing foreground debounce behavior.
+- Replaced the packaged 16/32/48/128 extension icons with the owner-provided AI Chat Monitor icon set.
+- Added regression coverage for hidden-tab scheduling, foreground debounce, and visibility catch-up; Browser and Telegram notification routing remain unchanged downstream of monitoring.
+- Preserved the strictly read-only ChatGPT boundary, permissions, provider behavior, Browser/sound notifications, and outbound-only Telegram behavior.
+
+Tracking: [Issue #85](https://github.com/ach1992/ai-chat-monitor/issues/85), [Issue #83](https://github.com/ach1992/ai-chat-monitor/issues/83), and [PR #84](https://github.com/ach1992/ai-chat-monitor/pull/84).
+
 ## 3.0.0 — 2026-08-30
 
 - Renamed the repository, extension, package, release artifact, UI, notifications, privacy policy, and current documentation to AI Chat Monitor / `ai-chat-monitor`.
