@@ -12,13 +12,19 @@
 - Extend the hidden Chromium regression to a realistic multi-turn mixed-selector DOM and require the exact newest assistant/user message IDs before accepting `TASK_COMPLETE`.
 - After further owner reproduction proved the live issue still unresolved, add bounded hidden-path diagnostics that retain timing, counts, assistant-change evidence, text lengths, generation/Stop/marker state, lifecycle, hidden event timing, and per-channel delivery outcome/timestamp without transcript text, credentials, or provider payloads. Synthetic Chrome tests are regression evidence only, not proof that the logged-in owner environment is fixed.
 - Prevent a same-document/same-epoch content-agent reannounce from erasing a newer accepted observation during MV3 recovery; a genuine page-epoch/route change still drops the prior observation and hidden diagnostic.
+- After owner validation of the integrated transport-completion candidate exposed an early false `RESPONSE_COMPLETE`, establish a persisted response-episode boundary at trusted `MANUAL_SEND` so the previous completed assistant/marker cannot be reprocessed as the new response's completion evidence before ChatGPT commits the next turn.
+- Stop user-interaction messages from directly running semantic/completion resolution against the unchanged prior observation, while preserving page-state blocker/error notifications and the strictly read-only ChatGPT boundary.
+- Require a demonstrably fresh assistant after a response starts; a fresh assistant observed in a transient `IDLE` state is not treated as complete unless it carries exact terminal semantic evidence, the current episode was actually observed generating, or bounded transport-completion evidence is correlated to that response episode.
+- Reserve generic `RESPONSE_COMPLETE` for the explicit bounded transport-completion fallback instead of using it as the default result of an otherwise ambiguous idle semantic resolution. Correlate hidden transport completion and deduplication to the current response episode.
+- Strengthen the Chrome-for-Testing response regression to model the full live race: previous completed assistant, trusted manual send, unchanged old assistant, new user ahead of the old assistant, fresh partial assistant with transient `IDLE`, current-response `GENERATING`, then hidden transport completion while final assistant DOM remains intentionally stale. No early completion event is allowed.
+- Document the Revision 8 response-episode evidence model and keep Issue #83/open owner validation as the final acceptance gate before any v3.0.3 GitHub Release.
 
 Tracking: [Issue #83](https://github.com/ach1992/ai-chat-monitor/issues/83).
 
 ## 3.0.2 — 2026-09-04
 
-- Correct hidden/background terminal-status extraction when Chromium exposes a stale/flattened rendered status prefix: structural terminal evidence now restores the final-line boundary before the existing fail-closed parser runs.
-- Make a still-running content agent self-reannounce after recoverable MV3 background-session loss instead of waiting for active-tab/Side Panel reconnect behavior.
+- Correct hidden/background terminal-status extraction when Chromium exposes a stale/flattened rendered marker prefix: structural DOM evidence now restores the terminal-line boundary before the existing fail-closed parser runs.
+- Make a still-running content agent self-reannounce after recoverable Manifest V3 background-session loss instead of waiting for active-tab/Side Panel reconnect behavior.
 - Protect monitored tabs from Chrome automatic discard while monitoring is enabled, restore the prior tab setting when monitoring stops, and surface frozen/discarded lifecycle state explicitly.
 - Replace the previous false-positive unpacked-extension smoke check with service-worker identity verification and add a real Chrome for Testing background-tab regression that proves hidden `TASK_COMPLETE` detection, lifecycle protection, and Browser-channel behavior where the test desktop retains notifications; deterministic notification-manager regressions cover Browser/Telegram routing independently of desktop-daemon availability.
 
