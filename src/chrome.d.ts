@@ -92,6 +92,82 @@ declare namespace chrome {
     ): Promise<TResponse>;
   }
 
+  namespace webRequest {
+    type ResourceType = "xmlhttprequest";
+
+    interface HttpHeader {
+      name: string;
+      value?: string;
+      binaryValue?: number[];
+    }
+
+    interface RequestFilter {
+      urls: string[];
+      types?: ResourceType[];
+      tabId?: number;
+      windowId?: number;
+    }
+
+    interface BaseRequestDetails {
+      requestId: string;
+      url: string;
+      method: string;
+      frameId: number;
+      parentFrameId: number;
+      tabId: number;
+      type: ResourceType;
+      timeStamp: number;
+      documentId?: string;
+      initiator?: string;
+    }
+
+    interface OnResponseStartedDetails extends BaseRequestDetails {
+      statusCode: number;
+      statusLine: string;
+      fromCache: boolean;
+      responseHeaders?: HttpHeader[];
+    }
+
+    interface OnCompletedDetails extends BaseRequestDetails {
+      statusCode: number;
+      statusLine: string;
+      fromCache: boolean;
+      responseHeaders?: HttpHeader[];
+    }
+
+    interface OnErrorOccurredDetails extends BaseRequestDetails {
+      error: string;
+      fromCache: boolean;
+    }
+
+    interface ResponseStartedEvent {
+      addListener(
+        callback: (details: OnResponseStartedDetails) => void,
+        filter: RequestFilter,
+        extraInfoSpec?: Array<"responseHeaders" | "extraHeaders">,
+      ): void;
+    }
+
+    interface CompletedEvent {
+      addListener(
+        callback: (details: OnCompletedDetails) => void,
+        filter: RequestFilter,
+        extraInfoSpec?: Array<"responseHeaders" | "extraHeaders">,
+      ): void;
+    }
+
+    interface ErrorOccurredEvent {
+      addListener(
+        callback: (details: OnErrorOccurredDetails) => void,
+        filter: RequestFilter,
+      ): void;
+    }
+
+    const onResponseStarted: ResponseStartedEvent;
+    const onCompleted: CompletedEvent;
+    const onErrorOccurred: ErrorOccurredEvent;
+  }
+
   namespace windows {
     interface Window {
       id?: number;
