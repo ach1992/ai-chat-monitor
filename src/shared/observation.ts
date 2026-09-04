@@ -41,6 +41,13 @@ export interface PageActionSnapshot {
   continueGeneratingAvailable: boolean;
 }
 
+export interface ResponseCompletionEvidence {
+  serial: number;
+  transport: "CHATGPT_CONVERSATION_STREAM";
+  visibility: "visible" | "hidden";
+  completedAt: number;
+}
+
 export interface PageObservation {
   conversationId?: string;
   routeKey: string;
@@ -48,6 +55,7 @@ export interface PageObservation {
   visibility?: "visible" | "hidden";
   generation: GenerationState;
   stopControlPresent?: boolean;
+  responseCompletion?: ResponseCompletionEvidence;
   latestUser?: UserTurnSnapshot;
   latestAssistant?: AssistantResponseSnapshot;
   composer: ComposerSnapshot;
@@ -98,6 +106,16 @@ function isTurnSnapshot(value: unknown): boolean {
   );
 }
 
+function isResponseCompletion(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.serial === "number" && Number.isInteger(value.serial) && value.serial >= 1 &&
+    value.transport === "CHATGPT_CONVERSATION_STREAM" &&
+    (value.visibility === "visible" || value.visibility === "hidden") &&
+    typeof value.completedAt === "number" && Number.isFinite(value.completedAt) && value.completedAt > 0
+  );
+}
+
 export function isPageObservation(value: unknown): value is PageObservation {
   if (!isRecord(value)) return false;
   if (
@@ -108,6 +126,7 @@ export function isPageObservation(value: unknown): value is PageObservation {
     (value.pageTitle !== undefined && (typeof value.pageTitle !== "string" || value.pageTitle.length > 300)) ||
     !isGenerationState(value.generation) ||
     (value.stopControlPresent !== undefined && typeof value.stopControlPresent !== "boolean") ||
+    (value.responseCompletion !== undefined && !isResponseCompletion(value.responseCompletion)) ||
     (value.confidence !== "HIGH" && value.confidence !== "LOW") ||
     !Number.isFinite(value.observedAt)
   ) {
