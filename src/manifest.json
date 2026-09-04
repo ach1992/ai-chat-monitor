@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AI Chat Monitor",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "description": "Monitors selected ChatGPT conversations and notifies you about completion, attention, and platform states without sending chat messages.",
   "minimum_chrome_version": "114",
   "permissions": ["storage", "sidePanel", "notifications", "offscreen", "clipboardWrite"],

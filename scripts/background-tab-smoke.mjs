@@ -247,9 +247,11 @@ try {
 
   const session = await waitFor(async () => {
     const stored = await evaluate(queryPage, "chrome.storage.session.get('guardian:session-registry:runtime')");
-    return stored["guardian:session-registry:runtime"]?.sessions?.find((candidate) => candidate.conversationId === CONVERSATION_ID) ?? false;
-  }, "background content-agent registration");
-  if (session.observation?.generation !== "GENERATING") throw new Error("Synthetic monitored chat did not begin in GENERATING state.");
+    const candidate = stored["guardian:session-registry:runtime"]?.sessions?.find(
+      (entry) => entry.conversationId === CONVERSATION_ID,
+    );
+    return candidate?.observation?.generation === "GENERATING" ? candidate : false;
+  }, "background content-agent registration in GENERATING state");
 
   await waitFor(async () => {
     const current = await evaluate(queryPage, `chrome.tabs.get(${tab.id}).then((item) => ({autoDiscardable:item.autoDiscardable}))`);

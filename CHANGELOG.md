@@ -1,13 +1,13 @@
 # Changelog
 
-## Unreleased
+## 3.0.2 — 2026-09-04
 
 - Correct hidden/background terminal-status extraction when Chromium exposes a stale/flattened rendered status prefix: structural terminal evidence now restores the final-line boundary before the existing fail-closed parser runs.
 - Make a still-running content agent self-reannounce after recoverable MV3 background-session loss instead of waiting for active-tab/Side Panel reconnect behavior.
 - Protect monitored tabs from Chrome automatic discard while monitoring is enabled, restore the prior tab setting when monitoring stops, and surface frozen/discarded lifecycle state explicitly.
-- Replace the previous false-positive unpacked-extension smoke check with service-worker identity verification and add a real Chrome for Testing background-tab regression that proves hidden `TASK_COMPLETE` detection plus Browser notification delivery.
+- Replace the previous false-positive unpacked-extension smoke check with service-worker identity verification and add a real Chrome for Testing background-tab regression that proves hidden `TASK_COMPLETE` detection, lifecycle protection, and Browser-channel behavior where the test desktop retains notifications; deterministic notification-manager regressions cover Browser/Telegram routing independently of desktop-daemon availability.
 
-Tracking: [Issue #83](https://github.com/ach1992/ai-chat-monitor/issues/83).
+Tracking: [Issue #91](https://github.com/ach1992/ai-chat-monitor/issues/91), [Issue #83](https://github.com/ach1992/ai-chat-monitor/issues/83), and [PR #90](https://github.com/ach1992/ai-chat-monitor/pull/90).
 
 ## 3.0.1 — 2026-09-04
 
