@@ -172,6 +172,16 @@ namespace GuardianContent {
 
   function hasCanonicalTerminalStatus(value: string): boolean {
     const normalized = value.replace(/\r\n?/g, "\n").trimEnd();
+    let occurrences = 0;
+    let offset = 0;
+    while (offset < normalized.length) {
+      const index = normalized.indexOf(STATUS_PREFIX, offset);
+      if (index < 0) break;
+      occurrences += 1;
+      if (occurrences > 1) return false;
+      offset = index + STATUS_PREFIX.length;
+    }
+    if (occurrences !== 1) return false;
     const terminalLine = normalized.split("\n").at(-1)?.trim() ?? "";
     return TERMINAL_STATUS_LINE.test(terminalLine);
   }

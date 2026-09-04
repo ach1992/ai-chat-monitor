@@ -138,9 +138,14 @@ test("malformed or code-rendered status never overrides a hidden Stop control", 
     makeDom(CANONICAL_STATUS, { stop: true, code: true }),
     { pathname: "/c/chat-bg" },
   );
+  const duplicate = new GuardianContent.BrowserChatGPTAdapter(
+    makeDom(`${CANONICAL_STATUS}\n${CANONICAL_STATUS}`, { stop: true }),
+    { pathname: "/c/chat-bg" },
+  );
 
   assert.equal((await malformed.observe(123)).generation, "GENERATING");
   assert.equal((await codeRendered.observe(123)).generation, "GENERATING");
+  assert.equal((await duplicate.observe(123)).generation, "GENERATING");
 });
 
 
