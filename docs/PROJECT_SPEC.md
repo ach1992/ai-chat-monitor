@@ -270,6 +270,9 @@ Current corrective invariant (Issue #83 Contract Revision 3): in a hidden runnab
 
 The unreleased `3.0.3` candidate under Issue #83 Contract Revision 4 additionally separates monitoring authority from active-tab UI state. The Side Panel is global across tabs and may show the active tab as non-ChatGPT while independently listing monitored chats that continue in the background. Side Panel refresh must not be required to reconnect a content agent. Managed-chat diagnostics expose only bounded observation metadata (last observation time, hidden/visible state, generation, lifecycle) so real-browser failures can be localized without storing transcript content or credentials. The real Chromium regression closes the Side Panel and force-restarts the MV3 worker while the monitored tab remains hidden; the hidden content agent must restart the worker and deliver the monitoring event without tab activation.
 
+
+Issue #83 Contract Revision 5 adds a second unreleased `3.0.3` correction from real owner evidence: supported assistant/user selector matches must be resolved in actual DOM order. Grouping matches by selector can select an older assistant turn while a newer hidden/streaming turn temporarily uses a different DOM shape, delaying status-marker recognition until foreground reconciliation. The Chromium regression therefore uses multiple turns with mixed selector shapes and requires the newest assistant/user message identities while the tab remains hidden.
+
 ## Historical note
 
 v1.x implemented guarded automatic continuation and in-chat self-check behavior. Those capabilities are intentionally removed from the v2 product contract. Historical v1 documentation may remain only when clearly labeled as historical evidence and must not be presented as current behavior.

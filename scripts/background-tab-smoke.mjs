@@ -16,8 +16,10 @@ const STATUS_LINE = 'AI_CHAT_MONITOR_STATUS={"decision":"COMPLETE"}';
 const TEST_HTML = `<!doctype html>
 <meta charset="utf-8">
 <title>AI Chat Monitor background smoke</title>
+<article data-turn="user" data-message-id="user-old">Earlier request.</article>
+<article data-turn="assistant" data-message-id="assistant-old">Older assistant response.</article>
 <div data-message-author-role="user" data-message-id="user-1">Please finish the task.</div>
-<div data-message-author-role="assistant" data-message-id="assistant-1" id="assistant">Working...</div>
+<article id="latest-turn"><div data-message-author-role="assistant" data-message-id="assistant-1" id="assistant">Working...</div></article>
 <div id="prompt-textarea" data-testid="composer" contenteditable="true"></div>
 <button data-testid="stop-button" id="stop">Stop generating</button>`;
 
@@ -310,6 +312,12 @@ try {
   )?.observation;
   if (observation?.latestAssistant?.normalizedText !== `Task done.\n${STATUS_LINE}`) {
     throw new Error(`Hidden observation lost the terminal status boundary: ${JSON.stringify(observation?.latestAssistant?.normalizedText)}`);
+  }
+  if (observation?.latestAssistant?.domMessageId !== "assistant-1") {
+    throw new Error(`Hidden observation selected the wrong assistant turn: ${JSON.stringify(observation?.latestAssistant?.domMessageId)}`);
+  }
+  if (observation?.latestUser?.domMessageId !== "user-1") {
+    throw new Error(`Hidden observation paired the wrong user turn: ${JSON.stringify(observation?.latestUser?.domMessageId)}`);
   }
   if (observation?.visibility !== "hidden") {
     throw new Error(`Final monitoring observation was not captured while hidden: ${JSON.stringify(observation?.visibility)}`);

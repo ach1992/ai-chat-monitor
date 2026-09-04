@@ -136,8 +136,18 @@ namespace GuardianContent {
     return [...found];
   }
 
-  function assistantMatches(document: Document): Element[] { return allMatches(document, ASSISTANT_SELECTORS); }
-  function userMatches(document: Document): Element[] { return allMatches(document, USER_SELECTORS); }
+  function orderedMatches(document: Document, selectors: readonly string[]): Element[] {
+    try {
+      const matches = [...document.querySelectorAll(selectors.join(","))];
+      if (matches.length > 0) return matches;
+    } catch {
+      // DOM drift must remain observational and fail closed.
+    }
+    return allMatches(document, selectors);
+  }
+
+  function assistantMatches(document: Document): Element[] { return orderedMatches(document, ASSISTANT_SELECTORS); }
+  function userMatches(document: Document): Element[] { return orderedMatches(document, USER_SELECTORS); }
 
   function latestUserBeforeAssistant(document: Document, assistant: Element): Element | undefined {
     const users = userMatches(document);

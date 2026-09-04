@@ -2,7 +2,7 @@
 
 Status:
 
-- **GitHub release:** `v3.0.2` published and artifact-verified, but post-release owner validation found remaining inactive-tab reliability/diagnostic gaps tracked by Issue #83 Contract Revisions 3–4.
+- **GitHub release:** `v3.0.2` published and artifact-verified, but post-release owner validation found remaining inactive-tab reliability/diagnostic gaps tracked by Issue #83 Contract Revisions 3–5.
 - **Unreleased candidate:** source version `3.0.3` contains Issue #83 corrections/diagnostics but is not a published release and remains gated on owner live validation.
 - **Chrome Web Store:** not submitted or published; production action deferred. Do not submit v3.0.2 or an unvalidated 3.0.3 candidate as the resolved background-reliability build.
 
