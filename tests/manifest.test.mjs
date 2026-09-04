@@ -7,12 +7,13 @@ const manifest = JSON.parse(await readFile(new URL("../dist/manifest.json", impo
 test("manifest is MV3 with bounded monitoring and local notification permissions", () => {
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.minimum_chrome_version, "114");
-  assert.deepEqual([...manifest.permissions].sort(), ["clipboardWrite", "notifications", "offscreen", "sidePanel", "storage"]);
+  assert.deepEqual([...manifest.permissions].sort(), ["clipboardWrite", "notifications", "offscreen", "sidePanel", "storage", "webRequest"]);
   assert.deepEqual(manifest.host_permissions, [
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
   ]);
   assert.deepEqual(manifest.optional_host_permissions, ["https://*/*"]);
+  assert.equal(manifest.permissions.includes("webRequestBlocking"), false, "response lifecycle observation must remain non-blocking");
   assert.equal(manifest.permissions.includes("tabs"), false, "tab URL access remains host-scoped rather than requesting broad tabs permission");
   assert.equal(manifest.side_panel.default_path, "sidepanel/index.html");
   assert.match(manifest.description, /Monitors selected ChatGPT conversations/i);
