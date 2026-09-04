@@ -2,7 +2,7 @@
 
 AI Chat Monitor is a Chromium Manifest V3 extension that **monitors selected ChatGPT conversations without controlling them**. It observes page/runtime state, resolves an optional semantic work status, and sends configurable Browser, local sound, and Telegram notifications.
 
-**Current published release: [v3.0.2](https://github.com/ach1992/ai-chat-monitor/releases/tag/v3.0.2).** Post-release owner validation found remaining inactive-tab reliability gaps, and owner validation of subsequent unreleased `3.0.3` candidates still reproduces the live failure, so neither v3.0.2 nor current source should be treated as the resolved background-monitoring build. Current unreleased source, tracked by [Issue #83](https://github.com/ach1992/ai-chat-monitor/issues/83), preserves the independently useful background safeguards and DOM-ordered latest-turn fix, restores tab-scoped Side Panel behavior, and adds a privacy-safe hidden-path diagnostic snapshot that does not add transcript text to its retained/copied evidence. The product remains strictly read-only.
+**Current published release: [v3.0.2](https://github.com/ach1992/ai-chat-monitor/releases/tag/v3.0.2).** Post-release owner validation found remaining inactive-tab reliability gaps, so v3.0.2 must not be treated as the resolved background-monitoring build. Current unreleased `3.0.3` source, tracked by [Issue #83](https://github.com/ach1992/ai-chat-monitor/issues/83), now correlates completion authority to the current response episode so a newly sent prompt cannot re-use the previous completed assistant turn as a fresh completion event, while preserving the independently useful hidden-tab, lifecycle, MV3 recovery, diagnostics, tab-scoped Side Panel, and read-only safeguards. Exact integrated owner validation is still required before a v3.0.3 release.
 
 ## Single purpose
 
@@ -198,6 +198,8 @@ See [PRIVACY.md](PRIVACY.md) for the complete current policy.
 - [Architecture](docs/ARCHITECTURE.md)
 - [Project specification](docs/PROJECT_SPEC.md)
 - [Conversation status protocol](docs/CONVERSATION_STATUS_PROTOCOL.md)
+- [Revision 7 background monitoring](docs/REV7_BACKGROUND_MONITORING.md)
+- [Revision 8 response-episode correlation](docs/REV8_RESPONSE_EPISODE.md)
 - [Privacy policy](PRIVACY.md)
 - [Chrome Web Store listing copy](docs/CHROME_WEB_STORE_LISTING.md)
 - [Store readiness](docs/STORE_READINESS.md)
@@ -206,7 +208,7 @@ See [PRIVACY.md](PRIVACY.md) for the complete current policy.
 
 ## Release state
 
-`v3.0.2` is the current artifact-verified published GitHub release, but it must not be treated as proof that inactive-tab monitoring is fully resolved. Current source is `3.0.3` (unreleased) with Issue #83 corrections and diagnostics; GitHub Release `v3.0.3` remains gated on owner validation in the real logged-in Chrome environment.
+`v3.0.2` is the current artifact-verified published GitHub release, but it must not be treated as proof that inactive-tab monitoring is fully resolved. Current source is `3.0.3` (unreleased) with Issue #83 response-episode, hidden-completion, lifecycle, and diagnostic corrections; GitHub Release `v3.0.3` remains gated on owner validation in the real logged-in Chrome environment.
 
 - Release target commit: `51cc8b6b1bac484309f4cc7537e183917d94fdc0`
 - Release ZIP: `ai-chat-monitor-3.0.2.zip`
