@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { monitoringEventIdentity, responseEpisodeAssistantState } from "../dist/monitoring/service.js";
+import { monitoringEventIdentity, responseEpisodeAssistantState, responseEpisodeStartedAt } from "../dist/monitoring/service.js";
 
 function session(latestAssistant) {
   return {
@@ -68,7 +68,6 @@ test("fingerprint remains the bounded fallback when no DOM message identity exis
   }), runtime), "a".repeat(64));
 });
 
-
 test("response episode rejects the previous assistant and pre-send observations", () => {
   const current = session({
     normalizedText: "previous",
@@ -108,4 +107,12 @@ test("response episode accepts only a demonstrably fresh assistant identity", ()
     baselineAssistantDomMessageId: "assistant-old",
   };
   assert.equal(responseEpisodeAssistantState(current), "FRESH_ASSISTANT");
+});
+
+test("newer observed generation supersedes an older manual-send episode", () => {
+  assert.equal(responseEpisodeStartedAt(100, undefined), 100);
+  assert.equal(responseEpisodeStartedAt(undefined, 200), 200);
+  assert.equal(responseEpisodeStartedAt(100, 200), 200);
+  assert.equal(responseEpisodeStartedAt(300, 200), 300);
+  assert.equal(responseEpisodeStartedAt(undefined, undefined), undefined);
 });

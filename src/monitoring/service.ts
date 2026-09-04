@@ -67,6 +67,7 @@ interface ResolutionCacheState {
 interface GenerationProgress {
   fingerprint?: string;
   textLength: number;
+  startedAt: number;
   changedAt: number;
   notified: boolean;
 }
@@ -190,6 +191,15 @@ export function monitoringEventIdentity(session: SessionView, runtime: Monitorin
 
 export type ResponseEpisodeAssistantState = "UNSCOPED" | "WAITING_FOR_FRESH_ASSISTANT" | "FRESH_ASSISTANT";
 
+export function responseEpisodeStartedAt(
+  manualStartedAt: number | undefined,
+  generationStartedAt: number | undefined,
+): number | undefined {
+  if (generationStartedAt === undefined) return manualStartedAt;
+  if (manualStartedAt === undefined) return generationStartedAt;
+  return Math.max(manualStartedAt, generationStartedAt);
+}
+
 export function responseEpisodeAssistantState(session: SessionView): ResponseEpisodeAssistantState {
   const episode = session.pendingResponse;
   if (episode === undefined) return "UNSCOPED";
@@ -295,12 +305,19 @@ export class MonitoringService {
 
     const completion = observation.responseCompletion;
     const episodeState = responseEpisodeAssistantState(session);
-    const sawGenerating = this.#generation.has(conversationId);
+    const generationStartedAt = this.#generation.get(conversationId)?.startedAt;
+    const sawGenerating = generationStartedAt !== undefined;
     const pageEvent = eventForPageState(state);
 
     if (observation.generation === "GENERATING") {
       await this.#handleGenerating(session, policy, state);
-      await this.#maybeEmitTransportCompletion(session, policy, state, completion, true);
+      await this.#maybeEmitTransportCompletion(
+        session,
+        policy,
+        state,
+        completion,
+        this.#generation.get(conversationId)?.startedAt,
+      );
       return;
     }
 
@@ -321,7 +338,7 @@ export class MonitoringService {
       };
       this.#runtime.set(session.tabId, runtime);
       if (pageEvent !== undefined) await this.#emitEvent(session, policy, runtime, pageEvent);
-      await this.#maybeEmitTransportCompletion(session, policy, state, completion, sawGenerating);
+      await this.#maybeEmitTransportCompletion(session, policy, state, completion, generationStartedAt);
       return;
     }
     const assistant = observation.latestAssistant;
@@ -342,7 +359,7 @@ export class MonitoringService {
       };
       this.#runtime.set(session.tabId, runtime);
       if (pageEvent !== undefined) await this.#emitEvent(session, policy, runtime, pageEvent);
-      await this.#maybeEmitTransportCompletion(session, policy, state, completion, sawGenerating);
+      await this.#maybeEmitTransportCompletion(session, policy, state, completion, generationStartedAt);
       return;
     }
 
@@ -405,7 +422,7 @@ export class MonitoringService {
     };
     this.#runtime.set(session.tabId, runtime);
     if (eventType !== undefined) await this.#emitEvent(session, policy, runtime, eventType);
-    await this.#maybeEmitTransportCompletion(session, policy, state, completion, sawGenerating);
+    await this.#maybeEmitTransportCompletion(session, policy, state, completion, generationStartedAt);
   }
 
   async updateChat(tabId: number, expectedConversationId: string, patch: ChatMonitoringPolicyPatch): Promise<ResolvedMonitoringPolicy> {
@@ -629,7 +646,13 @@ export class MonitoringService {
     const existing = this.#generation.get(conversationId);
     const changed = existing === undefined || existing.fingerprint !== currentFingerprint || existing.textLength !== currentLength;
     const progress: GenerationProgress = changed
-      ? { ...(currentFingerprint === undefined ? {} : { fingerprint: currentFingerprint }), textLength: currentLength, changedAt: now, notified: false }
+      ? {
+          ...(currentFingerprint === undefined ? {} : { fingerprint: currentFingerprint }),
+          textLength: currentLength,
+          startedAt: existing?.startedAt ?? now,
+          changedAt: now,
+          notified: false,
+        }
       : existing;
     this.#generation.set(conversationId, progress);
 
@@ -675,18 +698,16 @@ export class MonitoringService {
     policy: ResolvedMonitoringPolicy,
     state: MonitoringPageState,
     completion: ResponseCompletionEvidence | undefined,
-    sawGenerating: boolean,
+    generationStartedAt: number | undefined,
   ): Promise<void> {
     if (completion?.visibility !== "hidden") return;
     const conversationId = session.conversationId;
     if (conversationId === undefined) return;
 
-    const episode = session.pendingResponse;
-    if (episode !== undefined && completion.completedAt < episode.startedAt) return;
-    if (episode === undefined && !sawGenerating) return;
+    const episodeStartedAt = responseEpisodeStartedAt(session.pendingResponse?.startedAt, generationStartedAt);
+    if (episodeStartedAt === undefined || completion.completedAt < episodeStartedAt) return;
 
-    const episodeStartedAt = episode?.startedAt;
-    const deliveredSince = episodeStartedAt ?? completion.completedAt;
+    const deliveredSince = episodeStartedAt;
     const alreadyDelivered = this.#history.snapshot(200).some((event) =>
       event.conversationId === conversationId &&
       event.at >= deliveredSince &&
@@ -708,9 +729,7 @@ export class MonitoringService {
     };
     this.#runtime.set(session.tabId, runtime);
     await this.#emitEvent(session, policy, runtime, "RESPONSE_COMPLETE", {
-      identity: episodeStartedAt === undefined
-        ? `transport:${session.documentId}:${completion.serial}`
-        : `response:${session.documentId}:${episodeStartedAt}`,
+      identity: `response:${session.documentId}:${episodeStartedAt}`,
       at: completion.completedAt,
     });
   }

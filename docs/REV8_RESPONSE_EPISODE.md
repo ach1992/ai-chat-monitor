@@ -42,7 +42,7 @@ Normal page-state events such as Retry, rate limit, network error, authenticatio
 
 Revision 8 removes the generic `RESPONSE_COMPLETE` fallback from an otherwise ambiguous idle semantic resolution. Generic response-finished notification is reserved for the explicit bounded transport-completion fallback.
 
-A hidden transport completion must belong to the current response episode. When no explicit manual-send episode is available, transport fallback requires an actually observed generating episode. Delivery deduplication is scoped from the response-episode start so a specific semantic event already delivered for that response suppresses the generic fallback.
+A hidden transport completion must belong to the current response episode. When no explicit manual-send episode is available, transport fallback requires an actually observed generating episode. If a later Retry/Regenerate-style response produces a newer observed generation start than the retained manual-send boundary, that newer generation start becomes the response-episode identity so an older completed episode cannot suppress the new response. Delivery deduplication is scoped from the effective response-episode start so a specific semantic event already delivered for that response suppresses the generic fallback.
 
 Transport evidence remains completion authority only. It never fabricates `COMPLETE`, approval, decision, human-operation, provider, or other semantic state.
 
