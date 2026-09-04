@@ -40,6 +40,9 @@ export interface NotificationDeliveryReport {
   browser: NotificationDeliveryState;
   sound: NotificationDeliveryState;
   telegram: NotificationDeliveryState;
+  browserAt?: number;
+  soundAt?: number;
+  telegramAt?: number;
 }
 
 export type TelegramEventMode = "INHERIT" | "CUSTOM";
