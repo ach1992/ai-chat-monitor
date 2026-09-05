@@ -1,4 +1,4 @@
-import type { GenerationState, PageObservation } from "../shared/observation.js";
+import type { PageObservation } from "../shared/observation.js";
 
 export type ControlEligibility = "OWNER" | "MIRROR" | "NONE";
 
@@ -10,42 +10,6 @@ export type SessionEventRejectReason =
   | "FUTURE_EPOCH"
   | "STALE_SEQUENCE"
   | "IDENTITY_MISMATCH";
-
-export type HiddenMarkerHealth = "DETECTED" | "MISSING" | "MALFORMED";
-
-export type SessionInteractionKind =
-  | "COMPOSER_INPUT"
-  | "COMPOSER_FOCUS"
-  | "MANUAL_SEND"
-  | "STOP_GENERATION"
-  | "EDIT_TURN"
-  | "BLOCKING_INTERACTION";
-
-export interface PendingResponseEpisode {
-  startedAt: number;
-  baselineAssistantFingerprint?: string;
-  baselineAssistantDomMessageId?: string;
-}
-
-export interface HiddenMonitoringDiagnosticSnapshot {
-  backgroundedAt: number;
-  foregroundedAt?: number;
-  tabActivatedAt?: number;
-  visibleObservedAt?: number;
-  baselineAssistantFingerprint?: string;
-  baselineAssistantTextLength?: number;
-  hiddenObservationCount: number;
-  firstHiddenObservationAt?: number;
-  lastHiddenObservationAt?: number;
-  firstAssistantChangeAt?: number;
-  firstMarkerDetectedAt?: number;
-  hiddenAssistantTextLength?: number;
-  assistantChanged: boolean;
-  hiddenGeneration?: GenerationState;
-  hiddenStopControlPresent?: boolean;
-  hiddenMarkerHealth?: HiddenMarkerHealth;
-  transportCompletedAt?: number;
-}
 
 export interface AgentRegistration {
   tabId: number;
@@ -76,7 +40,6 @@ export interface ObservationEvent {
   pageEpoch: number;
   sequence: number;
   observation: PageObservation;
-  markerHealth?: HiddenMarkerHealth;
   sentAt: number;
 }
 
@@ -86,7 +49,6 @@ export interface InteractionEvent {
   agentInstanceId: string;
   pageEpoch: number;
   sequence: number;
-  interaction: SessionInteractionKind;
   sentAt: number;
 }
 
@@ -102,9 +64,6 @@ export interface SessionSnapshot {
   lastSeenAt: number;
   lastUserInteractionAt?: number;
   observation?: PageObservation;
-  lastObservationVisibility?: PageObservation["visibility"];
-  pendingResponse?: PendingResponseEpisode;
-  hiddenDiagnostic?: HiddenMonitoringDiagnosticSnapshot;
 }
 
 export interface SessionView extends SessionSnapshot {
@@ -138,66 +97,6 @@ function cloneSnapshot(snapshot: SessionSnapshot): SessionSnapshot {
   return structuredClone(snapshot);
 }
 
-function validOptionalFinite(value: unknown): boolean {
-  return value === undefined || (typeof value === "number" && Number.isFinite(value));
-}
-
-function validOptionalNonNegativeInteger(value: unknown): boolean {
-  return value === undefined || (Number.isInteger(value) && (value as number) >= 0);
-}
-
-function validOptionalFingerprint(value: unknown): boolean {
-  return value === undefined || (typeof value === "string" && /^[a-f0-9]{64}$/.test(value));
-}
-
-function validOptionalGeneration(value: unknown): boolean {
-  return value === undefined || value === "IDLE" || value === "GENERATING" || value === "UNKNOWN";
-}
-
-function validOptionalVisibility(value: unknown): boolean {
-  return value === undefined || value === "visible" || value === "hidden";
-}
-
-function validOptionalMarkerHealth(value: unknown): boolean {
-  return value === undefined || value === "DETECTED" || value === "MISSING" || value === "MALFORMED";
-}
-
-function validHiddenDiagnostic(value: unknown): value is HiddenMonitoringDiagnosticSnapshot {
-  if (typeof value !== "object" || value === null) return false;
-  const candidate = value as Partial<HiddenMonitoringDiagnosticSnapshot>;
-  return (
-    typeof candidate.backgroundedAt === "number" &&
-    Number.isFinite(candidate.backgroundedAt) &&
-    validOptionalFinite(candidate.foregroundedAt) &&
-    validOptionalFinite(candidate.tabActivatedAt) &&
-    validOptionalFinite(candidate.visibleObservedAt) &&
-    validOptionalFingerprint(candidate.baselineAssistantFingerprint) &&
-    validOptionalNonNegativeInteger(candidate.baselineAssistantTextLength) &&
-    Number.isInteger(candidate.hiddenObservationCount) &&
-    (candidate.hiddenObservationCount as number) >= 0 &&
-    validOptionalFinite(candidate.firstHiddenObservationAt) &&
-    validOptionalFinite(candidate.lastHiddenObservationAt) &&
-    validOptionalFinite(candidate.firstAssistantChangeAt) &&
-    validOptionalFinite(candidate.firstMarkerDetectedAt) &&
-    validOptionalNonNegativeInteger(candidate.hiddenAssistantTextLength) &&
-    typeof candidate.assistantChanged === "boolean" &&
-    validOptionalGeneration(candidate.hiddenGeneration) &&
-    (candidate.hiddenStopControlPresent === undefined || typeof candidate.hiddenStopControlPresent === "boolean") &&
-    validOptionalMarkerHealth(candidate.hiddenMarkerHealth) &&
-    validOptionalFinite(candidate.transportCompletedAt)
-  );
-}
-
-function validPendingResponse(value: unknown): value is PendingResponseEpisode {
-  if (typeof value !== "object" || value === null) return false;
-  const candidate = value as Partial<PendingResponseEpisode>;
-  return (
-    typeof candidate.startedAt === "number" && Number.isFinite(candidate.startedAt) && candidate.startedAt > 0 &&
-    validOptionalFingerprint(candidate.baselineAssistantFingerprint) &&
-    (candidate.baselineAssistantDomMessageId === undefined || typeof candidate.baselineAssistantDomMessageId === "string")
-  );
-}
-
 function validSnapshot(session: SessionSnapshot): boolean {
   return (
     Number.isInteger(session.tabId) &&
@@ -213,9 +112,7 @@ function validSnapshot(session: SessionSnapshot): boolean {
     typeof session.routeKey === "string" &&
     session.routeKey.length > 0 &&
     Number.isFinite(session.registeredAt) &&
-    Number.isFinite(session.lastSeenAt) &&
-    validOptionalVisibility(session.lastObservationVisibility) &&
-    (session.pendingResponse === undefined || validPendingResponse(session.pendingResponse))
+    Number.isFinite(session.lastSeenAt)
   );
 }
 
@@ -233,9 +130,6 @@ export class SessionRegistry {
     for (const stored of state.sessions) {
       if (!validSnapshot(stored)) continue;
       const session = cloneSnapshot(stored);
-      if (session.hiddenDiagnostic !== undefined && !validHiddenDiagnostic(session.hiddenDiagnostic)) {
-        delete session.hiddenDiagnostic;
-      }
       if (options.invalidateObservations === true) {
         delete session.observation;
       }
@@ -297,11 +191,6 @@ export class SessionRegistry {
     const sameDocumentAgent =
       existing?.documentId === registration.documentId &&
       existing.agentInstanceId === registration.agentInstanceId;
-    const sameSessionIdentity =
-      sameDocumentAgent &&
-      existing.pageEpoch === registration.pageEpoch &&
-      existing.routeKey === registration.routeKey &&
-      optionalStringEquals(existing.conversationId, registration.conversationId);
     const snapshot: SessionSnapshot = {
       tabId: registration.tabId,
       documentId: registration.documentId,
@@ -312,21 +201,6 @@ export class SessionRegistry {
       registeredAt: sameDocumentAgent ? existing.registeredAt : registration.sentAt,
       lastSeenAt: registration.sentAt,
       ...(registration.conversationId === undefined ? {} : { conversationId: registration.conversationId }),
-      ...(sameSessionIdentity && existing.observation !== undefined
-        ? { observation: cloneObservation(existing.observation) }
-        : {}),
-      ...(sameSessionIdentity && existing.lastObservationVisibility !== undefined
-        ? { lastObservationVisibility: existing.lastObservationVisibility }
-        : {}),
-      ...(sameSessionIdentity && existing.lastUserInteractionAt !== undefined
-        ? { lastUserInteractionAt: existing.lastUserInteractionAt }
-        : {}),
-      ...(sameSessionIdentity && existing.pendingResponse !== undefined
-        ? { pendingResponse: structuredClone(existing.pendingResponse) }
-        : {}),
-      ...(sameSessionIdentity && existing.hiddenDiagnostic !== undefined
-        ? { hiddenDiagnostic: structuredClone(existing.hiddenDiagnostic) }
-        : {}),
     };
 
     this.#sessions.set(registration.tabId, snapshot);
@@ -369,96 +243,11 @@ export class SessionRegistry {
       return { accepted: false, reason: "IDENTITY_MISMATCH" };
     }
 
-    let hiddenDiagnostic = session.hiddenDiagnostic;
-    if (event.observation.visibility === "hidden") {
-      const prior = hiddenDiagnostic ?? {
-        backgroundedAt: event.observation.observedAt,
-        ...(session.observation?.latestAssistant?.fingerprint === undefined
-          ? {}
-          : { baselineAssistantFingerprint: session.observation.latestAssistant.fingerprint }),
-        ...(session.observation?.latestAssistant?.textLength === undefined
-          ? {}
-          : { baselineAssistantTextLength: session.observation.latestAssistant.textLength }),
-        hiddenObservationCount: 0,
-        assistantChanged: false,
-      };
-      const assistant = event.observation.latestAssistant;
-      const currentFingerprint = assistant?.fingerprint;
-      const existingBaselineFingerprint = prior.baselineAssistantFingerprint;
-      const baselineFingerprint = existingBaselineFingerprint ?? currentFingerprint;
-      const baselineTextLength = prior.baselineAssistantTextLength ?? assistant?.textLength;
-      const changedNow = existingBaselineFingerprint !== undefined &&
-        currentFingerprint !== undefined &&
-        currentFingerprint !== existingBaselineFingerprint;
-      const markerDetectedNow = event.markerHealth === "DETECTED";
-      hiddenDiagnostic = {
-        ...prior,
-        ...(baselineFingerprint === undefined ? {} : { baselineAssistantFingerprint: baselineFingerprint }),
-        ...(baselineTextLength === undefined ? {} : { baselineAssistantTextLength: baselineTextLength }),
-        hiddenObservationCount: prior.hiddenObservationCount + 1,
-        ...(prior.firstHiddenObservationAt === undefined ? { firstHiddenObservationAt: event.observation.observedAt } : {}),
-        lastHiddenObservationAt: event.observation.observedAt,
-        ...(changedNow && prior.firstAssistantChangeAt === undefined ? { firstAssistantChangeAt: event.observation.observedAt } : {}),
-        ...(markerDetectedNow && prior.firstMarkerDetectedAt === undefined ? { firstMarkerDetectedAt: event.observation.observedAt } : {}),
-        assistantChanged: prior.assistantChanged || changedNow,
-        hiddenGeneration: event.observation.generation,
-        ...(event.observation.stopControlPresent === undefined
-          ? {}
-          : { hiddenStopControlPresent: event.observation.stopControlPresent }),
-        ...(event.markerHealth === undefined ? {} : { hiddenMarkerHealth: event.markerHealth }),
-        ...(assistant?.textLength === undefined ? {} : { hiddenAssistantTextLength: assistant.textLength }),
-      };
-    }
-
-    const responseTerminalStatus = event.observation.responseTerminalStatus;
-    if (responseTerminalStatus?.visibility === "hidden") {
-      const assistant = session.observation?.latestAssistant;
-      const prior = hiddenDiagnostic ?? {
-        backgroundedAt: responseTerminalStatus.completedAt,
-        ...(assistant?.fingerprint === undefined ? {} : { baselineAssistantFingerprint: assistant.fingerprint }),
-        ...(assistant?.textLength === undefined ? {} : { baselineAssistantTextLength: assistant.textLength }),
-        hiddenObservationCount: 0,
-        assistantChanged: false,
-      };
-      hiddenDiagnostic = {
-        ...prior,
-        ...(prior.firstMarkerDetectedAt === undefined ? { firstMarkerDetectedAt: responseTerminalStatus.completedAt } : {}),
-        hiddenMarkerHealth: "DETECTED",
-      };
-    }
-
-    const responseCompletion = event.observation.responseCompletion;
-    if (responseCompletion?.visibility === "hidden") {
-      const assistant = session.observation?.latestAssistant;
-      const prior = hiddenDiagnostic ?? {
-        backgroundedAt: responseCompletion.completedAt,
-        ...(assistant?.fingerprint === undefined ? {} : { baselineAssistantFingerprint: assistant.fingerprint }),
-        ...(assistant?.textLength === undefined ? {} : { baselineAssistantTextLength: assistant.textLength }),
-        hiddenObservationCount: 0,
-        assistantChanged: false,
-      };
-      hiddenDiagnostic = {
-        ...prior,
-        transportCompletedAt: responseCompletion.completedAt,
-      };
-    }
-
-    if (event.observation.visibility === "visible" && hiddenDiagnostic !== undefined) {
-      const visibleObservedAt = hiddenDiagnostic.visibleObservedAt ?? event.observation.observedAt;
-      hiddenDiagnostic = {
-        ...hiddenDiagnostic,
-        visibleObservedAt,
-        foregroundedAt: hiddenDiagnostic.foregroundedAt ?? visibleObservedAt,
-      };
-    }
-
     const next: SessionSnapshot = {
       ...session,
       lastSequence: event.sequence,
       lastSeenAt: event.sentAt,
       observation: cloneObservation(event.observation),
-      ...(event.observation.visibility === undefined ? {} : { lastObservationVisibility: event.observation.visibility }),
-      ...(hiddenDiagnostic === undefined ? {} : { hiddenDiagnostic }),
     };
     this.#sessions.set(event.tabId, next);
     return { accepted: true, session: this.#view(next) };
@@ -470,67 +259,22 @@ export class SessionRegistry {
     if (reject !== undefined) return { accepted: false, reason: reject };
     if (session === undefined) return { accepted: false, reason: "NO_SESSION" };
 
-    const baselineAssistant = session.observation?.latestAssistant;
-    const pendingResponse = event.interaction === "MANUAL_SEND"
-      ? {
-          startedAt: event.sentAt,
-          ...(baselineAssistant?.fingerprint === undefined ? {} : { baselineAssistantFingerprint: baselineAssistant.fingerprint }),
-          ...(baselineAssistant?.domMessageId === undefined ? {} : { baselineAssistantDomMessageId: baselineAssistant.domMessageId }),
-        }
-      : session.pendingResponse;
-
     const next: SessionSnapshot = {
       ...session,
       lastSequence: event.sequence,
       lastSeenAt: event.sentAt,
       lastUserInteractionAt: event.sentAt,
-      ...(pendingResponse === undefined ? {} : { pendingResponse }),
     };
     this.#sessions.set(event.tabId, next);
     return { accepted: true, session: this.#view(next) };
   }
 
-  markBackgrounded(tabId: number, at: number): boolean {
-    const session = this.#sessions.get(tabId);
-    if (session === undefined || !Number.isFinite(at)) return false;
-    if (
-      session.observation?.visibility === "hidden" &&
-      session.hiddenDiagnostic !== undefined &&
-      session.hiddenDiagnostic.foregroundedAt === undefined
-    ) {
-      return false;
-    }
-    const assistant = session.observation?.latestAssistant;
-    const next: SessionSnapshot = {
-      ...session,
-      hiddenDiagnostic: {
-        backgroundedAt: at,
-        ...(assistant?.fingerprint === undefined ? {} : { baselineAssistantFingerprint: assistant.fingerprint }),
-        ...(assistant?.textLength === undefined ? {} : { baselineAssistantTextLength: assistant.textLength }),
-        hiddenObservationCount: 0,
-        assistantChanged: false,
-      },
-    };
-    this.#sessions.set(tabId, next);
-    return true;
-  }
-
-  markForegrounded(tabId: number, at: number): boolean {
-    const session = this.#sessions.get(tabId);
-    const hiddenDiagnostic = session?.hiddenDiagnostic;
-    if (session === undefined || hiddenDiagnostic === undefined || !Number.isFinite(at)) return false;
-    this.#sessions.set(tabId, {
-      ...session,
-      hiddenDiagnostic: {
-        ...hiddenDiagnostic,
-        tabActivatedAt: hiddenDiagnostic.tabActivatedAt ?? at,
-        foregroundedAt: hiddenDiagnostic.foregroundedAt ?? at,
-      },
-    });
-    return true;
-  }
-
   invalidateTab(tabId: number): void {
+    // A tabs.onUpdated("loading") event does not identify which exact document caused it.
+    // Drop the live session so stale observations fail closed, but do not tombstone the
+    // document here: the same exact content agent may already have registered before the
+    // loading callback is delivered and must be allowed to reconnect. True document
+    // replacement is still retired by registerAgent when a newer document takes over.
     this.#sessions.delete(tabId);
   }
 

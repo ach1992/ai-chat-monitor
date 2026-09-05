@@ -1,7 +1,6 @@
 import type { ClassificationResult } from "../classification/types.js";
 import type { ConversationStatusMarkerHealth, ConversationProtocolDecision } from "../classification/conversation-protocol.js";
 import type { BlockingReason, GenerationState } from "../shared/observation.js";
-import type { NotificationDeliveryReport } from "../notifications/types.js";
 
 export type MonitoringEventType =
   | "RESPONSE_COMPLETE"
@@ -81,7 +80,7 @@ export interface MonitoringRuntimeStatus {
   tabId: number;
   conversationId?: string;
   enabled: boolean;
-  generation?: GenerationState | undefined;
+  generation?: GenerationState;
   pageState: MonitoringPageState;
   blockingReasons: BlockingReason[];
   semanticDecision?: ConversationProtocolDecision;
@@ -104,8 +103,6 @@ export interface MonitoringEvent {
   semanticSource: SemanticStatusSource;
   markerHealth: ConversationStatusMarkerHealth;
   assistantFingerprint?: string;
-  delivery?: NotificationDeliveryReport;
-  deliveryAt?: number;
   title: string;
   message: string;
 }

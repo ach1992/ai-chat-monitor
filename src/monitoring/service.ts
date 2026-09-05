@@ -8,7 +8,7 @@ import {
 } from "../classification/conversation-protocol.js";
 import type { ClassificationResult } from "../classification/types.js";
 import type { SessionView } from "../core/session-registry.js";
-import { defaultNotificationManager, NotificationDeliveryError } from "../notifications/manager.js";
+import { defaultNotificationManager } from "../notifications/manager.js";
 import { fetchProviderModelCatalog } from "../providers/catalog.js";
 import { createProviderManager } from "../providers/manager.js";
 import {
@@ -67,7 +67,6 @@ interface ResolutionCacheState {
 interface GenerationProgress {
   fingerprint?: string;
   textLength: number;
-  startedAt: number;
   changedAt: number;
   notified: boolean;
 }
@@ -75,11 +74,6 @@ interface GenerationProgress {
 interface LastAssistantIdentity {
   fingerprint: string;
   domMessageId?: string;
-}
-
-interface EventEmissionOptions {
-  identity?: string;
-  at?: number;
 }
 
 export interface MonitoringServiceStatus {
@@ -185,42 +179,6 @@ function cacheState(value: ResolutionCacheState | undefined): ResolutionCacheSta
   };
 }
 
-export function monitoringEventIdentity(session: SessionView, runtime: MonitoringRuntimeStatus): string {
-  return session.observation?.latestAssistant?.domMessageId ?? runtime.assistantFingerprint ?? `${session.pageEpoch}:${session.routeKey}`;
-}
-
-export type ResponseEpisodeAssistantState = "UNSCOPED" | "WAITING_FOR_FRESH_ASSISTANT" | "FRESH_ASSISTANT";
-
-export function responseEpisodeStartedAt(
-  manualStartedAt: number | undefined,
-  generationStartedAt: number | undefined,
-): number | undefined {
-  if (generationStartedAt === undefined) return manualStartedAt;
-  if (manualStartedAt === undefined) return generationStartedAt;
-  return Math.max(manualStartedAt, generationStartedAt);
-}
-
-export function responseEpisodeAssistantState(session: SessionView): ResponseEpisodeAssistantState {
-  const episode = session.pendingResponse;
-  if (episode === undefined) return "UNSCOPED";
-  const observation = session.observation;
-  const assistant = observation?.latestAssistant;
-  if (observation === undefined || observation.observedAt < episode.startedAt || assistant === undefined) {
-    return "WAITING_FOR_FRESH_ASSISTANT";
-  }
-  if (episode.baselineAssistantDomMessageId !== undefined && assistant.domMessageId !== undefined) {
-    return episode.baselineAssistantDomMessageId === assistant.domMessageId
-      ? "WAITING_FOR_FRESH_ASSISTANT"
-      : "FRESH_ASSISTANT";
-  }
-  if (episode.baselineAssistantFingerprint !== undefined) {
-    return episode.baselineAssistantFingerprint === assistant.fingerprint
-      ? "WAITING_FOR_FRESH_ASSISTANT"
-      : "FRESH_ASSISTANT";
-  }
-  return "FRESH_ASSISTANT";
-}
-
 export class MonitoringService {
   readonly #policies: MonitoringPolicyRepository;
   readonly #history: MonitoringHistoryRepository;
@@ -299,96 +257,13 @@ export class MonitoringService {
       return;
     }
 
-    const completion = observation.responseCompletion;
-    const streamTerminal = observation.responseTerminalStatus;
-    const episodeState = responseEpisodeAssistantState(session);
-    const generationStartedAt = this.#generation.get(conversationId)?.startedAt;
-    const sawGenerating = generationStartedAt !== undefined;
-    const pageEvent = eventForPageState(state);
-    const episodeStartedAt = session.pendingResponse?.startedAt;
-    const evidenceMatchesEpisode = (completedAt: number): boolean =>
-      episodeStartedAt !== undefined && completedAt >= episodeStartedAt;
-
-    if (streamTerminal !== undefined && evidenceMatchesEpisode(streamTerminal.completedAt)) {
-      this.#generation.delete(conversationId);
-      const uiDecision = semanticFromUi(state);
-      const decision = uiDecision ?? streamTerminal.decision;
-      const eventType = pageEvent ?? eventForDecision(decision);
-      const runtime: MonitoringRuntimeStatus = {
-        tabId: session.tabId,
-        conversationId,
-        enabled: true,
-        generation: observation.generation,
-        pageState: state,
-        blockingReasons: [...observation.blocking.reasons],
-        semanticDecision: decision,
-        semanticSource: uiDecision === undefined ? "STATUS_MARKER" : "UI",
-        markerHealth: "DETECTED",
-        ...(observation.latestAssistant === undefined ? {} : { assistantFingerprint: observation.latestAssistant.fingerprint }),
-        ...(eventType === undefined ? {} : { lastEvent: eventType }),
-        updatedAt: Date.now(),
-      };
-      this.#runtime.set(session.tabId, runtime);
-      if (eventType !== undefined) {
-        await this.#emitEvent(session, policy, runtime, eventType, {
-          identity: this.#responseEpisodeIdentity(session),
-          at: streamTerminal.completedAt,
-        });
-      }
-      return;
-    }
-
-    if (completion !== undefined && evidenceMatchesEpisode(completion.completedAt)) {
-      if (this.#responseEpisodeHasDeliveredEvent(session)) return;
-      this.#generation.delete(conversationId);
-      const uiDecision = semanticFromUi(state);
-      const eventType = pageEvent ?? "RESPONSE_COMPLETE";
-      const runtime: MonitoringRuntimeStatus = {
-        tabId: session.tabId,
-        conversationId,
-        enabled: true,
-        generation: observation.generation,
-        pageState: state,
-        blockingReasons: [...observation.blocking.reasons],
-        ...(uiDecision === undefined ? {} : { semanticDecision: uiDecision }),
-        semanticSource: uiDecision === undefined ? "UNKNOWN" : "UI",
-        markerHealth: "MISSING",
-        ...(observation.latestAssistant === undefined ? {} : { assistantFingerprint: observation.latestAssistant.fingerprint }),
-        lastEvent: eventType,
-        updatedAt: Date.now(),
-      };
-      this.#runtime.set(session.tabId, runtime);
-      await this.#emitEvent(session, policy, runtime, eventType, {
-        identity: this.#responseEpisodeIdentity(session),
-        at: completion.completedAt,
-      });
-      return;
-    }
-
     if (observation.generation === "GENERATING") {
       await this.#handleGenerating(session, policy, state);
       return;
     }
+    this.#generation.delete(conversationId);
 
-    if (episodeState === "WAITING_FOR_FRESH_ASSISTANT") {
-      const uiDecision = semanticFromUi(state);
-      const runtime: MonitoringRuntimeStatus = {
-        tabId: session.tabId,
-        conversationId,
-        enabled: true,
-        generation: observation.generation,
-        pageState: state,
-        blockingReasons: [...observation.blocking.reasons],
-        ...(uiDecision === undefined ? {} : { semanticDecision: uiDecision }),
-        semanticSource: uiDecision === undefined ? "UNKNOWN" : "UI",
-        markerHealth: "MISSING",
-        ...(pageEvent === undefined ? {} : { lastEvent: pageEvent }),
-        updatedAt: Date.now(),
-      };
-      this.#runtime.set(session.tabId, runtime);
-      if (pageEvent !== undefined) await this.#emitEvent(session, policy, runtime, pageEvent);
-      return;
-    }
+    const pageEvent = eventForPageState(state);
     const assistant = observation.latestAssistant;
     if (assistant === undefined || observation.confidence !== "HIGH") {
       const uiDecision = semanticFromUi(state);
@@ -410,28 +285,6 @@ export class MonitoringService {
       return;
     }
 
-    const marker = inspectConversationStatusMarker(assistant.normalizedText);
-    if (
-      episodeState === "FRESH_ASSISTANT" &&
-      marker.health !== "DETECTED" &&
-      !sawGenerating
-    ) {
-      this.#runtime.set(session.tabId, {
-        tabId: session.tabId,
-        conversationId,
-        enabled: true,
-        generation: observation.generation,
-        pageState: state,
-        blockingReasons: [...observation.blocking.reasons],
-        semanticSource: "UNKNOWN",
-        markerHealth: marker.health,
-        assistantFingerprint: assistant.fingerprint,
-        updatedAt: Date.now(),
-      });
-      return;
-    }
-
-    this.#generation.delete(conversationId);
     const resolution = await this.#resolveSemantic(session, state);
     const prior = this.#lastAssistant.get(conversationId);
     const repeated = prior !== undefined &&
@@ -444,7 +297,7 @@ export class MonitoringService {
       ...(assistant.domMessageId === undefined ? {} : { domMessageId: assistant.domMessageId }),
     });
 
-    let eventType = pageEvent ?? eventForDecision(resolution.decision);
+    let eventType = pageEvent ?? eventForDecision(resolution.decision) ?? "RESPONSE_COMPLETE";
     if (resolution.classification?.reasonCode === "PROVIDER_FAILURE") eventType = "PROVIDER_ERROR";
     if (repeated && pageEvent === undefined) eventType = "REPEATED_RESPONSE";
 
@@ -460,18 +313,11 @@ export class MonitoringService {
       markerHealth: resolution.marker.health,
       ...(resolution.classification === undefined ? {} : { classification: resolution.classification }),
       assistantFingerprint: assistant.fingerprint,
-      ...(eventType === undefined ? {} : { lastEvent: eventType }),
+      lastEvent: eventType,
       updatedAt: Date.now(),
     };
     this.#runtime.set(session.tabId, runtime);
-    if (eventType !== undefined) {
-      const priorEpisodeDelivery = pageEvent === undefined && this.#responseEpisodeHasDeliveredEvent(session);
-      if (!priorEpisodeDelivery) {
-        await this.#emitEvent(session, policy, runtime, eventType, {
-          identity: this.#responseEpisodeIdentity(session),
-        });
-      }
-    }
+    await this.#emitEvent(session, policy, runtime, eventType);
   }
 
   async updateChat(tabId: number, expectedConversationId: string, patch: ChatMonitoringPolicyPatch): Promise<ResolvedMonitoringPolicy> {
@@ -695,13 +541,7 @@ export class MonitoringService {
     const existing = this.#generation.get(conversationId);
     const changed = existing === undefined || existing.fingerprint !== currentFingerprint || existing.textLength !== currentLength;
     const progress: GenerationProgress = changed
-      ? {
-          ...(currentFingerprint === undefined ? {} : { fingerprint: currentFingerprint }),
-          textLength: currentLength,
-          startedAt: existing?.startedAt ?? now,
-          changedAt: now,
-          notified: false,
-        }
+      ? { ...(currentFingerprint === undefined ? {} : { fingerprint: currentFingerprint }), textLength: currentLength, changedAt: now, notified: false }
       : existing;
     this.#generation.set(conversationId, progress);
 
@@ -742,47 +582,20 @@ export class MonitoringService {
     });
   }
 
-  #responseEpisodeIdentity(session: SessionView): string {
-    const startedAt = session.pendingResponse?.startedAt;
-    if (startedAt !== undefined) return `response:${session.documentId}:${startedAt}`;
-    const runtime = this.#runtime.get(session.tabId);
-    return runtime === undefined
-      ? `page:${session.documentId}:${session.pageEpoch}:${session.routeKey}`
-      : monitoringEventIdentity(session, runtime);
-  }
-
-  #responseEpisodeHasDeliveredEvent(session: SessionView): boolean {
-    const conversationId = session.conversationId;
-    const startedAt = session.pendingResponse?.startedAt;
-    if (conversationId === undefined || startedAt === undefined) return false;
-    const identity = this.#responseEpisodeIdentity(session);
-    const prefix = `monitor:${conversationId}:${identity}:`;
-    return this.#history.snapshot(200).some((event) =>
-      event.id.startsWith(prefix) &&
-      event.at >= startedAt &&
-      (
-        event.delivery?.browser === "DELIVERED" ||
-        event.delivery?.sound === "DELIVERED" ||
-        event.delivery?.telegram === "DELIVERED"
-      ),
-    );
-  }
-
   async #emitEvent(
     session: SessionView,
     policy: ResolvedMonitoringPolicy,
     runtime: MonitoringRuntimeStatus,
     type: MonitoringEventType,
-    options: EventEmissionOptions = {},
   ): Promise<void> {
     const conversationId = runtime.conversationId;
     if (conversationId === undefined) return;
-    const identity = options.identity ?? monitoringEventIdentity(session, runtime);
-    const id = `monitor:${conversationId}:${identity}:${type}`.slice(0, 500);
+    const assistantIdentity = runtime.assistantFingerprint ?? session.observation?.latestAssistant?.domMessageId ?? session.routeKey;
+    const id = `monitor:${conversationId}:${assistantIdentity}:${type}`.slice(0, 500);
     const presentation = eventPresentation(type);
     const event: MonitoringEvent = {
       id,
-      at: options.at ?? Date.now(),
+      at: Date.now(),
       tabId: session.tabId,
       conversationId,
       type,
@@ -801,9 +614,8 @@ export class MonitoringService {
 
     const browserEnabled = policy.browserEvents.includes(type);
     const soundEnabled = policy.soundEvents.includes(type);
-    let delivery: MonitoringEvent["delivery"];
     try {
-      delivery = await defaultNotificationManager().deliver({
+      await defaultNotificationManager().deliver({
         id,
         event: type,
         title: presentation.title,
@@ -813,16 +625,8 @@ export class MonitoringService {
         conversationId,
         tabId: session.tabId,
       });
-    } catch (error) {
-      if (error instanceof NotificationDeliveryError) delivery = error.report;
-    }
-    if (delivery !== undefined) {
-      const deliveryAt = Date.now();
-      event.delivery = delivery;
-      event.deliveryAt = deliveryAt;
-      try { await this.#history.updateDelivery(event.id, delivery, deliveryAt); } catch {
-        // Delivery diagnostics are best effort and never alter monitoring state.
-      }
+    } catch {
+      // Delivery failures are observational and never alter monitoring state.
     }
   }
 

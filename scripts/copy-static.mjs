@@ -8,7 +8,6 @@ export const staticFiles = [
   ["src/manifest.json", "dist/manifest.json"],
   ["src/sidepanel/index.html", "dist/sidepanel/index.html"],
   ["src/sidepanel/styles.css", "dist/sidepanel/styles.css"],
-  ["src/sidepanel/diagnostics.css", "dist/sidepanel/diagnostics.css"],
   ["src/offscreen/audio.html", "dist/offscreen/audio.html"],
   ["src/assets/icon-16.png", "dist/assets/icon-16.png"],
   ["src/assets/icon-32.png", "dist/assets/icon-32.png"],

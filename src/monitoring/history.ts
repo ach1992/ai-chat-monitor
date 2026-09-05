@@ -12,23 +12,6 @@ export interface MonitoringHistoryPersistence {
 
 const MAX_EVENTS = 200;
 
-function validOptionalTimestamp(value: unknown): boolean {
-  return value === undefined || (typeof value === "number" && Number.isFinite(value) && value >= 0);
-}
-
-function validDelivery(value: MonitoringEvent["delivery"]): boolean {
-  if (value === undefined) return true;
-  const valid = (state: string) => state === "NOT_REQUESTED" || state === "DELIVERED" || state === "FAILED";
-  return (
-    valid(value.browser) &&
-    valid(value.sound) &&
-    valid(value.telegram) &&
-    validOptionalTimestamp(value.browserAt) &&
-    validOptionalTimestamp(value.soundAt) &&
-    validOptionalTimestamp(value.telegramAt)
-  );
-}
-
 function validEvent(event: MonitoringEvent): boolean {
   return (
     typeof event.id === "string" && event.id.length > 0 && event.id.length <= 500 &&
@@ -41,9 +24,7 @@ function validEvent(event: MonitoringEvent): boolean {
     typeof event.markerHealth === "string" &&
     typeof event.title === "string" && event.title.length <= 160 &&
     typeof event.message === "string" && event.message.length <= 500 &&
-    (event.assistantFingerprint === undefined || /^[a-f0-9]{64}$/.test(event.assistantFingerprint)) &&
-    validDelivery(event.delivery) &&
-    validOptionalTimestamp(event.deliveryAt)
+    (event.assistantFingerprint === undefined || /^[a-f0-9]{64}$/.test(event.assistantFingerprint))
   );
 }
 
@@ -81,20 +62,6 @@ export class MonitoringHistoryRepository {
         version: 1,
         events: [...this.#state.events, structuredClone(event)].slice(-MAX_EVENTS),
       };
-      await this.#persistence.save(next);
-      this.#state = next;
-      return true;
-    });
-  }
-
-  updateDelivery(id: string, delivery: NonNullable<MonitoringEvent["delivery"]>, deliveryAt: number): Promise<boolean> {
-    return this.#enqueue(async () => {
-      const index = this.#state.events.findIndex((event) => event.id === id);
-      if (index < 0 || !Number.isFinite(deliveryAt) || deliveryAt < 0 || !validDelivery(delivery)) return false;
-      const events = this.#state.events.map((event, current) =>
-        current === index ? { ...event, delivery: structuredClone(delivery), deliveryAt } : event,
-      );
-      const next: MonitoringHistoryState = { version: 1, events };
       await this.#persistence.save(next);
       this.#state = next;
       return true;

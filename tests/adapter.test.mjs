@@ -72,15 +72,7 @@ class FakeDocument {
   }
 
   querySelectorAll(selector) {
-    const direct = this.entries.find(([candidate]) => candidate === selector)?.[1];
-    if (direct !== undefined) return direct;
-    const selectors = selector.split(",").map((candidate) => candidate.trim()).filter(Boolean);
-    if (selectors.length <= 1) return [];
-    const found = new Set();
-    for (const candidate of selectors) {
-      for (const element of this.entries.find(([entry]) => entry === candidate)?.[1] ?? []) found.add(element);
-    }
-    return [...found].sort((left, right) => left.order - right.order);
+    return this.entries.find(([candidate]) => candidate === selector)?.[1] ?? [];
   }
 }
 
@@ -262,45 +254,4 @@ test("adapter ignores inert ChatGPT accessibility alert regions but keeps real a
   const realResult = await realAdapter.observe(24);
   assert.equal(realResult.blocking.blocked, true);
   assert.equal(realResult.blocking.reasons.includes("ERROR"), true);
-});
-
-test("adapter chooses DOM-latest turns across alternate selector shapes", async () => {
-  const GuardianContent = await loadAdapter();
-  const marker = 'AI_CHAT_MONITOR_STATUS={"decision":"COMPLETE"}';
-  const olderUser = new FakeElement({
-    textContent: "Older user request.",
-    attrs: { "data-message-id": "user-old" },
-    order: 0,
-  });
-  const olderAssistant = new FakeElement({
-    textContent: "Older assistant response.",
-    attrs: { "data-message-id": "assistant-old" },
-    order: 1,
-  });
-  const latestUser = new FakeElement({
-    textContent: "Latest user request.",
-    attrs: { "data-message-id": "user-new" },
-    order: 2,
-  });
-  const latestAssistant = new FakeElement({
-    textContent: `Latest assistant response.\n${marker}`,
-    attrs: { "data-message-id": "assistant-new" },
-    order: 3,
-  });
-  const composer = new FakeTextAreaElement({ value: "", order: 4 });
-  const document = new FakeDocument([
-    ['[data-message-author-role="user"]', [latestUser]],
-    ['article[data-turn="user"]', [olderUser]],
-    ['[data-message-author-role="assistant"]', [latestAssistant]],
-    ['article[data-turn="assistant"]', [olderAssistant]],
-    ["#prompt-textarea", [composer]],
-  ]);
-  const adapter = new GuardianContent.BrowserChatGPTAdapter(document, { pathname: "/c/abc-1234" });
-
-  const result = await adapter.observe(7777);
-
-  assert.equal(result.latestUser.domMessageId, "user-new");
-  assert.equal(result.latestUser.normalizedText, "Latest user request.");
-  assert.equal(result.latestAssistant.domMessageId, "assistant-new");
-  assert.equal(result.latestAssistant.normalizedText, `Latest assistant response.\n${marker}`);
 });

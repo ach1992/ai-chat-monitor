@@ -1,6 +1,6 @@
-# Chrome Web Store Listing — AI Chat Monitor v3.0.3 candidate
+# Chrome Web Store Listing — AI Chat Monitor v3.0.0
 
-> Draft Chrome Web Store listing copy for the current unreleased v3.0.3 source candidate. The latest published GitHub Release remains v3.0.2, and the extension has not been submitted to or published in the Chrome Web Store. Do not treat this draft as a Store submission or release claim.
+> Draft Chrome Web Store listing copy for the v3.0.0 release candidate. The extension has not been submitted to or published in the Chrome Web Store.
 
 ## Name
 
@@ -36,8 +36,6 @@ AI Chat Monitor does **not** write to the ChatGPT composer, click ChatGPT conver
 
 AI Chat Monitor is read-only with respect to ChatGPT. Full chat transcripts are not intentionally stored in monitoring history. Optional provider fallback receives bounded/minimized, secret-redacted recent context only when local evidence is insufficient. Telegram receives bounded notification metadata by default, not full ChatGPT messages.
 
-For reliable response-completion detection while a monitored ChatGPT tab is in the background, the extension observes a narrowly filtered ChatGPT response-request lifecycle at browser level. It accepts only successful top-frame ChatGPT conversation `POST` responses whose `Content-Type` is `text/event-stream`, and retains only bounded request/tab/document identity and timestamps needed to correlate start and completion. It does not read request bodies, response bodies, cookies, or authorization headers, and it cannot block or modify requests.
-
 No inbound Telegram remote control is provided.
 
 ## Single purpose statement
@@ -46,12 +44,12 @@ The extension's single purpose is to monitor user-selected ChatGPT Web conversat
 
 ## Permission justifications
 
-- **`storage`** — stores monitoring policy, bounded event history, optional provider configuration/secrets, Telegram configuration/secrets, sanitized health state, and bounded in-flight response-correlation metadata.
+- **`storage`** — stores monitoring policy, bounded event history, optional provider configuration/secrets, Telegram configuration/secrets, and sanitized health state in trusted extension storage.
 - **`sidePanel`** — provides the persistent monitoring/configuration UI.
 - **`notifications`** — shows configured Browser notifications for monitored events.
 - **`offscreen`** — plays optional local notification sound in a Manifest V3-compatible extension context.
 - **`clipboardWrite`** — copies the user-selected status-protocol setup text from explicit Side Panel Copy buttons. It is never used to paste into ChatGPT.
-- **Persistent host access: `https://chatgpt.com/*`, `https://chat.openai.com/*`** — reads supported ChatGPT page/runtime state and locally observes the cloned response stream only for a user-initiated response in a conversation the user selected for monitoring so it can recognize an exact terminal status or `data: [DONE]` without depending on foreground DOM rendering.
+- **Persistent host access: `https://chatgpt.com/*`, `https://chat.openai.com/*`** — reads supported ChatGPT page/runtime state for conversations the user chooses to monitor.
 - **Optional host envelope: `https://*/*`** — allows runtime grant of the exact HTTPS origin for a user-configured OpenAI-compatible provider that cannot be known at install time. AI Chat Monitor does not require arbitrary HTTPS access for normal ChatGPT observation.
 
 Telegram Bot API access is requested only when the user configures Telegram.
@@ -65,8 +63,6 @@ All extension JavaScript is packaged with the extension. Network calls to option
 ## User data disclosure summary
 
 The extension processes ChatGPT page state and bounded recent visible chat content locally for monitoring/classification. Full transcripts are not intentionally stored. Optional AI-provider fallback receives minimized, secret-redacted context only when needed. Optional Telegram receives bounded event metadata by default. Provider API keys and Telegram bot tokens are stored in trusted extension storage and are not rendered back in ordinary UI state.
-
-For background response completion, the extension keeps only a bounded rolling tail of the cloned current ChatGPT SSE response in page memory. That transient tail is used only to recognize a canonical terminal status or `data: [DONE]`; it is not persisted or transferred by the observer, and the original request/response is delegated unchanged.
 
 The project does not operate advertising, a developer-owned analytics backend, or a data-broker service, and does not sell user data.
 

@@ -130,33 +130,6 @@ export interface ContentAgentAck {
   tabId: number;
   documentId: string;
   controlEligibility?: ControlEligibility;
-  monitoringEnabled?: boolean;
-}
-
-export interface TabLifecycleStatus {
-  autoDiscardable: boolean;
-  discarded: boolean;
-  frozen: boolean;
-  runnable: boolean;
-}
-
-export interface HiddenMonitoringDiagnosticView {
-  backgroundedAt: number;
-  foregroundedAt?: number;
-  tabActivatedAt?: number;
-  visibleObservedAt?: number;
-  baselineAssistantTextLength?: number;
-  hiddenObservationCount: number;
-  firstHiddenObservationAt?: number;
-  lastHiddenObservationAt?: number;
-  firstAssistantChangeAt?: number;
-  firstMarkerDetectedAt?: number;
-  hiddenAssistantTextLength?: number;
-  assistantChanged: boolean;
-  hiddenGeneration?: PageObservation["generation"];
-  hiddenStopControlPresent?: boolean;
-  hiddenMarkerHealth?: MonitoringRuntimeStatus["markerHealth"];
-  transportCompletedAt?: number;
 }
 
 export interface PanelStatusResponse {
@@ -169,8 +142,6 @@ export interface PanelStatusResponse {
   controlEligibility?: ControlEligibility;
   monitoringPolicy?: ResolvedMonitoringPolicy;
   monitoringRuntime?: MonitoringRuntimeStatus;
-  tabLifecycle?: TabLifecycleStatus;
-  hiddenDiagnostic?: HiddenMonitoringDiagnosticView;
   lastSeenAt?: number;
 }
 
@@ -181,14 +152,10 @@ export interface ManagedChatStatus {
   pageTitle?: string;
   controlEligibility: ControlEligibility;
   lastSeenAt: number;
-  lastObservationAt?: number;
-  visibility?: PageObservation["visibility"];
   generation?: PageObservation["generation"];
   overrides?: ChatMonitoringPolicy;
   policy?: ResolvedMonitoringPolicy;
   runtime?: MonitoringRuntimeStatus;
-  tabLifecycle?: TabLifecycleStatus;
-  hiddenDiagnostic?: HiddenMonitoringDiagnosticView;
 }
 
 export interface RedactedProviderSettings {

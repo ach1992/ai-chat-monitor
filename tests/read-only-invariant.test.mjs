@@ -32,7 +32,7 @@ test("content and background runtime expose no ChatGPT write command or composer
   assert.doesNotMatch(content, /dispatchEvent\s*\(\s*new\s+InputEvent/);
 
   const scripts = manifest.content_scripts.flatMap((entry) => entry.js ?? []);
-  assert.deepEqual(scripts, ["content/main-stream-observer.js", "content/adapter.js", "content/index.js"]);
+  assert.deepEqual(scripts, ["content/adapter.js", "content/index.js"]);
   assert.equal(scripts.some((path) => /send-verification|guarded/i.test(path)), false);
 });
 

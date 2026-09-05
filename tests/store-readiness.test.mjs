@@ -74,13 +74,6 @@ test("manifest and public release metadata stay aligned with the implemented per
   assert.match(privacy, /OpenAI-compatible provider/);
   assert.match(privacy, /Telegram support is outbound notification-only/);
   assert.match(privacy, /clipboardWrite/);
-  assert.doesNotMatch(manifest.permissions.join(","), /webRequest/);
-  assert.doesNotMatch(listing, /webRequest/);
-  assert.match(listing, /bounded rolling tail/i);
-  assert.match(listing, /original request\/response is delegated unchanged/i);
-  assert.match(privacy, /16 KiB/i);
-  assert.match(privacy, /not written to extension storage/i);
-  assert.match(privacy, /original fetch call unchanged/i);
 });
 
 test("Side Panel prominently discloses read-only provider and Telegram data handling", async () => {
