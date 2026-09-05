@@ -188,7 +188,7 @@
     return "GET";
   }
 
-  function requestPath(input: RequestInfo | URL-: string | undefined {
+  function requestPath(input: RequestInfo | URL): string | undefined {
     try {
       const raw = typeof input === "string"
         ? input

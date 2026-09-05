@@ -148,7 +148,7 @@ namespace GuardianContentAgent {
     const serverStatus = boundedString(value.serverStatus, 80);
     const errorName = boundedString(value.errorName, 80);
     const socketId = boundedString(value.socketId, 100);
-    socketHost = boundedString(value.socketHost, 160);
+    const socketHost = boundedString(value.socketHost, 160);
     const socketPath = boundedString(value.socketPath, 240);
 
     if (visibility !== undefined) result.visibility = visibility;
