@@ -200,6 +200,7 @@
 
     pushUnique(state.conversationIds, value.conversation_id);
     pushUnique(state.parentMessageIds, value.parent_id);
+    pushUnique(state.parentMessageIds, value.parent_message_id);
     scanMessage(value, state);
 
     for (const nested of Object.values(value)) {
@@ -211,8 +212,8 @@
     let normalized = value;
     for (let pass = 0; pass < 3; pass += 1) {
       normalized = normalized
-        .replace(/\\\\u0022/gi, '"')
-        .replace(/\\\\"/g, '"');
+        .replace(/\\u0022/gi, '"')
+        .replace(/\\"/g, '"');
     }
     return normalized;
   }
@@ -289,7 +290,8 @@
           state.lastChunkAt = now;
           const decoded = decoder.decode(chunk.value, { stream: true });
           markerTail = (markerTail + decoded).slice(-16_384);
-          state.markerDecision = markerDecisionFromTail(markerTail) ?? state.markerDecision;
+          const markerDecision = markerDecisionFromTail(markerTail);
+          if (markerDecision !== undefined) state.markerDecision = markerDecision;
           buffer = (buffer + decoded).replace(/\r\n/g, "\n");
 
           let boundary = buffer.indexOf("\n\n");
