@@ -97,6 +97,48 @@ test("observation validates bounded response metadata and read-only action hints
       },
     },
   }), false);
+  assert.equal(isContentObservation({
+    ...base,
+    type: "content:observation",
+    observation: {
+      ...observation,
+      responseTerminalStatus: {
+        serial: 1,
+        source: "CHATGPT_RESPONSE_STREAM",
+        visibility: "hidden",
+        completedAt: 195,
+        decision: "COMPLETE",
+      },
+    },
+  }), true);
+  assert.equal(isContentObservation({
+    ...base,
+    type: "content:observation",
+    observation: {
+      ...observation,
+      responseTerminalStatus: {
+        serial: 1,
+        source: "CHATGPT_RESPONSE_STREAM",
+        visibility: "hidden",
+        completedAt: 195,
+        decision: "DONE",
+      },
+    },
+  }), false);
+  assert.equal(isContentObservation({
+    ...base,
+    type: "content:observation",
+    observation: {
+      ...observation,
+      responseTerminalStatus: {
+        serial: 1,
+        source: "OTHER",
+        visibility: "hidden",
+        completedAt: 195,
+        decision: "COMPLETE",
+      },
+    },
+  }), false);
   assert.equal(
     isContentObservation({
       ...base,

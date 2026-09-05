@@ -46,10 +46,6 @@ Current required permissions:
 - `notifications`
 - `offscreen`
 - `clipboardWrite`
-- `webRequest`
-
-`webRequestBlocking` is **not** requested.
-
 Persistent ChatGPT host permissions remain:
 
 - `https://chatgpt.com/*`
@@ -61,11 +57,9 @@ Optional host envelope remains:
 
 The broad optional HTTPS envelope exists for exact runtime grants to user-configured OpenAI-compatible provider origins. It is not used to broaden normal ChatGPT monitoring.
 
-The required non-blocking `webRequest` permission is used only on the already-supported ChatGPT hosts to correlate response lifecycle when hidden page UI is stale. The runtime filters for supported conversation endpoints, top-frame `xmlhttprequest`, `POST`, `2xx`, and response `Content-Type: text/event-stream`.
+Revision 10 does not require `webRequest`. A packaged MAIN-world content script is disabled by default and observes only a trusted user-initiated supported ChatGPT conversation `fetch` after that conversation is selected for monitoring, delegates that fetch unchanged, and consumes a cloned SSE response locally. It keeps only a bounded rolling in-memory tail needed to recognize a canonical terminal status or `data: [DONE]`; the full stream is not persisted or transferred by this observer.
 
-The response observer does not read request bodies, response bodies, cookies, or Authorization headers, does not persist network payload content, and cannot block/redirect/cancel/rewrite requests.
-
-Permission rationale is documented in `PRIVACY.md`, `docs/ARCHITECTURE.md`, `docs/CHROME_WEB_STORE_LISTING.md`, and `docs/REV9_BROWSER_RESPONSE_LIFECYCLE.md` and must remain aligned with `src/manifest.json`.
+Permission rationale is documented in `PRIVACY.md`, `docs/ARCHITECTURE.md`, `docs/CHROME_WEB_STORE_LISTING.md`, and `docs/REV10_PAGE_STREAM_TERMINAL.md` and must remain aligned with `src/manifest.json`.
 
 ## Privacy and data transfer
 
@@ -74,8 +68,8 @@ Permission rationale is documented in `PRIVACY.md`, `docs/ARCHITECTURE.md`, `doc
 - [x] Optional provider transfer is bounded/minimized and secret-redacted.
 - [x] Telegram receives bounded event metadata by default and remains outbound-only.
 - [x] Provider API keys and Telegram bot tokens remain in trusted extension storage.
-- [x] Revision 9 network correlation stores only bounded request/tab/document identity and timestamps in session storage while needed.
-- [x] Revision 9 documentation explicitly excludes request bodies, response bodies, cookies, Authorization headers, and transcript payload persistence from network correlation.
+- [x] Revision 10 keeps only a bounded rolling response tail transiently in page memory for terminal status / `data: [DONE]` recognition.
+- [x] Revision 10 does not persist that stream tail, does not transfer it to Telegram or developer infrastructure, and delegates the original page fetch unchanged.
 - [x] No developer-operated advertising, analytics backend, or data-broker service is part of the product.
 
 ## Remote code

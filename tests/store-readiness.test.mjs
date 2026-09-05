@@ -52,8 +52,7 @@ test("manifest and public release metadata stay aligned with the implemented per
   assert.equal(packageLock.packages[""].version, packageJson.version);
   assert.equal(typeof manifest.description, "string");
   assert.ok(manifest.description.length > 0);
-  assert.deepEqual(manifest.permissions, ["storage", "sidePanel", "notifications", "offscreen", "clipboardWrite", "webRequest"]);
-  assert.equal(manifest.permissions.includes("webRequestBlocking"), false);
+  assert.deepEqual(manifest.permissions, ["storage", "sidePanel", "notifications", "offscreen", "clipboardWrite"]);
   assert.deepEqual(manifest.host_permissions, ["https://chatgpt.com/*", "https://chat.openai.com/*"]);
   assert.deepEqual(manifest.optional_host_permissions, ["https://*/*"]);
 
@@ -63,7 +62,6 @@ test("manifest and public release metadata stay aligned with the implemented per
     "**`notifications`**",
     "**`offscreen`**",
     "**`clipboardWrite`**",
-    "**`webRequest`**",
     "**Persistent host access: `https://chatgpt.com/*`, `https://chat.openai.com/*`**",
     "**Optional host envelope: `https://*/*`**",
     "**No, this extension does not use remotely hosted executable code.**",
@@ -71,14 +69,18 @@ test("manifest and public release metadata stay aligned with the implemented per
     assert.match(listing, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
 
-  assert.match(listing, /does not read request bodies, response bodies, cookies, or authorization headers/i);
   assert.match(privacy, /read-only with respect to ChatGPT/);
   assert.match(privacy, /does not sell user data/);
   assert.match(privacy, /OpenAI-compatible provider/);
   assert.match(privacy, /Telegram support is outbound notification-only/);
   assert.match(privacy, /clipboardWrite/);
-  assert.match(privacy, /webRequest/);
-  assert.match(privacy, /does not read request bodies, response bodies, cookies, or authorization headers/i);
+  assert.doesNotMatch(manifest.permissions.join(","), /webRequest/);
+  assert.doesNotMatch(listing, /webRequest/);
+  assert.match(listing, /bounded rolling tail/i);
+  assert.match(listing, /original request\/response is delegated unchanged/i);
+  assert.match(privacy, /16 KiB/i);
+  assert.match(privacy, /not written to extension storage/i);
+  assert.match(privacy, /original fetch call unchanged/i);
 });
 
 test("Side Panel prominently discloses read-only provider and Telegram data handling", async () => {

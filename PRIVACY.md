@@ -14,7 +14,7 @@ To monitor a selected ChatGPT conversation, the extension may read and process l
 - the latest relevant user and assistant text needed for bounded semantic classification;
 - response fingerprints, DOM message identity, generation state, visible blocker/action state, and related monitoring metadata;
 - the optional terminal `AI_CHAT_MONITOR_STATUS={...}` marker;
-- bounded ChatGPT response-request lifecycle metadata used only to determine when the currently monitored response has actually finished;
+- a bounded rolling in-memory tail of the current user-initiated ChatGPT response stream, used only to recognize the optional terminal status marker or the stream `data: [DONE]` terminator;
 - local monitoring policy, notification preferences, provider configuration, Telegram configuration, and bounded diagnostics/history.
 
 Chat content is treated as untrusted input.
@@ -28,19 +28,21 @@ Trusted extension storage may contain:
 - optional Telegram bot token/destination and sanitized delivery health;
 - bounded monitoring-event metadata needed for deduplication and diagnostics;
 - bounded runtime/cache identity used to avoid duplicate classification or notifications;
-- while a ChatGPT response request is in flight, only bounded correlation metadata such as request identity, tab/document identity, and timestamps required to match the request's start and completion.
 
 Monitoring history does **not** intentionally store full ChatGPT transcripts or credentials. Provider credentials and Telegram bot tokens are not rendered back in ordinary Side Panel status output after saving.
 
 Legacy automatic-send/write-journal authority is not restored or migrated into current monitoring authority.
 
-## Read-only ChatGPT network lifecycle observation
+## Read-only ChatGPT response-stream observation
 
-The `webRequest` permission is used only on the persistent ChatGPT host permissions already listed below. Its purpose is to observe the lifecycle of the current ChatGPT conversation response at browser level when background-tab UI signals such as the Stop control are stale or absent.
+For a trusted user-initiated Send on a supported ChatGPT page whose conversation monitoring is enabled, a packaged MAIN-world observer delegates the page's original fetch call unchanged. When that exact request returns a ChatGPT conversation `text/event-stream` response, the observer consumes only a cloned copy of the stream while the original response continues unchanged to ChatGPT.
 
-AI Chat Monitor accepts only a bounded response-stream shape for completion correlation: a top-frame ChatGPT conversation request using `POST`, a successful response status, and `Content-Type: text/event-stream`. It correlates that request using bounded request/tab/document identity and timestamps.
+The observer is disabled for unmonitored conversations. When enabled, it keeps at most a bounded rolling tail in page memory (currently 16 KiB, with only the final 4 KiB used for terminal-marker matching). It uses that transient tail only to detect either:
 
-AI Chat Monitor does not read request bodies, response bodies, cookies, or authorization headers through this permission. It does not use `webRequestBlocking`, does not alter, redirect, cancel, or rewrite ChatGPT requests, and does not persist network payload content.
+- a canonical `AI_CHAT_MONITOR_STATUS={...}` terminal decision; or
+- `data: [DONE]` when no terminal decision was found.
+
+The rolling stream tail is not written to extension storage, monitoring history, logs, Telegram, or a developer-owned service. The observer does not inspect request bodies, cookies, Authorization headers, or credential headers, and it does not modify, redirect, cancel, replay, or rewrite the request or response. Only the minimal terminal decision or response-complete signal crosses from the page observer to the isolated extension runtime.
 
 ## Optional AI provider transfer
 
@@ -77,7 +79,7 @@ Persistent host access is limited to supported ChatGPT origins:
 - `https://chatgpt.com/*`
 - `https://chat.openai.com/*`
 
-These persistent host permissions cover both the read-only page observation content script and the bounded `webRequest` response-lifecycle observation described above.
+These persistent host permissions cover the read-only page observation scripts and the bounded local response-stream observation described above.
 
 The manifest also declares optional HTTPS host permission so a user can configure an arbitrary HTTPS OpenAI-compatible provider whose origin is not known at install time. AI Chat Monitor requests the exact selected provider origin at runtime where required.
 

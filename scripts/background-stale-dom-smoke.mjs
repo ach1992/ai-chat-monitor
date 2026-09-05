@@ -52,6 +52,9 @@ const certificate = spawnSync(openssl, [
 ], { stdio: "ignore" });
 if (certificate.status !== 0) throw new Error("Unable to create the response-lifecycle smoke certificate.");
 
+let statusMarkerWrittenAt;
+let statusDoneWrittenAt;
+
 const server = createServer(
   { key: await readFile(keyPath), cert: await readFile(certPath) },
   (request, response) => {
@@ -72,7 +75,15 @@ const server = createServer(
         connection: "keep-alive",
       });
       response.write('data: {"type":"message","status":"streaming"}\n\n');
+      const mode = url.searchParams.get("mode") ?? "generic";
+      if (mode === "status") {
+        setTimeout(() => {
+          statusMarkerWrittenAt = Date.now();
+          response.write('data: {"type":"message","text":"done\\nAI_CHAT_MONITOR_STATUS={\\"decision\\":\\"COMPLETE\\"}"}\n\n');
+        }, 400);
+      }
       setTimeout(() => {
+        if (mode === "status") statusDoneWrittenAt = Date.now();
         response.write("data: [DONE]\n\n");
         response.end();
       }, 1_200);
@@ -234,7 +245,7 @@ try {
     version: 2,
     revision: 1,
     defaults: {
-      browserEvents: ["RESPONSE_COMPLETE"],
+      browserEvents: ["RESPONSE_COMPLETE", "TASK_COMPLETE"],
       soundEvents: [],
       stallThresholdMs: 300_000,
       suppressLowPriorityWhileFocused: false,
@@ -242,7 +253,7 @@ try {
     chats: [{
       conversationId: CONVERSATION_ID,
       enabled: true,
-      browserEvents: ["RESPONSE_COMPLETE"],
+      browserEvents: ["RESPONSE_COMPLETE", "TASK_COMPLETE"],
       soundEvents: [],
     }],
   };
@@ -298,10 +309,6 @@ try {
   if (probe?.ok !== true) throw new Error(`Synthetic non-SSE probe failed: ${JSON.stringify(probe)}`);
   await sleep(250);
 
-  const transportAfterProbe = await evaluate(queryPage, "chrome.storage.session.get('guardian:response-transport:inflight').then((stored) => stored['guardian:response-transport:inflight']?.requests ?? [])");
-  if (transportAfterProbe.length !== 0) {
-    throw new Error(`Non-SSE probe incorrectly acquired response-stream authority: ${JSON.stringify(transportAfterProbe)}`);
-  }
   const eventsAfterProbe = await evaluate(queryPage, "chrome.storage.local.get('guardian:monitoring-history:events').then((stored) => stored['guardian:monitoring-history:events']?.events ?? [])");
   if (eventsAfterProbe.some((candidate) => candidate.at >= episode.startedAt)) {
     throw new Error(`Non-SSE probe or MANUAL_SEND produced a premature event: ${JSON.stringify(eventsAfterProbe)}`);
@@ -350,19 +357,13 @@ try {
   }
 
   await evaluate(chatPage, `(() => {
-    globalThis.__rev9ResponseFetch = fetch('/backend-api/f/conversation', {
+    globalThis.__rev10GenericFetch = fetch('/backend-api/f/conversation?mode=generic', {
       method:'POST',
       headers:{'content-type':'application/json'},
       body:'{}'
     }).then((response) => response.text()).then((text) => ({done:true,text,visibility:document.visibilityState}));
     return true;
   })()`);
-
-  const inFlight = await waitFor(async () => {
-    const stored = await evaluate(queryPage, "chrome.storage.session.get('guardian:response-transport:inflight')");
-    const requests = stored["guardian:response-transport:inflight"]?.requests ?? [];
-    return requests.find((candidate) => candidate.tabId === tab.id) ?? false;
-  }, "verified browser-level ChatGPT SSE request");
 
   await evaluate(chatPage, "document.querySelector('#assistant-new').textContent = 'partial response still streaming'; true");
   const streamingSession = await waitFor(async () => {
@@ -371,85 +372,179 @@ try {
     return session?.observation?.latestAssistant?.normalizedText === "partial response still streaming" &&
       session?.observation?.generation === "GENERATING" &&
       session?.observation?.stopControlPresent === false ? session : false;
-  }, "changing hidden assistant remaining generating while SSE is open");
-  if (streamingSession.observation.responseCompletion !== undefined) {
-    throw new Error(`Open SSE carried premature completion evidence: ${JSON.stringify(streamingSession.observation.responseCompletion)}`);
+  }, "changing hidden assistant remaining generating before page-stream DONE");
+  if (streamingSession.observation.responseCompletion !== undefined || streamingSession.observation.responseTerminalStatus !== undefined) {
+    throw new Error(`Open response stream carried premature completion evidence: ${JSON.stringify(streamingSession.observation)}`);
   }
 
-  const eventsWhileStreamOpen = await evaluate(queryPage, "chrome.storage.local.get('guardian:monitoring-history:events').then((stored) => stored['guardian:monitoring-history:events']?.events ?? [])");
-  if (eventsWhileStreamOpen.some((candidate) => candidate.at >= episode.startedAt)) {
-    throw new Error(`Open SSE produced a premature event: ${JSON.stringify(eventsWhileStreamOpen)}`);
+  const eventsWhileGenericOpen = await evaluate(queryPage, "chrome.storage.local.get('guardian:monitoring-history:events').then((stored) => stored['guardian:monitoring-history:events']?.events ?? [])");
+  if (eventsWhileGenericOpen.some((candidate) => candidate.at >= episode.startedAt)) {
+    throw new Error(`Open response stream produced a premature event: ${JSON.stringify(eventsWhileGenericOpen)}`);
   }
 
-  const fetchResult = await evaluate(chatPage, "globalThis.__rev9ResponseFetch");
-  if (fetchResult?.done !== true || fetchResult.visibility !== "hidden" || !String(fetchResult.text).includes("[DONE]")) {
-    throw new Error(`Synthetic SSE did not complete while hidden: ${JSON.stringify(fetchResult)}`);
+  const genericFetchResult = await evaluate(chatPage, "globalThis.__rev10GenericFetch");
+  if (genericFetchResult?.done !== true || genericFetchResult.visibility !== "hidden" || !String(genericFetchResult.text).includes("[DONE]")) {
+    throw new Error(`Synthetic generic SSE did not finish while hidden: ${JSON.stringify(genericFetchResult)}`);
   }
 
-  const event = await waitFor(async () => {
+  const genericEvent = await waitFor(async () => {
     const stored = await evaluate(queryPage, "chrome.storage.local.get('guardian:monitoring-history:events')");
     return stored["guardian:monitoring-history:events"]?.events?.find(
       (candidate) => candidate.conversationId === CONVERSATION_ID && candidate.type === "RESPONSE_COMPLETE" && candidate.delivery?.browser === "DELIVERED",
     ) ?? false;
-  }, "one delivered RESPONSE_COMPLETE from the verified hidden SSE completion", 6_000);
+  }, "one delivered RESPONSE_COMPLETE after actual page-stream DONE", 6_000);
 
-  const allEvents = await evaluate(queryPage, "chrome.storage.local.get('guardian:monitoring-history:events').then((stored) => stored['guardian:monitoring-history:events']?.events ?? [])");
-  const responseEvents = allEvents.filter((candidate) => candidate.conversationId === CONVERSATION_ID && candidate.at >= episode.startedAt);
-  const deliveredEvents = responseEvents.filter((candidate) =>
-    candidate.delivery?.browser === "DELIVERED" ||
-    candidate.delivery?.sound === "DELIVERED" ||
-    candidate.delivery?.telegram === "DELIVERED",
+  const genericEvents = await evaluate(queryPage, "chrome.storage.local.get('guardian:monitoring-history:events').then((stored) => stored['guardian:monitoring-history:events']?.events ?? [])");
+  const genericDelivered = genericEvents.filter((candidate) =>
+    candidate.conversationId === CONVERSATION_ID &&
+    candidate.at >= episode.startedAt &&
+    (candidate.delivery?.browser === "DELIVERED" || candidate.delivery?.sound === "DELIVERED" || candidate.delivery?.telegram === "DELIVERED"),
   );
-  if (deliveredEvents.length !== 1 || deliveredEvents[0].id !== event.id) {
-    throw new Error(`Response lifecycle emitted duplicate notification delivery: ${JSON.stringify(responseEvents)}`);
-  }
-  const nonGenericDelivered = responseEvents.some((candidate) => candidate.id !== event.id && (
-    candidate.delivery?.browser === "DELIVERED" ||
-    candidate.delivery?.sound === "DELIVERED" ||
-    candidate.delivery?.telegram === "DELIVERED"
-  ));
-  if (nonGenericDelivered) {
-    throw new Error(`Semantic diagnostics produced an extra delivered notification: ${JSON.stringify(responseEvents)}`);
+  if (genericDelivered.length !== 1 || genericDelivered[0].id !== genericEvent.id) {
+    throw new Error(`Generic response emitted duplicate notification delivery: ${JSON.stringify(genericEvents)}`);
   }
 
-  const sessionState = await evaluate(queryPage, "chrome.storage.session.get('guardian:session-registry:runtime')");
-  const session = sessionState["guardian:session-registry:runtime"]?.sessions?.find((candidate) => candidate.conversationId === CONVERSATION_ID);
-  const observation = session?.observation;
-  const diagnostic = session?.hiddenDiagnostic;
-  if (observation?.latestAssistant?.normalizedText !== "partial response still streaming") {
-    throw new Error(`Network completion unexpectedly depended on final assistant DOM text: ${JSON.stringify(observation?.latestAssistant)}`);
+  const genericSessionState = await evaluate(queryPage, "chrome.storage.session.get('guardian:session-registry:runtime')");
+  const genericSession = genericSessionState["guardian:session-registry:runtime"]?.sessions?.find((candidate) => candidate.conversationId === CONVERSATION_ID);
+  if (genericSession?.observation?.latestAssistant?.normalizedText !== "partial response still streaming") {
+    throw new Error(`Generic completion unexpectedly depended on final DOM text: ${JSON.stringify(genericSession?.observation?.latestAssistant)}`);
   }
-  if (observation?.responseCompletion?.visibility !== "hidden" || observation?.responseCompletion?.transport !== "CHATGPT_CONVERSATION_STREAM") {
-    throw new Error(`Verified hidden response completion evidence was not retained: ${JSON.stringify(observation?.responseCompletion)}`);
+  if (genericSession?.observation?.responseCompletion?.visibility !== "hidden") {
+    throw new Error(`Generic page-stream DONE evidence was not retained: ${JSON.stringify(genericSession?.observation?.responseCompletion)}`);
   }
-  if (observation?.generation !== "IDLE" || observation?.stopControlPresent !== false) {
-    throw new Error(`Verified network completion did not release the hidden generation hold: ${JSON.stringify({generation:observation?.generation,stop:observation?.stopControlPresent})}`);
+  if (genericSession?.observation?.responseTerminalStatus !== undefined) {
+    throw new Error(`Generic response unexpectedly carried terminal semantic evidence: ${JSON.stringify(genericSession.observation.responseTerminalStatus)}`);
   }
-  if (diagnostic?.transportCompletedAt === undefined) {
-    throw new Error(`Diagnostic did not retain verified transport completion: ${JSON.stringify(diagnostic)}`);
+  if (genericSession?.hiddenDiagnostic?.transportCompletedAt === undefined) {
+    throw new Error(`Generic completion diagnostic was not retained: ${JSON.stringify(genericSession?.hiddenDiagnostic)}`);
   }
-  const foregroundEvidenceAfterBackground = [
-    diagnostic.foregroundedAt,
-    diagnostic.tabActivatedAt,
-    diagnostic.visibleObservedAt,
-  ].some((value) => typeof value === "number" && value > diagnostic.backgroundedAt);
-  if (foregroundEvidenceAfterBackground) {
-    throw new Error(`Diagnostic shows foreground/activation after the monitored tab was backgrounded: ${JSON.stringify(diagnostic)}`);
+
+  await evaluate(queryPage, "chrome.runtime.sendMessage({type:'panel:history-clear',protocolVersion:2})");
+  await evaluate(chatPage, "document.querySelector('#prompt-textarea')?.focus(); true");
+  await chatPage.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+  await chatPage.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+
+  const episode2 = await waitFor(async () => {
+    const stored = await evaluate(queryPage, "chrome.storage.session.get('guardian:session-registry:runtime')");
+    const session = stored["guardian:session-registry:runtime"]?.sessions?.find((candidate) => candidate.conversationId === CONVERSATION_ID);
+    return session?.pendingResponse?.startedAt > episode.startedAt ? session.pendingResponse : false;
+  }, "second manual-send response episode boundary");
+
+  await evaluate(chatPage, `(() => {
+    globalThis.__rev10StatusFetch = fetch('/backend-api/f/conversation?mode=status', {
+      method:'POST',
+      headers:{'content-type':'application/json'},
+      body:'{}'
+    }).then((response) => response.text()).then((text) => ({done:true,text,visibility:document.visibilityState}));
+    return true;
+  })()`);
+
+  await waitFor(
+    () => statusMarkerWrittenAt !== undefined && statusDoneWrittenAt === undefined,
+    "terminal marker written while response stream is still open",
+    1_000,
+  );
+  const statusEventsBeforeDone = await evaluate(queryPage, "chrome.storage.local.get('guardian:monitoring-history:events').then((stored) => stored['guardian:monitoring-history:events']?.events ?? [])");
+  if (statusEventsBeforeDone.some((candidate) => candidate.at >= episode2.startedAt)) {
+    throw new Error(`Status response notified before actual SSE DONE: ${JSON.stringify(statusEventsBeforeDone)}`);
   }
-  if (diagnostic.transportCompletedAt < inFlight.startedAt) {
-    throw new Error(`Completion preceded its correlated SSE start: ${JSON.stringify({inFlight,diagnostic})}`);
+
+  const statusFetchResult = await evaluate(chatPage, "globalThis.__rev10StatusFetch");
+  if (statusFetchResult?.done !== true || statusFetchResult.visibility !== "hidden" || !String(statusFetchResult.text).includes("AI_CHAT_MONITOR_STATUS")) {
+    throw new Error(`Synthetic status SSE did not finish while hidden: ${JSON.stringify(statusFetchResult)}`);
   }
-  if (event.delivery?.browserAt === undefined || event.delivery.browserAt < event.at) {
-    throw new Error(`Browser delivery timing is incomplete: ${JSON.stringify(event.delivery)}`);
+
+  const statusEvent = await waitFor(async () => {
+    const stored = await evaluate(queryPage, "chrome.storage.local.get('guardian:monitoring-history:events')");
+    return stored["guardian:monitoring-history:events"]?.events?.find(
+      (candidate) => candidate.conversationId === CONVERSATION_ID && candidate.at >= episode2.startedAt && candidate.type === "TASK_COMPLETE" && candidate.delivery?.browser === "DELIVERED",
+    ) ?? false;
+  }, "one delivered TASK_COMPLETE from terminal page-stream status", 6_000);
+
+  const statusEvents = await evaluate(queryPage, "chrome.storage.local.get('guardian:monitoring-history:events').then((stored) => stored['guardian:monitoring-history:events']?.events ?? [])");
+  const statusDelivered = statusEvents.filter((candidate) =>
+    candidate.conversationId === CONVERSATION_ID &&
+    candidate.at >= episode2.startedAt &&
+    (candidate.delivery?.browser === "DELIVERED" || candidate.delivery?.sound === "DELIVERED" || candidate.delivery?.telegram === "DELIVERED"),
+  );
+  if (statusDelivered.length !== 1 || statusDelivered[0].id !== statusEvent.id) {
+    throw new Error(`Terminal status emitted duplicate delivery: ${JSON.stringify(statusEvents)}`);
   }
+  if (statusEvents.some((candidate) => candidate.at >= episode2.startedAt && candidate.type === "RESPONSE_COMPLETE")) {
+    throw new Error(`Terminal status response incorrectly emitted generic RESPONSE_COMPLETE: ${JSON.stringify(statusEvents)}`);
+  }
+
+  const statusSessionState = await evaluate(queryPage, "chrome.storage.session.get('guardian:session-registry:runtime')");
+  const statusSession = statusSessionState["guardian:session-registry:runtime"]?.sessions?.find((candidate) => candidate.conversationId === CONVERSATION_ID);
+  if (statusSession?.observation?.responseTerminalStatus?.decision !== "COMPLETE" || statusSession?.observation?.responseTerminalStatus?.visibility !== "hidden") {
+    throw new Error(`Terminal status stream evidence was not retained: ${JSON.stringify(statusSession?.observation?.responseTerminalStatus)}`);
+  }
+  if (statusSession?.observation?.responseCompletion !== undefined) {
+    throw new Error(`Terminal status stream also carried generic completion evidence: ${JSON.stringify(statusSession.observation.responseCompletion)}`);
+  }
+
+  const lateDomText = 'Final DOM response\nAI_CHAT_MONITOR_STATUS={"decision":"COMPLETE"}';
+  await evaluate(chatPage, `document.querySelector('#assistant-new').textContent = ${JSON.stringify(lateDomText)}; true`);
+  await waitFor(async () => {
+    const stored = await evaluate(queryPage, "chrome.storage.session.get('guardian:session-registry:runtime')");
+    const session = stored["guardian:session-registry:runtime"]?.sessions?.find((candidate) => candidate.conversationId === CONVERSATION_ID);
+    return session?.observation?.latestAssistant?.normalizedText?.includes("AI_CHAT_MONITOR_STATUS") ? session : false;
+  }, "late DOM terminal marker catch-up");
+  await sleep(300);
+
+  const afterDomCatchup = await evaluate(queryPage, "chrome.storage.local.get('guardian:monitoring-history:events').then((stored) => stored['guardian:monitoring-history:events']?.events ?? [])");
+  const deliveredAfterCatchup = afterDomCatchup.filter((candidate) =>
+    candidate.conversationId === CONVERSATION_ID &&
+    candidate.at >= episode2.startedAt &&
+    (candidate.delivery?.browser === "DELIVERED" || candidate.delivery?.sound === "DELIVERED" || candidate.delivery?.telegram === "DELIVERED"),
+  );
+  if (deliveredAfterCatchup.length !== 1 || deliveredAfterCatchup[0].id !== statusEvent.id) {
+    throw new Error(`Late DOM marker produced duplicate semantic delivery: ${JSON.stringify(afterDomCatchup)}`);
+  }
+
   if (await evaluate(chatPage, "document.visibilityState") !== "hidden") {
-    throw new Error("Monitored tab was activated before the notification completed.");
+    throw new Error("Monitored tab was activated before both background outcomes completed.");
   }
-  if (await evaluate(chatPage, "document.querySelector('[data-testid=stop-button]') !== null") !== false) {
-    throw new Error("Smoke accidentally introduced a Stop control.");
+  await secondBrowser.browserClient.send("Target.activateTarget", { targetId: chatPage.targetId });
+  await waitFor(async () => (await evaluate(chatPage, "document.visibilityState")) === "visible", "foreground after background outcomes");
+  await sleep(300);
+  const afterForeground = await evaluate(queryPage, "chrome.storage.local.get('guardian:monitoring-history:events').then((stored) => stored['guardian:monitoring-history:events']?.events ?? [])");
+  const deliveredAfterForeground = afterForeground.filter((candidate) =>
+    candidate.conversationId === CONVERSATION_ID &&
+    candidate.at >= episode2.startedAt &&
+    (candidate.delivery?.browser === "DELIVERED" || candidate.delivery?.sound === "DELIVERED" || candidate.delivery?.telegram === "DELIVERED"),
+  );
+  if (deliveredAfterForeground.length !== 1 || deliveredAfterForeground[0].id !== statusEvent.id) {
+    throw new Error(`Foreground reconciliation produced duplicate delivery: ${JSON.stringify(afterForeground)}`);
   }
 
-  console.log(`Rev9 hidden response lifecycle passed: ${event.type}, browser=${event.delivery.browser}, streamStart=${inFlight.startedAt}, transportAt=${diagnostic.transportCompletedAt}, browserAt=${event.delivery.browserAt}`);
+  await evaluate(chatPage, `(() => {
+    globalThis.__rev10ArmsAfterDisable = [];
+    window.addEventListener('message', (event) => {
+      if (event?.data?.channel === 'AI_CHAT_MONITOR_PAGE_STREAM_V1' && event.data.type === 'stream-armed') {
+        globalThis.__rev10ArmsAfterDisable.push(event.data.episodeStartedAt);
+      }
+    });
+    return true;
+  })()`);
+  const disabled = await evaluate(queryPage, `chrome.tabs.sendMessage(${tab.id}, {
+    type:'background:monitoring-state',
+    protocolVersion:2,
+    enabled:false
+  }, {documentId:${JSON.stringify(statusSession.documentId)}})`);
+  if (disabled?.type !== 'content:monitoring-state-ack') {
+    throw new Error(`Unable to disable the content observer for gating regression: ${JSON.stringify(disabled)}`);
+  }
+  await evaluate(chatPage, "document.querySelector('#prompt-textarea')?.focus(); true");
+  await chatPage.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+  await chatPage.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+  await sleep(200);
+  const armsAfterDisable = await evaluate(chatPage, "globalThis.__rev10ArmsAfterDisable");
+  if (!Array.isArray(armsAfterDisable) || armsAfterDisable.length !== 0) {
+    throw new Error(`Monitoring-off chat still armed the MAIN response observer: ${JSON.stringify(armsAfterDisable)}`);
+  }
+
+  console.log(`Rev10 page-stream priority passed: generic=${genericEvent.type}, semantic=${statusEvent.type}, no duplicate after DOM/foreground catch-up, monitoring-off observer stayed disarmed`);
 } finally {
   for (const client of [queryPage, chatPage, settingsPage]) {
     try { client?.close(); } catch { /* ignore cleanup */ }

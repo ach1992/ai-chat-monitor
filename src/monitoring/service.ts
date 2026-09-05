@@ -23,7 +23,7 @@ import type {
   ProviderProfileMutation,
   ProviderSettingsState,
 } from "../providers/types.js";
-import type { PageObservation, ResponseCompletionEvidence } from "../shared/observation.js";
+import type { PageObservation } from "../shared/observation.js";
 import { createDurableStorage, createEphemeralStorage } from "../storage/index.js";
 import { MonitoringHistoryRepository, type MonitoringHistoryState } from "./history.js";
 import { MonitoringPolicyRepository, type MonitoringPolicyPersistence } from "./policy.js";
@@ -221,10 +221,6 @@ export function responseEpisodeAssistantState(session: SessionView): ResponseEpi
   return "FRESH_ASSISTANT";
 }
 
-function deliverySucceeded(event: MonitoringEvent): boolean {
-  return event.delivery?.browser === "DELIVERED" || event.delivery?.sound === "DELIVERED" || event.delivery?.telegram === "DELIVERED";
-}
-
 export class MonitoringService {
   readonly #policies: MonitoringPolicyRepository;
   readonly #history: MonitoringHistoryRepository;
@@ -304,20 +300,73 @@ export class MonitoringService {
     }
 
     const completion = observation.responseCompletion;
+    const streamTerminal = observation.responseTerminalStatus;
     const episodeState = responseEpisodeAssistantState(session);
     const generationStartedAt = this.#generation.get(conversationId)?.startedAt;
     const sawGenerating = generationStartedAt !== undefined;
     const pageEvent = eventForPageState(state);
+    const episodeStartedAt = session.pendingResponse?.startedAt;
+    const evidenceMatchesEpisode = (completedAt: number): boolean =>
+      episodeStartedAt !== undefined && completedAt >= episodeStartedAt;
+
+    if (streamTerminal !== undefined && evidenceMatchesEpisode(streamTerminal.completedAt)) {
+      this.#generation.delete(conversationId);
+      const uiDecision = semanticFromUi(state);
+      const decision = uiDecision ?? streamTerminal.decision;
+      const eventType = pageEvent ?? eventForDecision(decision);
+      const runtime: MonitoringRuntimeStatus = {
+        tabId: session.tabId,
+        conversationId,
+        enabled: true,
+        generation: observation.generation,
+        pageState: state,
+        blockingReasons: [...observation.blocking.reasons],
+        semanticDecision: decision,
+        semanticSource: uiDecision === undefined ? "STATUS_MARKER" : "UI",
+        markerHealth: "DETECTED",
+        ...(observation.latestAssistant === undefined ? {} : { assistantFingerprint: observation.latestAssistant.fingerprint }),
+        ...(eventType === undefined ? {} : { lastEvent: eventType }),
+        updatedAt: Date.now(),
+      };
+      this.#runtime.set(session.tabId, runtime);
+      if (eventType !== undefined) {
+        await this.#emitEvent(session, policy, runtime, eventType, {
+          identity: this.#responseEpisodeIdentity(session),
+          at: streamTerminal.completedAt,
+        });
+      }
+      return;
+    }
+
+    if (completion !== undefined && evidenceMatchesEpisode(completion.completedAt)) {
+      if (this.#responseEpisodeHasDeliveredEvent(session)) return;
+      this.#generation.delete(conversationId);
+      const uiDecision = semanticFromUi(state);
+      const eventType = pageEvent ?? "RESPONSE_COMPLETE";
+      const runtime: MonitoringRuntimeStatus = {
+        tabId: session.tabId,
+        conversationId,
+        enabled: true,
+        generation: observation.generation,
+        pageState: state,
+        blockingReasons: [...observation.blocking.reasons],
+        ...(uiDecision === undefined ? {} : { semanticDecision: uiDecision }),
+        semanticSource: uiDecision === undefined ? "UNKNOWN" : "UI",
+        markerHealth: "MISSING",
+        ...(observation.latestAssistant === undefined ? {} : { assistantFingerprint: observation.latestAssistant.fingerprint }),
+        lastEvent: eventType,
+        updatedAt: Date.now(),
+      };
+      this.#runtime.set(session.tabId, runtime);
+      await this.#emitEvent(session, policy, runtime, eventType, {
+        identity: this.#responseEpisodeIdentity(session),
+        at: completion.completedAt,
+      });
+      return;
+    }
 
     if (observation.generation === "GENERATING") {
       await this.#handleGenerating(session, policy, state);
-      await this.#maybeEmitTransportCompletion(
-        session,
-        policy,
-        state,
-        completion,
-        this.#generation.get(conversationId)?.startedAt,
-      );
       return;
     }
 
@@ -338,7 +387,6 @@ export class MonitoringService {
       };
       this.#runtime.set(session.tabId, runtime);
       if (pageEvent !== undefined) await this.#emitEvent(session, policy, runtime, pageEvent);
-      await this.#maybeEmitTransportCompletion(session, policy, state, completion, generationStartedAt);
       return;
     }
     const assistant = observation.latestAssistant;
@@ -359,19 +407,14 @@ export class MonitoringService {
       };
       this.#runtime.set(session.tabId, runtime);
       if (pageEvent !== undefined) await this.#emitEvent(session, policy, runtime, pageEvent);
-      await this.#maybeEmitTransportCompletion(session, policy, state, completion, generationStartedAt);
       return;
     }
 
     const marker = inspectConversationStatusMarker(assistant.normalizedText);
-    const completionMatchesEpisode = session.pendingResponse === undefined
-      ? sawGenerating
-      : completion !== undefined && completion.completedAt >= session.pendingResponse.startedAt;
     if (
       episodeState === "FRESH_ASSISTANT" &&
       marker.health !== "DETECTED" &&
-      !sawGenerating &&
-      !completionMatchesEpisode
+      !sawGenerating
     ) {
       this.#runtime.set(session.tabId, {
         tabId: session.tabId,
@@ -421,8 +464,14 @@ export class MonitoringService {
       updatedAt: Date.now(),
     };
     this.#runtime.set(session.tabId, runtime);
-    if (eventType !== undefined) await this.#emitEvent(session, policy, runtime, eventType);
-    await this.#maybeEmitTransportCompletion(session, policy, state, completion, generationStartedAt);
+    if (eventType !== undefined) {
+      const priorEpisodeDelivery = pageEvent === undefined && this.#responseEpisodeHasDeliveredEvent(session);
+      if (!priorEpisodeDelivery) {
+        await this.#emitEvent(session, policy, runtime, eventType, {
+          identity: this.#responseEpisodeIdentity(session),
+        });
+      }
+    }
   }
 
   async updateChat(tabId: number, expectedConversationId: string, patch: ChatMonitoringPolicyPatch): Promise<ResolvedMonitoringPolicy> {
@@ -693,45 +742,30 @@ export class MonitoringService {
     });
   }
 
-  async #maybeEmitTransportCompletion(
-    session: SessionView,
-    policy: ResolvedMonitoringPolicy,
-    state: MonitoringPageState,
-    completion: ResponseCompletionEvidence | undefined,
-    generationStartedAt: number | undefined,
-  ): Promise<void> {
-    if (completion?.visibility !== "hidden") return;
+  #responseEpisodeIdentity(session: SessionView): string {
+    const startedAt = session.pendingResponse?.startedAt;
+    if (startedAt !== undefined) return `response:${session.documentId}:${startedAt}`;
+    const runtime = this.#runtime.get(session.tabId);
+    return runtime === undefined
+      ? `page:${session.documentId}:${session.pageEpoch}:${session.routeKey}`
+      : monitoringEventIdentity(session, runtime);
+  }
+
+  #responseEpisodeHasDeliveredEvent(session: SessionView): boolean {
     const conversationId = session.conversationId;
-    if (conversationId === undefined) return;
-
-    const episodeStartedAt = responseEpisodeStartedAt(session.pendingResponse?.startedAt, generationStartedAt);
-    if (episodeStartedAt === undefined || completion.completedAt < episodeStartedAt) return;
-
-    const deliveredSince = episodeStartedAt;
-    const alreadyDelivered = this.#history.snapshot(200).some((event) =>
-      event.conversationId === conversationId &&
-      event.at >= deliveredSince &&
-      deliverySucceeded(event),
+    const startedAt = session.pendingResponse?.startedAt;
+    if (conversationId === undefined || startedAt === undefined) return false;
+    const identity = this.#responseEpisodeIdentity(session);
+    const prefix = `monitor:${conversationId}:${identity}:`;
+    return this.#history.snapshot(200).some((event) =>
+      event.id.startsWith(prefix) &&
+      event.at >= startedAt &&
+      (
+        event.delivery?.browser === "DELIVERED" ||
+        event.delivery?.sound === "DELIVERED" ||
+        event.delivery?.telegram === "DELIVERED"
+      ),
     );
-    if (alreadyDelivered) return;
-
-    const runtime: MonitoringRuntimeStatus = {
-      tabId: session.tabId,
-      conversationId,
-      enabled: true,
-      generation: session.observation?.generation,
-      pageState: state,
-      blockingReasons: [...(session.observation?.blocking.reasons ?? [])],
-      semanticSource: "UNKNOWN",
-      markerHealth: "MISSING",
-      lastEvent: "RESPONSE_COMPLETE",
-      updatedAt: Date.now(),
-    };
-    this.#runtime.set(session.tabId, runtime);
-    await this.#emitEvent(session, policy, runtime, "RESPONSE_COMPLETE", {
-      identity: `response:${session.documentId}:${episodeStartedAt}`,
-      at: completion.completedAt,
-    });
   }
 
   async #emitEvent(

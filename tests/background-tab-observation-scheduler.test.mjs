@@ -35,6 +35,8 @@ async function loadContentAgent(initialVisibility) {
   const sent = [];
   const timers = new Map();
   const documentListeners = new Map();
+  const windowListeners = new Map();
+  const windowPosted = [];
   let nextTimerId = 1;
   let mutationCallback;
   let runtimeCallback;
@@ -46,9 +48,9 @@ async function loadContentAgent(initialVisibility) {
     async observe() {
       return { ...structuredClone(state.observation), visibility: state.visibilityState };
     }
-    isComposerTarget() { return false; }
-    isManualSendTarget() { return false; }
-    isStopGenerationTarget() { return false; }
+    isComposerTarget(target) { return target?.composer === true; }
+    isManualSendTarget(target) { return target?.manualSend === true; }
+    isStopGenerationTarget(target) { return target?.stop === true; }
     isEditTurnTarget() { return false; }
     isBlockingInteractionTarget() { return false; }
   }
@@ -69,7 +71,12 @@ async function loadContentAgent(initialVisibility) {
   };
 
   const window = {
-    addEventListener() {},
+    addEventListener(type, callback) {
+      const listeners = windowListeners.get(type) ?? [];
+      listeners.push(callback);
+      windowListeners.set(type, listeners);
+    },
+    postMessage(data) { windowPosted.push(structuredClone(data)); },
     setInterval() { return 1; },
     setTimeout(callback) {
       const id = nextTimerId;
@@ -101,6 +108,7 @@ async function loadContentAgent(initialVisibility) {
           tabId: 1,
           documentId: "document-test",
           controlEligibility: "OWNER",
+          monitoringEnabled: true,
         };
       },
     },
@@ -134,6 +142,23 @@ async function loadContentAgent(initialVisibility) {
       assert.equal(typeof runtimeCallback, "function");
       runtimeCallback(structuredClone(message), {}, () => undefined);
     },
+    pageMessage(message) {
+      for (const listener of windowListeners.get("message") ?? []) {
+        listener({ source: window, origin: "https://chatgpt.com", data: structuredClone(message) });
+      }
+    },
+    manualSend() {
+      const event = {
+        type: "keydown",
+        isTrusted: true,
+        key: "Enter",
+        shiftKey: false,
+        isComposing: false,
+        target: { composer: true },
+      };
+      for (const listener of documentListeners.get("keydown") ?? []) listener(event);
+    },
+    get pageMessages() { return windowPosted; },
     setVisibility(value) { state.visibilityState = value; },
     setObservation(value) { state.observation = structuredClone(value); },
     rejectNextObservation() { state.rejectNextObservation = true; },
@@ -154,6 +179,21 @@ function observationMessages(sent) {
 
 function completionObservations(sent) {
   return observationMessages(sent).filter((message) => message.observation?.responseCompletion !== undefined);
+}
+
+function armPageStream(agent) {
+  const interaction = [...agent.sent].reverse().find((message) =>
+    message.type === "content:user-interaction" && message.interaction === "MANUAL_SEND",
+  );
+  assert.ok(interaction);
+  const episodeStartedAt = interaction.sentAt;
+  agent.pageMessage({
+    channel: "AI_CHAT_MONITOR_PAGE_STREAM_V1",
+    type: "stream-armed",
+    protocolVersion: 1,
+    episodeStartedAt,
+  });
+  return { episodeStartedAt };
 }
 
 test("hidden-tab DOM mutations produce observations without timer callbacks", async () => {
@@ -207,9 +247,10 @@ test("hidden agent self-heals a lost background session without tab activation",
   );
 });
 
-test("browser stream start keeps hidden transient IDLE observations in generation", async () => {
+test("manual send arms page-stream monitoring and keeps hidden transient IDLE observations generating", async () => {
   const agent = await loadContentAgent("hidden");
   agent.sent.length = 0;
+  agent.pageMessages.length = 0;
   agent.setObservation({
     ...observation(),
     generation: "IDLE",
@@ -221,23 +262,21 @@ test("browser stream start keeps hidden transient IDLE observations in generatio
     },
   });
 
-  agent.backgroundMessage({
-    type: "background:response-stream-started",
-    protocolVersion: 2,
-    requestId: "request-1",
-    startedAt: 1_000,
-  });
+  agent.manualSend();
   await flushAsyncWork();
 
+  const arm = armPageStream(agent);
   const observations = observationMessages(agent.sent);
   assert.equal(observations.length, 1);
   assert.equal(observations[0].observation.generation, "GENERATING");
   assert.equal(observations[0].observation.responseCompletion, undefined);
+  assert.equal(observations[0].observation.responseTerminalStatus, undefined);
 });
 
-test("matching browser stream completion releases hidden generation and binds completion evidence", async () => {
+test("matching page-stream DONE releases hidden generation and binds generic completion only", async () => {
   const agent = await loadContentAgent("hidden");
   agent.sent.length = 0;
+  agent.pageMessages.length = 0;
   agent.setObservation({
     ...observation(),
     generation: "IDLE",
@@ -248,40 +287,36 @@ test("matching browser stream completion releases hidden generation and binds co
       domMessageId: "assistant-new",
     },
   });
-
-  agent.backgroundMessage({
-    type: "background:response-stream-started",
-    protocolVersion: 2,
-    requestId: "request-2",
-    startedAt: 2_000,
-  });
+  agent.manualSend();
   await flushAsyncWork();
+  const arm = armPageStream(agent);
   agent.sent.length = 0;
 
-  agent.backgroundMessage({
-    type: "background:response-stream-completed",
-    protocolVersion: 2,
-    requestId: "request-2",
-    startedAt: 2_000,
-    completedAt: 3_000,
+  agent.pageMessage({
+    channel: "AI_CHAT_MONITOR_PAGE_STREAM_V1",
+    type: "response-complete",
+    protocolVersion: 1,
+    episodeStartedAt: arm.episodeStartedAt,
+    completedAt: arm.episodeStartedAt + 2_000,
   });
   await flushAsyncWork();
 
   const completions = completionObservations(agent.sent);
   assert.equal(completions.length, 1);
   assert.equal(completions[0].observation.generation, "IDLE");
-  assert.equal(completions[0].observation.latestAssistant.normalizedText, "partial response");
   assert.deepEqual(completions[0].observation.responseCompletion, {
     serial: 1,
     transport: "CHATGPT_CONVERSATION_STREAM",
     visibility: "hidden",
-    completedAt: 3_000,
+    completedAt: arm.episodeStartedAt + 2_000,
   });
+  assert.equal(completions[0].observation.responseTerminalStatus, undefined);
 });
 
-test("mismatched browser stream completion cannot end the active hidden response", async () => {
+test("mismatched page-stream outcome cannot end the current hidden response", async () => {
   const agent = await loadContentAgent("hidden");
   agent.sent.length = 0;
+  agent.pageMessages.length = 0;
   agent.setObservation({
     ...observation(),
     generation: "IDLE",
@@ -292,22 +327,17 @@ test("mismatched browser stream completion cannot end the active hidden response
       domMessageId: "assistant-new",
     },
   });
-
-  agent.backgroundMessage({
-    type: "background:response-stream-started",
-    protocolVersion: 2,
-    requestId: "request-current",
-    startedAt: 4_000,
-  });
+  agent.manualSend();
   await flushAsyncWork();
+  const arm = armPageStream(agent);
   agent.sent.length = 0;
 
-  agent.backgroundMessage({
-    type: "background:response-stream-completed",
-    protocolVersion: 2,
-    requestId: "request-old",
-    startedAt: 3_000,
-    completedAt: 4_500,
+  agent.pageMessage({
+    channel: "AI_CHAT_MONITOR_PAGE_STREAM_V1",
+    type: "response-complete",
+    protocolVersion: 1,
+    episodeStartedAt: arm.episodeStartedAt - 1,
+    completedAt: arm.episodeStartedAt + 1_000,
   });
   agent.mutation();
   await flushAsyncWork();
@@ -316,9 +346,10 @@ test("mismatched browser stream completion cannot end the active hidden response
   assert.ok(observationMessages(agent.sent).every((message) => message.observation.generation === "GENERATING"));
 });
 
-test("aborted browser stream clears the hidden generation hold without fabricating completion", async () => {
+test("terminal status from page stream suppresses generic completion evidence", async () => {
   const agent = await loadContentAgent("hidden");
   agent.sent.length = 0;
+  agent.pageMessages.length = 0;
   agent.setObservation({
     ...observation(),
     generation: "IDLE",
@@ -329,25 +360,76 @@ test("aborted browser stream clears the hidden generation hold without fabricati
       domMessageId: "assistant-new",
     },
   });
-
-  agent.backgroundMessage({
-    type: "background:response-stream-started",
-    protocolVersion: 2,
-    requestId: "request-abort",
-    startedAt: 5_000,
-  });
+  agent.manualSend();
   await flushAsyncWork();
+  const arm = armPageStream(agent);
   agent.sent.length = 0;
 
-  agent.backgroundMessage({
-    type: "background:response-stream-aborted",
-    protocolVersion: 2,
-    requestId: "request-abort",
-    startedAt: 5_000,
+  agent.pageMessage({
+    channel: "AI_CHAT_MONITOR_PAGE_STREAM_V1",
+    type: "terminal-status",
+    protocolVersion: 1,
+    episodeStartedAt: arm.episodeStartedAt,
+    completedAt: arm.episodeStartedAt + 3_000,
+    decision: "COMPLETE",
   });
   await flushAsyncWork();
 
   const observations = observationMessages(agent.sent);
+  assert.equal(observations.length, 1);
+  assert.equal(observations[0].observation.responseCompletion, undefined);
+  assert.deepEqual(observations[0].observation.responseTerminalStatus, {
+    serial: 1,
+    source: "CHATGPT_RESPONSE_STREAM",
+    visibility: "hidden",
+    completedAt: arm.episodeStartedAt + 3_000,
+    decision: "COMPLETE",
+  });
+});
+
+test("monitoring-off state disables hidden response hold and ignores page-stream outcomes", async () => {
+  const agent = await loadContentAgent("hidden");
+  agent.sent.length = 0;
+  agent.backgroundMessage({
+    type: "background:monitoring-state",
+    protocolVersion: 2,
+    enabled: false,
+  });
+  agent.setObservation({
+    ...observation(),
+    generation: "IDLE",
+    latestAssistant: {
+      normalizedText: "unmonitored partial response",
+      textLength: 28,
+      fingerprint: "c".repeat(64),
+      domMessageId: "assistant-unmonitored",
+    },
+  });
+
+  agent.manualSend();
+  await flushAsyncWork();
+  const interaction = [...agent.sent].reverse().find((message) =>
+    message.type === "content:user-interaction" && message.interaction === "MANUAL_SEND",
+  );
+  assert.ok(interaction);
+  agent.pageMessage({
+    channel: "AI_CHAT_MONITOR_PAGE_STREAM_V1",
+    type: "stream-armed",
+    protocolVersion: 1,
+    episodeStartedAt: interaction.sentAt,
+  });
+  agent.pageMessage({
+    channel: "AI_CHAT_MONITOR_PAGE_STREAM_V1",
+    type: "response-complete",
+    protocolVersion: 1,
+    episodeStartedAt: interaction.sentAt,
+    completedAt: interaction.sentAt + 1000,
+  });
+  agent.mutation();
+  await flushAsyncWork();
+
+  const observations = observationMessages(agent.sent);
+  assert.ok(observations.length >= 1);
+  assert.ok(observations.every((message) => message.observation.generation === "IDLE"));
   assert.equal(completionObservations(agent.sent).length, 0);
-  assert.equal(observations.at(-1)?.observation.generation, "IDLE");
 });
