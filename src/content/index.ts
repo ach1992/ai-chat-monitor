@@ -1,6 +1,6 @@
 namespace GuardianContentAgent {
   type RuntimeResponse =
-    | { type: "background:agent-ack"; protocolVersion: 2; accepted: boolean }
+    | { type: "background:agent-ack"; protocolVersion: 2; accepted: boolean; monitoringEnabled?: boolean }
     | { type: "background:error"; protocolVersion: 2; code: string; message: string };
 
   type InteractionKind =
@@ -10,6 +10,17 @@ namespace GuardianContentAgent {
     | "STOP_GENERATION"
     | "EDIT_TURN"
     | "BLOCKING_INTERACTION";
+
+  type MarkerHealth = "DETECTED" | "MISSING" | "MALFORMED";
+  type SemanticDecision =
+    | "CONTINUE"
+    | "HOLD_APPROVAL"
+    | "HOLD_DECISION"
+    | "HOLD_HUMAN_OPERATION"
+    | "COMPLETE"
+    | "PLATFORM_ERROR"
+    | "RATE_LIMIT"
+    | "UNSURE";
 
   interface PanelAgentProbeMessage {
     type: "panel:agent-probe";
@@ -21,8 +32,30 @@ namespace GuardianContentAgent {
     protocolVersion: 2;
   }
 
+  interface ServerCompletionEvidence {
+    conversationId: string;
+    assistantMessageId: string;
+    parentUserMessageId: string;
+    messageStatus: "finished_successfully";
+    endTurn: true;
+    markerHealth: MarkerHealth;
+    semanticDecision?: SemanticDecision;
+    assistantTextLength: number;
+  }
+
   const FOCUS_INTENT_WINDOW_MS = 1_500;
   const PERIODIC_OBSERVATION_MS = 15_000;
+  const HIDDEN_RESPONSE_CHANNEL = "AI_CHAT_MONITOR_HIDDEN_RESPONSE_V1";
+  const DECISIONS = new Set<SemanticDecision>([
+    "CONTINUE",
+    "HOLD_APPROVAL",
+    "HOLD_DECISION",
+    "HOLD_HUMAN_OPERATION",
+    "COMPLETE",
+    "PLATFORM_ERROR",
+    "RATE_LIMIT",
+    "UNSURE",
+  ]);
   const adapter = new GuardianContent.BrowserChatGPTAdapter(document, location);
   const agentInstanceId = crypto.randomUUID();
   let pageEpoch = 1;
@@ -32,6 +65,7 @@ namespace GuardianContentAgent {
   let observationGeneration = 0;
   let outboundQueue: Promise<void> = Promise.resolve();
   let lastKeyboardFocusIntentAt: number | undefined;
+  let monitoringEnabled = false;
 
   function nextSequence(): number { sequence += 1; return sequence; }
 
@@ -39,6 +73,9 @@ namespace GuardianContentAgent {
     let response: RuntimeResponse | undefined;
     const operation = outboundQueue.then(async () => {
       try { response = await chrome.runtime.sendMessage<RuntimeResponse>(message); } catch { response = undefined; }
+      if (response?.type === "background:agent-ack" && typeof response.monitoringEnabled === "boolean") {
+        monitoringEnabled = response.monitoringEnabled;
+      }
     });
     outboundQueue = operation.catch(() => undefined);
     await operation;
@@ -49,6 +86,10 @@ namespace GuardianContentAgent {
     return typeof value === "object" && value !== null;
   }
 
+  function isBoundedId(value: unknown): value is string {
+    return typeof value === "string" && /^[A-Za-z0-9_-]{4,200}$/.test(value);
+  }
+
   function isPanelAgentProbeMessage(value: unknown): value is PanelAgentProbeMessage {
     return isRecord(value) && value.type === "panel:agent-probe" && value.protocolVersion === GuardianContent.PROTOCOL_VERSION;
   }
@@ -56,6 +97,74 @@ namespace GuardianContentAgent {
   function isPanelAgentReconnectMessage(value: unknown): value is PanelAgentReconnectMessage {
     return isRecord(value) && value.type === "panel:agent-reconnect" && value.protocolVersion === GuardianContent.PROTOCOL_VERSION;
   }
+
+  function parseServerCompletionEvidence(value: unknown): ServerCompletionEvidence | undefined {
+    if (!isRecord(value)) return undefined;
+    if (!isBoundedId(value.conversationId) || !isBoundedId(value.assistantMessageId) || !isBoundedId(value.parentUserMessageId)) return undefined;
+    if (value.messageStatus !== "finished_successfully" || value.endTurn !== true) return undefined;
+    if (value.markerHealth !== "DETECTED" && value.markerHealth !== "MISSING" && value.markerHealth !== "MALFORMED") return undefined;
+    if (value.semanticDecision !== undefined &&
+        (typeof value.semanticDecision !== "string" || !DECISIONS.has(value.semanticDecision as SemanticDecision))) return undefined;
+    if (value.markerHealth === "DETECTED" && value.semanticDecision === undefined) return undefined;
+    if (value.markerHealth !== "DETECTED" && value.semanticDecision !== undefined) return undefined;
+    if (typeof value.assistantTextLength !== "number" || !Number.isInteger(value.assistantTextLength) ||
+        value.assistantTextLength < 0 || value.assistantTextLength > 262_144) return undefined;
+    return {
+      conversationId: value.conversationId,
+      assistantMessageId: value.assistantMessageId,
+      parentUserMessageId: value.parentUserMessageId,
+      messageStatus: value.messageStatus,
+      endTurn: true,
+      markerHealth: value.markerHealth,
+      ...(value.semanticDecision === undefined ? {} : { semanticDecision: value.semanticDecision as SemanticDecision }),
+      assistantTextLength: value.assistantTextLength,
+    };
+  }
+
+  function armHiddenResponseBridge(): void {
+    const conversationId = adapter.currentConversationId();
+    window.postMessage({
+      channel: HIDDEN_RESPONSE_CHANNEL,
+      type: "control",
+      protocolVersion: 1,
+      enabled: monitoringEnabled && conversationId !== undefined,
+      ...(conversationId === undefined ? {} : { conversationId }),
+    }, location.origin);
+  }
+
+  async function forwardServerCompletion(evidence: ServerCompletionEvidence): Promise<void> {
+    if (!monitoringEnabled || adapter.currentConversationId() !== evidence.conversationId) return;
+    const observation = await adapter.observe();
+    if (observation.conversationId !== evidence.conversationId || observation.confidence !== "HIGH") return;
+    if (observation.latestUser?.domMessageId !== evidence.parentUserMessageId) return;
+    if (observation.latestAssistant?.domMessageId !== evidence.assistantMessageId) return;
+
+    await send({
+      type: "content:server-completion",
+      protocolVersion: GuardianContent.PROTOCOL_VERSION,
+      agentInstanceId,
+      pageEpoch,
+      sequence: nextSequence(),
+      sentAt: Date.now(),
+      conversationId: evidence.conversationId,
+      assistantMessageId: evidence.assistantMessageId,
+      parentUserMessageId: evidence.parentUserMessageId,
+      messageStatus: evidence.messageStatus,
+      endTurn: evidence.endTurn,
+      markerHealth: evidence.markerHealth,
+      ...(evidence.semanticDecision === undefined ? {} : { semanticDecision: evidence.semanticDecision }),
+      assistantTextLength: evidence.assistantTextLength,
+    });
+  }
+
+  window.addEventListener("message", (event) => {
+    if (event.source !== window || event.origin !== location.origin || !isRecord(event.data)) return;
+    if (event.data.channel !== HIDDEN_RESPONSE_CHANNEL ||
+        event.data.type !== "server-completion-evidence" ||
+        event.data.protocolVersion !== 1) return;
+    const evidence = parseServerCompletionEvidence(event.data.evidence);
+    if (evidence !== undefined) void forwardServerCompletion(evidence);
+  });
 
   function agentProbeResponse(): Record<string, unknown> {
     const conversationId = adapter.currentConversationId();
@@ -148,6 +257,7 @@ namespace GuardianContentAgent {
   }
 
   function emitUserInteraction(interaction: InteractionKind): void {
+    if (interaction === "MANUAL_SEND") armHiddenResponseBridge();
     void send({
       type: "content:user-interaction",
       protocolVersion: GuardianContent.PROTOCOL_VERSION,
