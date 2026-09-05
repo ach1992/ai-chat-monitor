@@ -52,6 +52,101 @@ import {
 
 const REGISTRY_KEY = "runtime";
 const registryStorage = createEphemeralStorage<SessionRegistryState>("session-registry");
+
+const BACKGROUND_MONITORING_DIAGNOSTIC_KEY = "trace";
+const MAX_BACKGROUND_MONITORING_DIAGNOSTIC_ENTRIES = 256;
+const BACKGROUND_MONITORING_DIAGNOSTIC_CHANGE_SAMPLE_MS = 2_000;
+const BACKGROUND_MONITORING_DIAGNOSTIC_HEARTBEAT_MS = 15_000;
+
+type DiagnosticContentMessage = Pick<ContentObservation, "agentInstanceId" | "pageEpoch" | "sequence" | "sentAt">;
+type DiagnosticIdentity = { tabId: number; documentId: string };
+
+interface BackgroundMonitoringDiagnosticEntry {
+  at: number;
+  bootId: string;
+  kind: "WORKER_BOOT" | "MANUAL_SEND" | "OBSERVATION" | "SESSION_REJECTED" | "TAB_ACTIVATED";
+  tabId?: number | undefined;
+  activeTabId?: number | undefined;
+  tabActive?: boolean | undefined;
+  documentId?: string | undefined;
+  agentInstanceId?: string | undefined;
+  pageEpoch?: number | undefined;
+  sequence?: number | undefined;
+  contentSentAt?: number | undefined;
+  conversationId?: string | undefined;
+  rejectReason?: string | undefined;
+  observedAt?: number | undefined;
+  generation?: ContentObservation["observation"]["generation"] | undefined;
+  confidence?: ContentObservation["observation"]["confidence"] | undefined;
+  userMessageId?: string | undefined;
+  userLength?: number | undefined;
+  assistantMessageId?: string | undefined;
+  assistantLength?: number | undefined;
+  pageState?: string | undefined;
+  markerHealth?: string | undefined;
+  semanticDecision?: string | undefined;
+  semanticSource?: string | undefined;
+  lastEvent?: string | undefined;
+  monitoringUpdatedAt?: number | undefined;
+  latestEventType?: string | undefined;
+  latestEventAt?: number | undefined;
+}
+
+interface BackgroundMonitoringDiagnosticTrace {
+  version: 1;
+  entries: BackgroundMonitoringDiagnosticEntry[];
+}
+
+const backgroundMonitoringDiagnosticStorage = createEphemeralStorage<BackgroundMonitoringDiagnosticTrace>(
+  "background-monitoring-diagnostic",
+);
+const backgroundMonitoringDiagnosticBootId = crypto.randomUUID();
+let backgroundMonitoringDiagnosticTrace: BackgroundMonitoringDiagnosticTrace = { version: 1, entries: [] };
+const backgroundMonitoringDiagnosticReady = backgroundMonitoringDiagnosticStorage
+  .get(BACKGROUND_MONITORING_DIAGNOSTIC_KEY)
+  .then((stored) => {
+    if (stored?.version === 1 && Array.isArray(stored.entries)) {
+      backgroundMonitoringDiagnosticTrace = { version: 1, entries: stored.entries.slice(-MAX_BACKGROUND_MONITORING_DIAGNOSTIC_ENTRIES) };
+    }
+  })
+  .catch(() => undefined);
+let backgroundMonitoringDiagnosticQueue: Promise<void> = Promise.resolve();
+const backgroundMonitoringObservationSamples = new Map<number, { signature: string; at: number }>();
+
+function diagnosticContentIdentity(
+  identity: DiagnosticIdentity,
+  message: DiagnosticContentMessage,
+  sender: chrome.runtime.MessageSender,
+): Partial<BackgroundMonitoringDiagnosticEntry> {
+  return {
+    tabId: identity.tabId,
+    tabActive: sender.tab?.active,
+    documentId: identity.documentId,
+    agentInstanceId: message.agentInstanceId,
+    pageEpoch: message.pageEpoch,
+    sequence: message.sequence,
+    contentSentAt: message.sentAt,
+  };
+}
+
+function recordBackgroundMonitoringDiagnostic(
+  entry: Omit<BackgroundMonitoringDiagnosticEntry, "at" | "bootId">,
+): Promise<void> {
+  const run = backgroundMonitoringDiagnosticQueue.then(async () => {
+    await backgroundMonitoringDiagnosticReady;
+    backgroundMonitoringDiagnosticTrace = {
+      version: 1,
+      entries: [
+        ...backgroundMonitoringDiagnosticTrace.entries,
+        { ...entry, at: Date.now(), bootId: backgroundMonitoringDiagnosticBootId },
+      ].slice(-MAX_BACKGROUND_MONITORING_DIAGNOSTIC_ENTRIES),
+    };
+    await backgroundMonitoringDiagnosticStorage.set(BACKGROUND_MONITORING_DIAGNOSTIC_KEY, backgroundMonitoringDiagnosticTrace);
+  });
+  backgroundMonitoringDiagnosticQueue = run.catch(() => undefined);
+  return run.catch(() => undefined);
+}
+
 let registry = new SessionRegistry();
 let mutationQueue: Promise<void> = Promise.resolve();
 
@@ -63,6 +158,8 @@ const registryReady = Promise.all([
 ]).then(([, state]) => {
   registry = SessionRegistry.fromState(state, { invalidateObservations: true });
 });
+
+void recordBackgroundMonitoringDiagnostic({ kind: "WORKER_BOOT" });
 
 async function requestContentAgentReconnect(tabId: number, documentId?: string): Promise<void> {
   try {
@@ -206,8 +303,65 @@ async function handleObservation(message: ContentObservation, sender: chrome.run
       observation: message.observation,
       sentAt: message.sentAt,
     }));
-    if (!result.accepted) return staleEvent(result.reason);
+    if (!result.accepted) {
+      await recordBackgroundMonitoringDiagnostic({
+        kind: "SESSION_REJECTED",
+        ...diagnosticContentIdentity(identity, message, sender),
+        rejectReason: result.reason,
+      });
+      return staleEvent(result.reason);
+    }
+
     await monitoring.handleSession(result.session);
+    const runtime = (await monitoring.status(identity.tabId)).runtime;
+    const latestEvent = monitoring.history(20).reverse().find((event) => event.conversationId === result.session.conversationId);
+    const user = message.observation.latestUser;
+    const assistant = message.observation.latestAssistant;
+    const entry: Omit<BackgroundMonitoringDiagnosticEntry, "at" | "bootId"> = {
+      kind: "OBSERVATION",
+      ...diagnosticContentIdentity(identity, message, sender),
+      conversationId: result.session.conversationId,
+      observedAt: message.observation.observedAt,
+      generation: message.observation.generation,
+      confidence: message.observation.confidence,
+      userMessageId: user?.domMessageId,
+      userLength: user?.textLength,
+      assistantMessageId: assistant?.domMessageId,
+      assistantLength: assistant?.textLength,
+      pageState: runtime?.pageState,
+      markerHealth: runtime?.markerHealth,
+      semanticDecision: runtime?.semanticDecision,
+      semanticSource: runtime?.semanticSource,
+      lastEvent: runtime?.lastEvent,
+      monitoringUpdatedAt: runtime?.updatedAt,
+      latestEventType: latestEvent?.type,
+      latestEventAt: latestEvent?.at,
+    };
+    const signature = JSON.stringify([
+      entry.tabActive,
+      entry.generation,
+      entry.confidence,
+      entry.userMessageId,
+      entry.userLength,
+      entry.assistantMessageId,
+      entry.assistantLength,
+      entry.pageState,
+      entry.markerHealth,
+      entry.semanticDecision,
+      entry.lastEvent,
+      entry.latestEventType,
+      entry.latestEventAt,
+    ]);
+    const now = Date.now();
+    const prior = backgroundMonitoringObservationSamples.get(identity.tabId);
+    const changed = prior?.signature !== signature;
+    if (prior === undefined ||
+      (changed && now - prior.at >= BACKGROUND_MONITORING_DIAGNOSTIC_CHANGE_SAMPLE_MS) ||
+      now - prior.at >= BACKGROUND_MONITORING_DIAGNOSTIC_HEARTBEAT_MS) {
+      backgroundMonitoringObservationSamples.set(identity.tabId, { signature, at: now });
+      await recordBackgroundMonitoringDiagnostic(entry);
+    }
+
     return acceptedAck(identity.tabId, identity.documentId, result);
   } catch {
     return protocolError("STORAGE_FAILURE", "Unable to persist observation state.");
@@ -225,8 +379,24 @@ async function handleInteraction(message: ContentUserInteraction, sender: chrome
       sequence: message.sequence,
       sentAt: message.sentAt,
     }));
-    if (!result.accepted) return staleEvent(result.reason);
+    if (!result.accepted) {
+      if (message.interaction === "MANUAL_SEND") {
+        await recordBackgroundMonitoringDiagnostic({
+          kind: "SESSION_REJECTED",
+          ...diagnosticContentIdentity(identity, message, sender),
+          rejectReason: result.reason,
+        });
+      }
+      return staleEvent(result.reason);
+    }
     await monitoring.handleSession(result.session);
+    if (message.interaction === "MANUAL_SEND") {
+      await recordBackgroundMonitoringDiagnostic({
+        kind: "MANUAL_SEND",
+        ...diagnosticContentIdentity(identity, message, sender),
+        conversationId: result.session.conversationId,
+      });
+    }
     return acceptedAck(identity.tabId, identity.documentId, result);
   } catch {
     return protocolError("STORAGE_FAILURE", "Unable to persist user-interaction state.");
@@ -480,6 +650,17 @@ chrome.notifications.onClicked.addListener((notificationId) => {
     }
     try { await chrome.tabs.update(event.tabId, { active: true }); } catch { /* stale tab */ }
   }).catch(() => undefined);
+});
+
+chrome.tabs.onActivated.addListener((activeInfo) => {
+  void registryReady.then(async () => {
+    const session = registry.getTab(activeInfo.tabId);
+    await recordBackgroundMonitoringDiagnostic({
+      kind: "TAB_ACTIVATED",
+      activeTabId: activeInfo.tabId,
+      conversationId: session?.conversationId,
+    });
+  });
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
