@@ -1,5 +1,6 @@
 import { isPageObservation, type PageObservation } from "./observation.js";
 import type { ControlEligibility } from "../core/session-registry.js";
+import type { ConversationProtocolDecision, ConversationStatusMarkerHealth } from "../classification/conversation-protocol.js";
 import { MONITORING_EVENTS } from "../monitoring/policy.js";
 import type {
   ChatMonitoringPolicy,
@@ -7,7 +8,7 @@ import type {
   MonitoringEvent,
   MonitoringEventType,
   MonitoringPolicyDefaults,
-  MonitoringRuntimeStatus,
+  MonitoringPolicyState,
   ResolvedMonitoringPolicy,
 } from "../monitoring/types.js";
 import {
@@ -60,6 +61,18 @@ export interface ContentObservation extends ContentSessionBase {
 export interface ContentUserInteraction extends ContentSessionBase {
   type: "content:user-interaction";
   interaction: UserInteractionKind;
+}
+
+export interface ContentServerCompletion extends ContentSessionBase {
+  type: "content:server-completion";
+  conversationId: string;
+  assistantMessageId: string;
+  parentUserMessageId: string;
+  messageStatus: string;
+  endTurn: true;
+  markerHealth: ConversationStatusMarkerHealth;
+  semanticDecision?: ConversationProtocolDecision;
+  assistantTextLength: number;
 }
 
 export interface PanelStatusRequest {
@@ -130,6 +143,7 @@ export interface ContentAgentAck {
   tabId: number;
   documentId: string;
   controlEligibility?: ControlEligibility;
+  monitoringEnabled?: boolean;
 }
 
 export interface PanelStatusResponse {
@@ -141,7 +155,7 @@ export interface PanelStatusResponse {
   conversationId?: string;
   controlEligibility?: ControlEligibility;
   monitoringPolicy?: ResolvedMonitoringPolicy;
-  monitoringRuntime?: MonitoringRuntimeStatus;
+  monitoringRuntime?: import("../monitoring/types.js").MonitoringRuntimeStatus;
   lastSeenAt?: number;
 }
 
@@ -155,7 +169,7 @@ export interface ManagedChatStatus {
   generation?: PageObservation["generation"];
   overrides?: ChatMonitoringPolicy;
   policy?: ResolvedMonitoringPolicy;
-  runtime?: MonitoringRuntimeStatus;
+  runtime?: import("../monitoring/types.js").MonitoringRuntimeStatus;
 }
 
 export interface RedactedProviderSettings {
@@ -179,7 +193,7 @@ export interface MonitoringPolicyResponse {
   revision: number;
   tabId?: number;
   policy?: ResolvedMonitoringPolicy;
-  runtime?: MonitoringRuntimeStatus;
+  runtime?: import("../monitoring/types.js").MonitoringRuntimeStatus;
 }
 
 export interface ProviderSettingsResponse {
@@ -217,6 +231,7 @@ export type GuardianRequest =
   | ContentNavigation
   | ContentObservation
   | ContentUserInteraction
+  | ContentServerCompletion
   | PanelStatusRequest
   | PanelOverviewRequest
   | PanelMonitoringPolicyUpdate
@@ -240,6 +255,16 @@ export type GuardianResponse =
   | ProtocolErrorResponse;
 
 const EVENT_SET = new Set<MonitoringEventType>(MONITORING_EVENTS);
+const DECISION_SET = new Set<ConversationProtocolDecision>([
+  "CONTINUE",
+  "HOLD_APPROVAL",
+  "HOLD_DECISION",
+  "HOLD_HUMAN_OPERATION",
+  "COMPLETE",
+  "PLATFORM_ERROR",
+  "RATE_LIMIT",
+  "UNSURE",
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -343,6 +368,21 @@ export function isContentUserInteraction(value: unknown): value is ContentUserIn
       value.interaction === "EDIT_TURN" ||
       value.interaction === "BLOCKING_INTERACTION")
   );
+}
+
+export function isContentServerCompletion(value: unknown): value is ContentServerCompletion {
+  if (!isRecord(value) || value.type !== "content:server-completion" || !isSessionBase(value)) return false;
+  if (typeof value.conversationId !== "string" || !/^[A-Za-z0-9_-]{4,200}$/.test(value.conversationId)) return false;
+  if (typeof value.assistantMessageId !== "string" || !/^[A-Za-z0-9_-]{4,200}$/.test(value.assistantMessageId)) return false;
+  if (typeof value.parentUserMessageId !== "string" || !/^[A-Za-z0-9_-]{4,200}$/.test(value.parentUserMessageId)) return false;
+  if (value.messageStatus !== "finished_successfully" || value.endTurn !== true) return false;
+  if (value.markerHealth !== "DETECTED" && value.markerHealth !== "MISSING" && value.markerHealth !== "MALFORMED") return false;
+  if (value.semanticDecision !== undefined &&
+      (typeof value.semanticDecision !== "string" || !DECISION_SET.has(value.semanticDecision as ConversationProtocolDecision))) return false;
+  if (value.markerHealth === "DETECTED" && value.semanticDecision === undefined) return false;
+  if (value.markerHealth !== "DETECTED" && value.semanticDecision !== undefined) return false;
+  return typeof value.assistantTextLength === "number" && Number.isInteger(value.assistantTextLength) &&
+    value.assistantTextLength >= 0 && value.assistantTextLength <= 262_144;
 }
 
 export function isPanelStatusRequest(value: unknown): value is PanelStatusRequest {
