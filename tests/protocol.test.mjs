@@ -5,6 +5,7 @@ import {
   isContentHello,
   isContentNavigation,
   isContentObservation,
+  isContentServerCompletion,
   isContentUserInteraction,
   isPanelHistoryClear,
   isPanelMonitoringDefaultsUpdate,
@@ -29,12 +30,43 @@ test("protocol accepts identity-bound observational content events", () => {
     true,
   );
   assert.equal(isContentUserInteraction({ ...base, type: "content:user-interaction", interaction: "COMPOSER_INPUT" }), true);
+  assert.equal(isContentServerCompletion({
+    ...base,
+    type: "content:server-completion",
+    conversationId: "conv-1",
+    assistantMessageId: "assistant-1",
+    parentUserMessageId: "user-1",
+    messageStatus: "finished_successfully",
+    endTurn: true,
+    markerHealth: "DETECTED",
+    semanticDecision: "COMPLETE",
+    assistantTextLength: 420,
+  }), true);
 });
 
-test("protocol rejects malformed content messages", () => {
+test("protocol rejects malformed content messages and inconsistent server completion evidence", () => {
   assert.equal(isContentHello({ ...base, type: "content:hello", sequence: 0, routeKey: "/" }), false);
   assert.equal(isContentHello({ ...base, type: "content:hello", protocolVersion: 1, routeKey: "/" }), false);
   assert.equal(isContentUserInteraction({ ...base, type: "content:user-interaction", interaction: "CLICK_ANYWHERE" }), false);
+
+  const completion = {
+    ...base,
+    type: "content:server-completion",
+    conversationId: "conv-1",
+    assistantMessageId: "assistant-1",
+    parentUserMessageId: "user-1",
+    messageStatus: "finished_successfully",
+    endTurn: true,
+    markerHealth: "DETECTED",
+    semanticDecision: "COMPLETE",
+    assistantTextLength: 420,
+  };
+  assert.equal(isContentServerCompletion({ ...completion, endTurn: false }), false);
+  assert.equal(isContentServerCompletion({ ...completion, messageStatus: "in_progress" }), false);
+  assert.equal(isContentServerCompletion({ ...completion, markerHealth: "MISSING", semanticDecision: "COMPLETE" }), false);
+  assert.equal(isContentServerCompletion({ ...completion, markerHealth: "DETECTED", semanticDecision: undefined }), false);
+  assert.equal(isContentServerCompletion({ ...completion, assistantMessageId: "" }), false);
+  assert.equal(isContentServerCompletion({ ...completion, assistantTextLength: 999_999 }), false);
 });
 
 test("observation validates bounded response metadata and read-only action hints", () => {

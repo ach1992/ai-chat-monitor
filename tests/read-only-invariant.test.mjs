@@ -32,16 +32,22 @@ test("content and background runtime expose no ChatGPT write command or composer
   assert.doesNotMatch(content, /dispatchEvent\s*\(\s*new\s+InputEvent/);
 
   const scripts = manifest.content_scripts.flatMap((entry) => entry.js ?? []);
-  assert.deepEqual(scripts, ["content/adapter.js", "content/index.js"]);
+  assert.deepEqual(scripts, ["content/hidden-response-bridge.js", "content/adapter.js", "content/index.js"]);
   assert.equal(scripts.some((path) => /send-verification|guarded/i.test(path)), false);
 });
 
-test("the extension may observe ChatGPT controls but never exposes an inbound mutation action", async () => {
+test("the extension may observe ChatGPT controls and canonical response state but never exposes an inbound ChatGPT mutation action", async () => {
   const adapter = await readFile(new URL("../dist/content/adapter.js", import.meta.url), "utf8");
   const agent = await readFile(new URL("../dist/content/index.js", import.meta.url), "utf8");
+  const bridge = await readFile(new URL("../dist/content/hidden-response-bridge.js", import.meta.url), "utf8");
 
   assert.match(adapter, /retryAvailable/);
   assert.match(adapter, /continueGeneratingAvailable/);
   assert.match(agent, /content:observation/);
+  assert.match(agent, /content:server-completion/);
+  assert.match(bridge, /finished_successfully/);
+  assert.match(bridge, /end_turn/);
+  assert.match(bridge, /\/backend-api\/conversations\//);
   assert.doesNotMatch(agent, /continuationText|decisionId|expiresAt/);
+  assert.doesNotMatch(bridge, /\.click\s*\(|dispatchEvent\s*\(|focus\s*\(|prompt-textarea/);
 });
