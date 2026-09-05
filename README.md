@@ -197,6 +197,7 @@ See [PRIVACY.md](PRIVACY.md) for the complete current policy.
 - [Architecture](docs/ARCHITECTURE.md)
 - [Project specification](docs/PROJECT_SPEC.md)
 - [Conversation status protocol](docs/CONVERSATION_STATUS_PROTOCOL.md)
+- [Background monitoring investigation guardrails](docs/BACKGROUND_MONITORING_INVESTIGATION.md)
 - [Privacy policy](PRIVACY.md)
 - [Chrome Web Store listing copy](docs/CHROME_WEB_STORE_LISTING.md)
 - [Store readiness](docs/STORE_READINESS.md)
