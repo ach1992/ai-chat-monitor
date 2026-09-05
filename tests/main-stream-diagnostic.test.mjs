@@ -59,16 +59,12 @@ async function loadDiagnostic(responseFactory) {
     Request,
     Response,
     URL,
-    ReadableStream,
-    TextEncoder,
-    TextDecoder,
     Date,
     Number,
     Object,
     Array,
     JSON,
     Math,
-    Set,
     crypto: webcrypto,
     structuredClone,
   };
@@ -114,20 +110,6 @@ async function loadDiagnostic(responseFactory) {
   };
 }
 
-function sseResponse(chunks) {
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream({
-    start(controller) {
-      for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
-      controller.close();
-    },
-  });
-  return new Response(stream, {
-    status: 200,
-    headers: { "content-type": "text/event-stream; charset=utf-8" },
-  });
-}
-
 test("network diagnostic is disabled by default and preserves the original fetch contract", async () => {
   const response = new Response("ok", { status: 200, headers: { "content-type": "application/json" } });
   const diagnostic = await loadDiagnostic(() => response);
@@ -143,98 +125,69 @@ test("network diagnostic is disabled by default and preserves the original fetch
   assert.deepEqual(diagnostic.events, []);
 });
 
-test("diagnostic emits bounded stream identity metadata without response text", async () => {
-  const marker = 'AI_CHAT_MONITOR_STATUS={"decision":"COMPLETE"}';
-  const assistantText = `hello\n${marker}`;
-  const payload = {
-    conversation_id: "conversation-1",
-    parent_id: "user-123",
-    message: {
-      id: "assistant-456",
-      author: { role: "assistant" },
-      content: { parts: [assistantText] },
-    },
-  };
-  const diagnostic = await loadDiagnostic(() => sseResponse([
-    `data: ${JSON.stringify(payload)}\n\n`,
-    "data: [DONE]\n\n",
-  ]));
-  diagnostic.setEnabled(true);
-  diagnostic.userSend();
-  await diagnostic.fetch("/backend-api/f/conversation?token=must-not-be-recorded", { method: "POST" });
-  await flushAsyncWork();
-
-  const armed = diagnostic.events.find((event) => event.kind === "EPISODE_ARMED");
-  const response = diagnostic.events.find((event) => event.kind === "FETCH_RESPONSE");
-  const done = diagnostic.events.find((event) => event.kind === "STREAM_DONE");
-  assert.ok(armed);
-  assert.ok(response);
-  assert.ok(done);
-  assert.equal(response.path, "/backend-api/f/conversation");
-  assert.equal(response.contentType, "text/event-stream; charset=utf-8");
-  assert.equal(done.streamId, response.streamId);
-  assert.equal(done.requestOrdinal, 1);
-  assert.deepEqual(done.assistantMessageIds, ["assistant-456"]);
-  assert.deepEqual(done.parentMessageIds, ["user-123"]);
-  assert.deepEqual(done.conversationIds, ["conversation-1"]);
-  assert.equal(done.assistantTextLength, assistantText.length);
-  assert.equal(done.doneSeen, true);
-  assert.equal(done.markerDecision, "COMPLETE");
-  assert.equal(done.endReason, "DONE");
-  assert.equal(JSON.stringify(done).includes("hello"), false);
-  assert.equal(JSON.stringify(done).includes("AI_CHAT_MONITOR_STATUS"), false);
-  assert.equal(JSON.stringify(diagnostic.events).includes("must-not-be-recorded"), false);
-});
-
-test("multiple same-episode SSE candidates stay distinct and none becomes completion authority", async () => {
-  let call = 0;
-  const diagnostic = await loadDiagnostic(() => {
-    call += 1;
-    const payload = {
-      conversation_id: "conversation-2",
-      parent_id: "user-222",
-      message: {
-        id: `assistant-${call}`,
-        author: { role: "assistant" },
-        content: { parts: [`candidate-${call}`] },
-      },
-    };
-    return sseResponse([
-      `data: ${JSON.stringify(payload)}\n\n`,
-      "data: [DONE]\n\n",
-    ]);
+test("diagnostic records only selected conversation lifecycle metadata", async () => {
+  const diagnostic = await loadDiagnostic((input) => {
+    if (String(input).includes("stream_status")) {
+      return new Response('{"status":"IS_STREAMING","secret":"must-not-leak"}', {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return new Response('{"opaque":"body"}', {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
   });
   diagnostic.setEnabled(true);
   diagnostic.userSend();
-  await diagnostic.fetch("/backend-api/f/conversation", { method: "POST" });
-  await diagnostic.fetch("/backend-api/f/conversation/resume", { method: "POST" });
+
+  const conversationResponse = await diagnostic.fetch(
+    "/backend-api/f/conversation?token=must-not-be-recorded",
+    { method: "POST", body: "opaque-request-body" },
+  );
+  const statusResponse = await diagnostic.fetch(
+    "/backend-api/conversation/diagnostic-test/stream_status?token=must-not-be-recorded",
+    { method: "GET" },
+  );
+  await diagnostic.fetch("/backend-api/models?token=must-not-be-recorded", { method: "GET" });
+  await diagnostic.fetch("/ces/v1/t?token=must-not-be-recorded", { method: "POST" });
   await flushAsyncWork();
 
+  assert.equal(await conversationResponse.text(), '{"opaque":"body"}');
+  assert.equal(await statusResponse.text(), '{"status":"IS_STREAMING","secret":"must-not-leak"}');
+
   const responses = diagnostic.events.filter((event) => event.kind === "FETCH_RESPONSE");
-  const done = diagnostic.events.filter((event) => event.kind === "STREAM_DONE");
+  const lifecycle = diagnostic.events.filter((event) => event.kind === "LIFECYCLE_STATUS");
   assert.equal(responses.length, 2);
-  assert.equal(done.length, 2);
-  assert.notEqual(responses[0].streamId, responses[1].streamId);
-  assert.deepEqual(responses.map((event) => event.requestOrdinal), [1, 2]);
-  assert.deepEqual(done.map((event) => event.assistantMessageIds?.[0]), ["assistant-1", "assistant-2"]);
+  assert.deepEqual(responses.map((event) => [event.method, event.path]), [
+    ["POST", "/backend-api/f/conversation"],
+    ["GET", "/backend-api/conversation/diagnostic-test/stream_status"],
+  ]);
+  assert.equal(lifecycle.length, 1);
+  assert.equal(lifecycle[0].serverStatus, "IS_STREAMING");
+  assert.equal(lifecycle[0].path, "/backend-api/conversation/diagnostic-test/stream_status");
+  assert.equal(JSON.stringify(diagnostic.events).includes("must-not-leak"), false);
+  assert.equal(JSON.stringify(diagnostic.events).includes("must-not-be-recorded"), false);
+  assert.equal(JSON.stringify(diagnostic.events).includes("opaque-request-body"), false);
 });
 
-test("non-SSE POSTs are identified but their bodies are never consumed as streams", async () => {
-  const diagnostic = await loadDiagnostic(() => new Response('{"opaque":"body"}', {
-    status: 202,
+test("only the current conversation lifecycle GET paths are observed", async () => {
+  const diagnostic = await loadDiagnostic(() => new Response('{"status":"DONE"}', {
+    status: 200,
     headers: { "content-type": "application/json" },
   }));
   diagnostic.setEnabled(true);
   diagnostic.userSend();
-  await diagnostic.fetch("/backend-api/other-path?secret=query", { method: "POST" });
+
+  await diagnostic.fetch("/backend-api/conversation/other-chat/stream_status", { method: "GET" });
+  await diagnostic.fetch("/backend-api/conversations/diagnostic-test", { method: "GET" });
+  await diagnostic.fetch("/backend-api/conversation/diagnostic-test", { method: "GET" });
   await flushAsyncWork();
 
   const responses = diagnostic.events.filter((event) => event.kind === "FETCH_RESPONSE");
-  assert.equal(responses.length, 1);
-  assert.equal(responses[0].path, "/backend-api/other-path");
-  assert.equal(responses[0].status, 202);
-  assert.equal(responses[0].contentType, "application/json");
-  assert.equal(diagnostic.events.some((event) => event.kind.startsWith("STREAM_")), false);
-  assert.equal(JSON.stringify(diagnostic.events).includes("opaque"), false);
-  assert.equal(JSON.stringify(diagnostic.events).includes("secret"), false);
+  assert.deepEqual(responses.map((event) => event.path), [
+    "/backend-api/conversations/diagnostic-test",
+    "/backend-api/conversation/diagnostic-test",
+  ]);
+  assert.equal(diagnostic.events.some((event) => event.kind === "LIFECYCLE_STATUS"), false);
 });

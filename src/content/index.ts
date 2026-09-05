@@ -33,12 +33,12 @@ namespace GuardianContentAgent {
   }
 
   interface PageNetworkDiagnosticEvent {
-    kind: "EPISODE_ARMED" | "FETCH_RESPONSE" | "FETCH_ERROR" | "STREAM_SNAPSHOT" | "STREAM_DONE" | "STREAM_END" | "STREAM_ERROR";
+    kind: "EPISODE_ARMED" | "FETCH_RESPONSE" | "FETCH_ERROR" | "LIFECYCLE_STATUS";
     at: number;
     visibility?: string;
     episodeId?: string;
     episodeStartedAt?: number;
-    streamId?: string;
+    requestId?: string;
     requestOrdinal?: number;
     requestStartedAt?: number;
     responseAt?: number;
@@ -46,19 +46,7 @@ namespace GuardianContentAgent {
     path?: string;
     status?: number;
     contentType?: string;
-    chunkCount?: number;
-    byteCount?: number;
-    eventCount?: number;
-    firstChunkAt?: number;
-    lastChunkAt?: number;
-    assistantMessageIds?: string[];
-    parentMessageIds?: string[];
-    conversationIds?: string[];
-    assistantTextLength?: number;
-    doneSeen?: boolean;
-    markerDecision?: string;
-    endedAt?: number;
-    endReason?: string;
+    serverStatus?: string;
     errorName?: string;
   }
 
@@ -120,56 +108,34 @@ namespace GuardianContentAgent {
     return typeof value === "number" && Number.isFinite(value) ? value : undefined;
   }
 
-  function boundedStringArray(value: unknown): string[] | undefined {
-    if (!Array.isArray(value) || value.length > 8) return undefined;
-    const result: string[] = [];
-    for (const entry of value) {
-      const normalized = boundedString(entry, 200);
-      if (normalized === undefined) return undefined;
-      result.push(normalized);
-    }
-    return result;
-  }
-
   function sanitizeNetworkDiagnosticEvent(value: unknown): PageNetworkDiagnosticEvent | undefined {
     if (!isRecord(value)) return undefined;
     const kind = value.kind;
     if (kind !== "EPISODE_ARMED" &&
       kind !== "FETCH_RESPONSE" &&
       kind !== "FETCH_ERROR" &&
-      kind !== "STREAM_SNAPSHOT" &&
-      kind !== "STREAM_DONE" &&
-      kind !== "STREAM_END" &&
-      kind !== "STREAM_ERROR") return undefined;
+      kind !== "LIFECYCLE_STATUS") return undefined;
     const at = finiteNumber(value.at);
     if (at === undefined) return undefined;
 
     const result: PageNetworkDiagnosticEvent = { kind, at };
     const visibility = boundedString(value.visibility, 32);
     const episodeId = boundedString(value.episodeId, 100);
-    const streamId = boundedString(value.streamId, 220);
+    const requestId = boundedString(value.requestId, 220);
     const method = boundedString(value.method, 16);
     const path = boundedString(value.path, 240);
     const contentType = boundedString(value.contentType, 160);
-    const markerDecision = boundedString(value.markerDecision, 40);
-    const endReason = boundedString(value.endReason, 20);
+    const serverStatus = boundedString(value.serverStatus, 80);
     const errorName = boundedString(value.errorName, 80);
-    const assistantMessageIds = boundedStringArray(value.assistantMessageIds);
-    const parentMessageIds = boundedStringArray(value.parentMessageIds);
-    const conversationIds = boundedStringArray(value.conversationIds);
 
     if (visibility !== undefined) result.visibility = visibility;
     if (episodeId !== undefined) result.episodeId = episodeId;
-    if (streamId !== undefined) result.streamId = streamId;
+    if (requestId !== undefined) result.requestId = requestId;
     if (method !== undefined) result.method = method;
     if (path !== undefined) result.path = path;
     if (contentType !== undefined) result.contentType = contentType;
-    if (markerDecision !== undefined) result.markerDecision = markerDecision;
-    if (endReason !== undefined) result.endReason = endReason;
+    if (serverStatus !== undefined) result.serverStatus = serverStatus;
     if (errorName !== undefined) result.errorName = errorName;
-    if (assistantMessageIds !== undefined) result.assistantMessageIds = assistantMessageIds;
-    if (parentMessageIds !== undefined) result.parentMessageIds = parentMessageIds;
-    if (conversationIds !== undefined) result.conversationIds = conversationIds;
 
     for (const key of [
       "episodeStartedAt",
@@ -177,18 +143,10 @@ namespace GuardianContentAgent {
       "requestStartedAt",
       "responseAt",
       "status",
-      "chunkCount",
-      "byteCount",
-      "eventCount",
-      "firstChunkAt",
-      "lastChunkAt",
-      "assistantTextLength",
-      "endedAt",
     ] as const) {
       const numberValue = finiteNumber(value[key]);
       if (numberValue !== undefined) result[key] = numberValue;
     }
-    if (typeof value.doneSeen === "boolean") result.doneSeen = value.doneSeen;
     return result;
   }
 

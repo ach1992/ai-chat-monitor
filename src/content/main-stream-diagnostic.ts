@@ -1,19 +1,15 @@
 (() => {
   const CHANNEL = "AI_CHAT_MONITOR_NETWORK_DIAGNOSTIC_V1";
   const MAX_EPISODE_MS = 180_000;
-  const SNAPSHOT_INTERVAL_MS = 5_000;
-  const MAX_IDS = 8;
   const MAX_PATH_CHARS = 240;
   const MAX_CONTENT_TYPE_CHARS = 160;
+  const MAX_SERVER_STATUS_CHARS = 80;
 
   type DiagnosticKind =
     | "EPISODE_ARMED"
     | "FETCH_RESPONSE"
     | "FETCH_ERROR"
-    | "STREAM_SNAPSHOT"
-    | "STREAM_DONE"
-    | "STREAM_END"
-    | "STREAM_ERROR";
+    | "LIFECYCLE_STATUS";
 
   interface ControlMessage {
     channel: typeof CHANNEL;
@@ -22,10 +18,10 @@
     enabled: boolean;
   }
 
-  interface StreamState {
+  interface RequestState {
     episodeId: string;
     episodeStartedAt: number;
-    streamId: string;
+    requestId: string;
     requestOrdinal: number;
     requestStartedAt: number;
     responseAt: number;
@@ -33,20 +29,6 @@
     path: string;
     status: number;
     contentType: string;
-    chunkCount: number;
-    byteCount: number;
-    eventCount: number;
-    firstChunkAt?: number;
-    lastChunkAt?: number;
-    assistantMessageIds: string[];
-    parentMessageIds: string[];
-    conversationIds: string[];
-    assistantTextLength?: number;
-    doneSeen: boolean;
-    markerDecision?: string;
-    endedAt?: number;
-    endReason?: "DONE" | "EOF" | "ERROR";
-    lastSnapshotAt: number;
   }
 
   if (typeof window.fetch !== "function") return;
@@ -70,12 +52,6 @@
 
   function boundedString(value: unknown, max: number): string | undefined {
     return typeof value === "string" && value.length > 0 ? value.slice(0, max) : undefined;
-  }
-
-  function pushUnique(target: string[], value: unknown): void {
-    const candidate = boundedString(value, 200);
-    if (candidate === undefined || target.includes(candidate) || target.length >= MAX_IDS) return;
-    target.push(candidate);
   }
 
   function post(kind: DiagnosticKind, details: Record<string, unknown> = {}): void {
@@ -165,69 +141,35 @@
     }
   }
 
-  function textLikeLength(value: unknown): number {
-    if (typeof value === "string") return value.length;
-    if (Array.isArray(value)) return value.reduce((sum, entry) => sum + textLikeLength(entry), 0);
-    if (!isRecord(value)) return 0;
-    if (typeof value.text === "string") return value.text.length;
-    if (typeof value.value === "string") return value.value.length;
-    return 0;
+  function currentConversationId(): string | undefined {
+    try {
+      const pathname = new URL(location.href).pathname;
+      return /(?:^|\/)c\/([^/]+)(?:\/|$)/.exec(pathname)?.[1];
+    } catch {
+      return undefined;
+    }
   }
 
-  function assistantContentLength(message: Record<string, unknown>): number | undefined {
-    const content = message.content;
-    if (!isRecord(content)) return undefined;
-    if (Array.isArray(content.parts)) return textLikeLength(content.parts);
-    if (typeof content.text === "string") return content.text.length;
+  function isConversationRequestPath(path: string): boolean {
+    return path === "/backend-api/f/conversation" ||
+      path === "/backend-api/f/conversation/prepare" ||
+      path === "/backend-api/f/conversation/resume";
+  }
+
+  function lifecyclePathKind(path: string): "STREAM_STATUS" | "CONVERSATION_DETAIL" | undefined {
+    const conversationId = currentConversationId();
+    if (conversationId === undefined) return undefined;
+    if (path === `/backend-api/conversation/${conversationId}/stream_status`) return "STREAM_STATUS";
+    if (path === `/backend-api/conversation/${conversationId}` ||
+      path === `/backend-api/conversations/${conversationId}`) return "CONVERSATION_DETAIL";
     return undefined;
   }
 
-  function scanMessage(message: Record<string, unknown>, state: StreamState): void {
-    const author = message.author;
-    if (!isRecord(author) || author.role !== "assistant") return;
-    pushUnique(state.assistantMessageIds, message.id);
-    const length = assistantContentLength(message);
-    if (length !== undefined) state.assistantTextLength = Math.max(state.assistantTextLength ?? 0, length);
-  }
-
-  function scanPayload(value: unknown, state: StreamState, depth = 0): void {
-    if (depth > 7) return;
-    if (Array.isArray(value)) {
-      for (const entry of value) scanPayload(entry, state, depth + 1);
-      return;
-    }
-    if (!isRecord(value)) return;
-
-    pushUnique(state.conversationIds, value.conversation_id);
-    pushUnique(state.parentMessageIds, value.parent_id);
-    pushUnique(state.parentMessageIds, value.parent_message_id);
-    scanMessage(value, state);
-
-    for (const nested of Object.values(value)) {
-      if (typeof nested === "object" && nested !== null) scanPayload(nested, state, depth + 1);
-    }
-  }
-
-  function normalizeJsonEscapes(value: string): string {
-    let normalized = value;
-    for (let pass = 0; pass < 3; pass += 1) {
-      normalized = normalized
-        .replace(/\\u0022/gi, '"')
-        .replace(/\\"/g, '"');
-    }
-    return normalized;
-  }
-
-  function markerDecisionFromTail(value: string): string | undefined {
-    const normalized = normalizeJsonEscapes(value.slice(-8_192));
-    return /AI_CHAT_MONITOR_STATUS=\{"decision":"([A-Z_]+)"\}/.exec(normalized)?.[1];
-  }
-
-  function stateDetails(state: StreamState): Record<string, unknown> {
+  function stateDetails(state: RequestState): Record<string, unknown> {
     return {
       episodeId: state.episodeId,
       episodeStartedAt: state.episodeStartedAt,
-      streamId: state.streamId,
+      requestId: state.requestId,
       requestOrdinal: state.requestOrdinal,
       requestStartedAt: state.requestStartedAt,
       responseAt: state.responseAt,
@@ -235,93 +177,21 @@
       path: state.path,
       status: state.status,
       contentType: state.contentType,
-      chunkCount: state.chunkCount,
-      byteCount: state.byteCount,
-      eventCount: state.eventCount,
-      firstChunkAt: state.firstChunkAt,
-      lastChunkAt: state.lastChunkAt,
-      assistantMessageIds: [...state.assistantMessageIds],
-      parentMessageIds: [...state.parentMessageIds],
-      conversationIds: [...state.conversationIds],
-      assistantTextLength: state.assistantTextLength,
-      doneSeen: state.doneSeen,
-      markerDecision: state.markerDecision,
-      endedAt: state.endedAt,
-      endReason: state.endReason,
     };
   }
 
-  function snapshot(state: StreamState, kind: DiagnosticKind, force = false): void {
-    const now = Date.now();
-    if (!force && now - state.lastSnapshotAt < SNAPSHOT_INTERVAL_MS) return;
-    state.lastSnapshotAt = now;
-    post(kind, stateDetails(state));
-  }
-
-  function processSseData(data: string, state: StreamState): boolean {
-    state.eventCount += 1;
-    if (data.trim() === "[DONE]") {
-      state.doneSeen = true;
-      state.endedAt = Date.now();
-      state.endReason = "DONE";
-      return true;
-    }
-    try { scanPayload(JSON.parse(data), state); } catch { /* non-JSON SSE metadata is diagnostic-noise only */ }
-    return false;
-  }
-
-  async function observeSse(response: Response, state: StreamState): Promise<void> {
+  async function observeStreamStatus(response: Response, state: RequestState): Promise<void> {
     try {
-      const clone = response.clone();
-      const reader = clone.body?.getReader();
-      if (reader === undefined) return;
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let markerTail = "";
-      try {
-        while (true) {
-          const chunk = await reader.read();
-          if (chunk.done) break;
-          if (chunk.value === undefined) continue;
-          const now = Date.now();
-          state.chunkCount += 1;
-          state.byteCount += chunk.value.byteLength;
-          state.firstChunkAt ??= now;
-          state.lastChunkAt = now;
-          const decoded = decoder.decode(chunk.value, { stream: true });
-          markerTail = (markerTail + decoded).slice(-16_384);
-          const markerDecision = markerDecisionFromTail(markerTail);
-          if (markerDecision !== undefined) state.markerDecision = markerDecision;
-          buffer = (buffer + decoded).replace(/\r\n/g, "\n");
-
-          let boundary = buffer.indexOf("\n\n");
-          while (boundary >= 0) {
-            const rawEvent = buffer.slice(0, boundary);
-            buffer = buffer.slice(boundary + 2);
-            const data = rawEvent
-              .split("\n")
-              .filter((line) => line.startsWith("data:"))
-              .map((line) => line.slice(5).trimStart())
-              .join("\n");
-            if (data.length > 0 && processSseData(data, state)) {
-              snapshot(state, "STREAM_DONE", true);
-              return;
-            }
-            boundary = buffer.indexOf("\n\n");
-          }
-          snapshot(state, "STREAM_SNAPSHOT");
-        }
-
-        state.endedAt = Date.now();
-        state.endReason = "EOF";
-        snapshot(state, "STREAM_END", true);
-      } finally {
-        try { reader.releaseLock(); } catch { /* stream already released */ }
-      }
+      const payload: unknown = await response.clone().json();
+      if (!isRecord(payload)) return;
+      const serverStatus = boundedString(payload.status, MAX_SERVER_STATUS_CHARS) ??
+        boundedString(payload.async_status, MAX_SERVER_STATUS_CHARS);
+      post("LIFECYCLE_STATUS", {
+        ...stateDetails(state),
+        ...(serverStatus === undefined ? {} : { serverStatus }),
+      });
     } catch {
-      state.endedAt = Date.now();
-      state.endReason = "ERROR";
-      snapshot(state, "STREAM_ERROR", true);
+      // The diagnostic never treats an unreadable status body as completion evidence.
     }
   }
 
@@ -331,12 +201,14 @@
     const currentEpisodeStartedAt = episodeStartedAt;
     const method = requestMethod(args[0], args[1]);
     const path = requestPath(args[0]);
+    const lifecycleKind = path === undefined ? undefined : lifecyclePathKind(path);
     const eligible = enabled &&
       currentEpisodeId !== undefined &&
       currentEpisodeStartedAt !== undefined &&
-      method === "POST" &&
       path !== undefined &&
-      startedAt - currentEpisodeStartedAt <= MAX_EPISODE_MS;
+      startedAt - currentEpisodeStartedAt <= MAX_EPISODE_MS &&
+      ((method === "POST" && isConversationRequestPath(path)) ||
+        (method === "GET" && lifecycleKind !== undefined));
 
     let response: Response;
     try {
@@ -360,10 +232,10 @@
     requestOrdinal += 1;
     const ordinal = requestOrdinal;
     const contentType = (response.headers.get("content-type") ?? "").slice(0, MAX_CONTENT_TYPE_CHARS);
-    const state: StreamState = {
+    const state: RequestState = {
       episodeId: currentEpisodeId,
       episodeStartedAt: currentEpisodeStartedAt,
-      streamId: `${currentEpisodeId}:${ordinal}`,
+      requestId: `${currentEpisodeId}:${ordinal}`,
       requestOrdinal: ordinal,
       requestStartedAt: startedAt,
       responseAt: Date.now(),
@@ -371,19 +243,11 @@
       path,
       status: response.status,
       contentType,
-      chunkCount: 0,
-      byteCount: 0,
-      eventCount: 0,
-      assistantMessageIds: [],
-      parentMessageIds: [],
-      conversationIds: [],
-      doneSeen: false,
-      lastSnapshotAt: 0,
     };
     post("FETCH_RESPONSE", stateDetails(state));
 
-    if (contentType.toLowerCase().includes("text/event-stream") && response.body !== null) {
-      void observeSse(response, state);
+    if (lifecycleKind === "STREAM_STATUS" && contentType.toLowerCase().includes("application/json")) {
+      void observeStreamStatus(response, state);
     }
     return response;
   };
