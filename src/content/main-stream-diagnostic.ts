@@ -5,6 +5,7 @@
   const MAX_CONTENT_TYPE_CHARS = 160;
   const MAX_SERVER_STATUS_CHARS = 80;
   const MAX_SOCKET_HOST_CHARS = 160;
+  const MAX_MARKER_DECISION_CHARS = 40;
   const MAX_WEBSOCKETS = 4;
   const WEBSOCKET_SNAPSHOT_INTERVAL_MS = 10_000;
 
@@ -47,6 +48,9 @@
     firstMessageAt?: number;
     lastMessageAt?: number;
     lastSnapshotAt?: number;
+    frameKindReported: boolean;
+    currentConversationSeen: boolean;
+    markerDecision?: string;
   }
 
   if (typeof window.fetch !== "function") return;
@@ -154,9 +158,12 @@
   function resetWebSocketEpisode(): void {
     for (const [socket, state] of socketStates) {
       state.messageCount = 0;
+      state.frameKindReported = false;
+      state.currentConversationSeen = false;
       delete state.firstMessageAt;
       delete state.lastMessageAt;
       delete state.lastSnapshotAt;
+      delete state.markerDecision;
       if (socket.readyState === 0 || socket.readyState === 1) {
         post("WEBSOCKET_PRESENT", webSocketDetails(socket, state));
       }
@@ -280,6 +287,64 @@
     }
   }
 
+  function webSocketFrameKind(data: unknown): string {
+    if (typeof data === "string") return "text";
+    if (typeof Blob !== "undefined" && data instanceof Blob) return "blob";
+    if (typeof ArrayBuffer !== "undefined" && data instanceof ArrayBuffer) return "arraybuffer";
+    return "other";
+  }
+
+  function markerDecisionFromFrame(value: string): string | undefined {
+    const match = /AI_CHAT_MONITOR_STATUS=\{\\?"decision\\?"\s*:\s*\\?"([A-Z_]{2,40})\\?"\}/.exec(value);
+    return boundedString(match?.[1], MAX_MARKER_DECISION_CHARS);
+  }
+
+  function observeWebSocketFrame(socket: WebSocket, state: WebSocketState, event: MessageEvent): void {
+    const episode = activeEpisode();
+    if (episode === undefined) return;
+
+    let data: unknown;
+    try { data = event.data; } catch { return; }
+    const frameKind = webSocketFrameKind(data);
+
+    if (!state.frameKindReported) {
+      state.frameKindReported = true;
+      post("LIFECYCLE_STATUS", {
+        ...webSocketDetails(socket, state),
+        method: "WEBSOCKET",
+        path: state.socketPath,
+        contentType: `websocket/${frameKind}`,
+        serverStatus: "FRAME_OBSERVED",
+      });
+    }
+
+    if (typeof data !== "string") return;
+    const conversationId = currentConversationId();
+    if (conversationId === undefined || !data.includes(conversationId)) return;
+
+    if (!state.currentConversationSeen) {
+      state.currentConversationSeen = true;
+      post("LIFECYCLE_STATUS", {
+        ...webSocketDetails(socket, state),
+        method: "WEBSOCKET",
+        path: state.socketPath,
+        contentType: "websocket/text",
+        serverStatus: "CURRENT_CONVERSATION_FRAME",
+      });
+    }
+
+    const markerDecision = markerDecisionFromFrame(data);
+    if (markerDecision === undefined || state.markerDecision === markerDecision) return;
+    state.markerDecision = markerDecision;
+    post("LIFECYCLE_STATUS", {
+      ...webSocketDetails(socket, state),
+      method: "WEBSOCKET",
+      path: state.socketPath,
+      contentType: "websocket/text",
+      serverStatus: `MARKER:${markerDecision}`,
+    });
+  }
+
   function registerWebSocket(socket: WebSocket, rawUrl: unknown): void {
     if (socketStates.size >= MAX_WEBSOCKETS) return;
     const endpoint = webSocketEndpoint(rawUrl);
@@ -292,18 +357,21 @@
       socketHost: endpoint.socketHost,
       socketPath: endpoint.socketPath,
       messageCount: 0,
+      frameKindReported: false,
+      currentConversationSeen: false,
     };
     socketStates.set(socket, state);
 
     socket.addEventListener("open", () => {
       if (activeEpisode() !== undefined) post("WEBSOCKET_PRESENT", webSocketDetails(socket, state));
     });
-    socket.addEventListener("message", () => {
+    socket.addEventListener("message", (event) => {
       if (activeEpisode() === undefined) return;
       const now = Date.now();
       state.messageCount += 1;
       state.firstMessageAt ??= now;
       state.lastMessageAt = now;
+      observeWebSocketFrame(socket, state, event);
       snapshotWebSocket(socket, state);
     });
     socket.addEventListener("close", () => {

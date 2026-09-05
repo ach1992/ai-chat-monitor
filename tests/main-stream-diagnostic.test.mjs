@@ -96,6 +96,8 @@ async function loadDiagnostic(responseFactory) {
     Map,
     Proxy,
     Reflect,
+    Blob,
+    ArrayBuffer,
     crypto: webcrypto,
     structuredClone,
   };
@@ -227,7 +229,7 @@ test("only the current conversation lifecycle GET paths are observed", async () 
   assert.equal(diagnostic.events.some((event) => event.kind === "LIFECYCLE_STATUS"), false);
 });
 
-test("websocket diagnostic records activity timing only and never reads message payloads", async () => {
+test("websocket diagnostic inspects only bounded frame identity and never retains payload text", async () => {
   const diagnostic = await loadDiagnostic(() => new Response('{"ok":true}', {
     status: 200,
     headers: { "content-type": "application/json" },
@@ -236,19 +238,29 @@ test("websocket diagnostic records activity timing only and never reads message 
 
   const socket = diagnostic.webSocket("wss://events.chatgpt.com/backend-api/realtime?token=must-not-be-recorded", ["chat"]);
   socket.emit("open");
-  diagnostic.userSend();
 
-  const poisonMessage = {};
-  Object.defineProperty(poisonMessage, "data", {
-    get() { throw new Error("message payload must not be read"); },
+  const poisonBeforeSend = {};
+  Object.defineProperty(poisonBeforeSend, "data", {
+    get() { throw new Error("payload must not be read before a trusted send episode"); },
   });
-  socket.emit("message", poisonMessage);
-  socket.emit("message", poisonMessage);
+  socket.emit("message", poisonBeforeSend);
+
+  diagnostic.userSend();
+  socket.emit("message", {
+    data: '{"conversation_id":"other-chat","secret":"other-secret"}',
+  });
+  socket.emit("message", {
+    data: '{"conversation_id":"diagnostic-test","secret":"must-not-leak","content":"AI_CHAT_MONITOR_STATUS={\\"decision\\":\\"COMPLETE\\"}"}',
+  });
   await diagnostic.fetch("/backend-api/f/conversation/prepare", { method: "POST" });
   await flushAsyncWork();
 
   const present = diagnostic.events.find((event) => event.kind === "WEBSOCKET_PRESENT");
   const activity = diagnostic.events.filter((event) => event.kind === "WEBSOCKET_ACTIVITY");
+  const websocketLifecycle = diagnostic.events.filter(
+    (event) => event.kind === "LIFECYCLE_STATUS" && event.method === "WEBSOCKET",
+  );
+
   assert.ok(present);
   assert.equal(present.socketHost, "events.chatgpt.com");
   assert.equal(present.socketPath, "/backend-api/realtime");
@@ -256,8 +268,19 @@ test("websocket diagnostic records activity timing only and never reads message 
   assert.ok(activity.length >= 2);
   assert.equal(activity.at(-1).messageCount, 2);
   assert.equal(typeof activity.at(-1).lastMessageAt, "number");
-  assert.equal(JSON.stringify(diagnostic.events).includes("must-not-be-recorded"), false);
-  assert.equal(JSON.stringify(diagnostic.events).includes("message payload must not be read"), false);
+  assert.deepEqual(websocketLifecycle.map((event) => event.serverStatus), [
+    "FRAME_OBSERVED",
+    "CURRENT_CONVERSATION_FRAME",
+    "MARKER:COMPLETE",
+  ]);
+  assert.equal(websocketLifecycle[0].contentType, "websocket/text");
+
+  const serialized = JSON.stringify(diagnostic.events);
+  assert.equal(serialized.includes("must-not-be-recorded"), false);
+  assert.equal(serialized.includes("must-not-leak"), false);
+  assert.equal(serialized.includes("other-secret"), false);
+  assert.equal(serialized.includes("AI_CHAT_MONITOR_STATUS="), false);
+  assert.equal(serialized.includes("payload must not be read before a trusted send episode"), false);
 });
 
 test("websocket diagnostic ignores non-OpenAI endpoints", async () => {
@@ -266,10 +289,11 @@ test("websocket diagnostic ignores non-OpenAI endpoints", async () => {
   const socket = diagnostic.webSocket("wss://example.com/private?token=must-not-be-recorded");
   socket.emit("open");
   diagnostic.userSend();
-  socket.emit("message", {});
+  socket.emit("message", { data: "private-payload-must-not-be-recorded" });
   await flushAsyncWork();
 
   assert.equal(diagnostic.events.some((event) => event.kind.startsWith("WEBSOCKET_")), false);
   assert.equal(JSON.stringify(diagnostic.events).includes("example.com"), false);
   assert.equal(JSON.stringify(diagnostic.events).includes("must-not-be-recorded"), false);
+  assert.equal(JSON.stringify(diagnostic.events).includes("private-payload-must-not-be-recorded"), false);
 });
