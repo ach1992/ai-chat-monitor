@@ -33,7 +33,15 @@ namespace GuardianContentAgent {
   }
 
   interface PageNetworkDiagnosticEvent {
-    kind: "EPISODE_ARMED" | "FETCH_RESPONSE" | "FETCH_ERROR" | "LIFECYCLE_STATUS";
+    kind:
+      | "EPISODE_ARMED"
+      | "FETCH_RESPONSE"
+      | "FETCH_ERROR"
+      | "LIFECYCLE_STATUS"
+      | "WEBSOCKET_PRESENT"
+      | "WEBSOCKET_ACTIVITY"
+      | "WEBSOCKET_CLOSE"
+      | "WEBSOCKET_ERROR";
     at: number;
     visibility?: string;
     episodeId?: string;
@@ -48,6 +56,14 @@ namespace GuardianContentAgent {
     contentType?: string;
     serverStatus?: string;
     errorName?: string;
+    socketId?: string;
+    socketHost?: string;
+    socketPath?: string;
+    socketCreatedAt?: number;
+    readyState?: number;
+    messageCount?: number;
+    firstMessageAt?: number;
+    lastMessageAt?: number;
   }
 
   const FOCUS_INTENT_WINDOW_MS = 1_500;
@@ -114,7 +130,11 @@ namespace GuardianContentAgent {
     if (kind !== "EPISODE_ARMED" &&
       kind !== "FETCH_RESPONSE" &&
       kind !== "FETCH_ERROR" &&
-      kind !== "LIFECYCLE_STATUS") return undefined;
+      kind !== "LIFECYCLE_STATUS" &&
+      kind !== "WEBSOCKET_PRESENT" &&
+      kind !== "WEBSOCKET_ACTIVITY" &&
+      kind !== "WEBSOCKET_CLOSE" &&
+      kind !== "WEBSOCKET_ERROR") return undefined;
     const at = finiteNumber(value.at);
     if (at === undefined) return undefined;
 
@@ -127,6 +147,9 @@ namespace GuardianContentAgent {
     const contentType = boundedString(value.contentType, 160);
     const serverStatus = boundedString(value.serverStatus, 80);
     const errorName = boundedString(value.errorName, 80);
+    const socketId = boundedString(value.socketId, 100);
+    socketHost = boundedString(value.socketHost, 160);
+    const socketPath = boundedString(value.socketPath, 240);
 
     if (visibility !== undefined) result.visibility = visibility;
     if (episodeId !== undefined) result.episodeId = episodeId;
@@ -136,6 +159,9 @@ namespace GuardianContentAgent {
     if (contentType !== undefined) result.contentType = contentType;
     if (serverStatus !== undefined) result.serverStatus = serverStatus;
     if (errorName !== undefined) result.errorName = errorName;
+    if (socketId !== undefined) result.socketId = socketId;
+    if (socketHost !== undefined) result.socketHost = socketHost;
+    if (socketPath !== undefined) result.socketPath = socketPath;
 
     for (const key of [
       "episodeStartedAt",
@@ -143,6 +169,11 @@ namespace GuardianContentAgent {
       "requestStartedAt",
       "responseAt",
       "status",
+      "socketCreatedAt",
+      "readyState",
+      "messageCount",
+      "firstMessageAt",
+      "lastMessageAt",
     ] as const) {
       const numberValue = finiteNumber(value[key]);
       if (numberValue !== undefined) result[key] = numberValue;

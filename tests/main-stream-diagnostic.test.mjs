@@ -16,12 +16,40 @@ async function loadDiagnostic(responseFactory) {
   const documentListeners = new Map();
   const posted = [];
   const calls = [];
+  const sockets = [];
   const originalFetch = async (input, init) => {
     calls.push({ input, init });
     return responseFactory(input, init);
   };
+  class FakeWebSocket {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSING = 2;
+    static CLOSED = 3;
+
+    constructor(url, protocols) {
+      this.url = String(url);
+      this.protocols = protocols;
+      this.readyState = FakeWebSocket.CONNECTING;
+      this.listeners = new Map();
+      sockets.push(this);
+    }
+
+    addEventListener(type, callback) {
+      const existing = this.listeners.get(type) ?? [];
+      existing.push(callback);
+      this.listeners.set(type, existing);
+    }
+
+    emit(type, event = {}) {
+      if (type === "open") this.readyState = FakeWebSocket.OPEN;
+      if (type === "close") this.readyState = FakeWebSocket.CLOSED;
+      for (const listener of this.listeners.get(type) ?? []) listener(event);
+    }
+  }
   const window = {
     fetch: originalFetch,
+    WebSocket: FakeWebSocket,
     addEventListener(type, callback) {
       const existing = windowListeners.get(type) ?? [];
       existing.push(callback);
@@ -65,6 +93,9 @@ async function loadDiagnostic(responseFactory) {
     Array,
     JSON,
     Math,
+    Map,
+    Proxy,
+    Reflect,
     crypto: webcrypto,
     structuredClone,
   };
@@ -74,6 +105,7 @@ async function loadDiagnostic(responseFactory) {
   return {
     calls,
     posted,
+    sockets,
     get events() {
       return posted
         .filter((message) => message.type === "network-diagnostic")
@@ -106,6 +138,9 @@ async function loadDiagnostic(responseFactory) {
     },
     fetch(input = "/backend-api/f/conversation", init = { method: "POST" }) {
       return window.fetch(input, init);
+    },
+    webSocket(url, protocols) {
+      return new window.WebSocket(url, protocols);
     },
   };
 }
@@ -190,4 +225,51 @@ test("only the current conversation lifecycle GET paths are observed", async () 
     "/backend-api/conversation/diagnostic-test",
   ]);
   assert.equal(diagnostic.events.some((event) => event.kind === "LIFECYCLE_STATUS"), false);
+});
+
+test("websocket diagnostic records activity timing only and never reads message payloads", async () => {
+  const diagnostic = await loadDiagnostic(() => new Response('{"ok":true}', {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  }));
+  diagnostic.setEnabled(true);
+
+  const socket = diagnostic.webSocket("wss://events.chatgpt.com/backend-api/realtime?token=must-not-be-recorded", ["chat"]);
+  socket.emit("open");
+  diagnostic.userSend();
+
+  const poisonMessage = {};
+  Object.defineProperty(poisonMessage, "data", {
+    get() { throw new Error("message payload must not be read"); },
+  });
+  socket.emit("message", poisonMessage);
+  socket.emit("message", poisonMessage);
+  await diagnostic.fetch("/backend-api/f/conversation/prepare", { method: "POST" });
+  await flushAsyncWork();
+
+  const present = diagnostic.events.find((event) => event.kind === "WEBSOCKET_PRESENT");
+  const activity = diagnostic.events.filter((event) => event.kind === "WEBSOCKET_ACTIVITY");
+  assert.ok(present);
+  assert.equal(present.socketHost, "events.chatgpt.com");
+  assert.equal(present.socketPath, "/backend-api/realtime");
+  assert.equal(present.readyState, 1);
+  assert.ok(activity.length >= 2);
+  assert.equal(activity.at(-1).messageCount, 2);
+  assert.equal(typeof activity.at(-1).lastMessageAt, "number");
+  assert.equal(JSON.stringify(diagnostic.events).includes("must-not-be-recorded"), false);
+  assert.equal(JSON.stringify(diagnostic.events).includes("message payload must not be read"), false);
+});
+
+test("websocket diagnostic ignores non-OpenAI endpoints", async () => {
+  const diagnostic = await loadDiagnostic(() => new Response("ok"));
+  diagnostic.setEnabled(true);
+  const socket = diagnostic.webSocket("wss://example.com/private?token=must-not-be-recorded");
+  socket.emit("open");
+  diagnostic.userSend();
+  socket.emit("message", {});
+  await flushAsyncWork();
+
+  assert.equal(diagnostic.events.some((event) => event.kind.startsWith("WEBSOCKET_")), false);
+  assert.equal(JSON.stringify(diagnostic.events).includes("example.com"), false);
+  assert.equal(JSON.stringify(diagnostic.events).includes("must-not-be-recorded"), false);
 });

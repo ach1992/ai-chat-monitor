@@ -4,12 +4,19 @@
   const MAX_PATH_CHARS = 240;
   const MAX_CONTENT_TYPE_CHARS = 160;
   const MAX_SERVER_STATUS_CHARS = 80;
+  const MAX_SOCKET_HOST_CHARS = 160;
+  const MAX_WEBSOCKETS = 4;
+  const WEBSOCKET_SNAPSHOT_INTERVAL_MS = 10_000;
 
   type DiagnosticKind =
     | "EPISODE_ARMED"
     | "FETCH_RESPONSE"
     | "FETCH_ERROR"
-    | "LIFECYCLE_STATUS";
+    | "LIFECYCLE_STATUS"
+    | "WEBSOCKET_PRESENT"
+    | "WEBSOCKET_ACTIVITY"
+    | "WEBSOCKET_CLOSE"
+    | "WEBSOCKET_ERROR";
 
   interface ControlMessage {
     channel: typeof CHANNEL;
@@ -31,12 +38,25 @@
     contentType: string;
   }
 
+  interface WebSocketState {
+    socketId: string;
+    socketCreatedAt: number;
+    socketHost: string;
+    socketPath: string;
+    messageCount: number;
+    firstMessageAt?: number;
+    lastMessageAt?: number;
+    lastSnapshotAt?: number;
+  }
+
   if (typeof window.fetch !== "function") return;
   const originalFetch = window.fetch.bind(window);
   let enabled = false;
   let episodeId: string | undefined;
   let episodeStartedAt: number | undefined;
   let requestOrdinal = 0;
+  let socketOrdinal = 0;
+  const socketStates = new Map<WebSocket, WebSocketState>();
 
   function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
@@ -98,12 +118,58 @@
     });
   }
 
+  function activeEpisode(): { episodeId: string; episodeStartedAt: number } | undefined {
+    if (!enabled || episodeId === undefined || episodeStartedAt === undefined) return undefined;
+    if (Date.now() - episodeStartedAt > MAX_EPISODE_MS) return undefined;
+    return { episodeId, episodeStartedAt };
+  }
+
+  function webSocketDetails(socket: WebSocket, state: WebSocketState): Record<string, unknown> {
+    const episode = activeEpisode();
+    return {
+      ...(episode === undefined ? {} : episode),
+      socketId: state.socketId,
+      socketCreatedAt: state.socketCreatedAt,
+      socketHost: state.socketHost,
+      socketPath: state.socketPath,
+      readyState: socket.readyState,
+      messageCount: state.messageCount,
+      firstMessageAt: state.firstMessageAt,
+      lastMessageAt: state.lastMessageAt,
+    };
+  }
+
+  function snapshotWebSocket(socket: WebSocket, state: WebSocketState, force = false): void {
+    if (activeEpisode() === undefined || state.messageCount === 0) return;
+    const now = Date.now();
+    if (!force && state.lastSnapshotAt !== undefined && now - state.lastSnapshotAt < WEBSOCKET_SNAPSHOT_INTERVAL_MS) return;
+    state.lastSnapshotAt = now;
+    post("WEBSOCKET_ACTIVITY", webSocketDetails(socket, state));
+  }
+
+  function snapshotAllWebSockets(force = false): void {
+    for (const [socket, state] of socketStates) snapshotWebSocket(socket, state, force);
+  }
+
+  function resetWebSocketEpisode(): void {
+    for (const [socket, state] of socketStates) {
+      state.messageCount = 0;
+      delete state.firstMessageAt;
+      delete state.lastMessageAt;
+      delete state.lastSnapshotAt;
+      if (socket.readyState === 0 || socket.readyState === 1) {
+        post("WEBSOCKET_PRESENT", webSocketDetails(socket, state));
+      }
+    }
+  }
+
   function armFromTrustedSend(): void {
     if (!enabled) return;
     episodeStartedAt = Date.now();
     episodeId = crypto.randomUUID();
     requestOrdinal = 0;
     post("EPISODE_ARMED", { episodeId, episodeStartedAt });
+    resetWebSocketEpisode();
   }
 
   document.addEventListener("keydown", (event) => {
@@ -122,7 +188,7 @@
     return "GET";
   }
 
-  function requestPath(input: RequestInfo | URL): string | undefined {
+  function requestPath(input: RequestInfo | URL-: string | undefined {
     try {
       const raw = typeof input === "string"
         ? input
@@ -195,6 +261,74 @@
     }
   }
 
+  function webSocketEndpoint(rawUrl: unknown): { socketHost: string; socketPath: string } | undefined {
+    try {
+      const url = rawUrl instanceof URL ? rawUrl : new URL(String(rawUrl), location.href);
+      if (url.protocol !== "ws:" && url.protocol !== "wss:") return undefined;
+      const hostname = url.hostname.toLowerCase();
+      const trustedHost = hostname === "chatgpt.com" ||
+        hostname.endsWith(".chatgpt.com") ||
+        hostname === "openai.com" ||
+        hostname.endsWith(".openai.com");
+      if (!trustedHost) return undefined;
+      return {
+        socketHost: url.host.slice(0, MAX_SOCKET_HOST_CHARS),
+        socketPath: url.pathname.slice(0, MAX_PATH_CHARS),
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  function registerWebSocket(socket: WebSocket, rawUrl: unknown): void {
+    if (socketStates.size >= MAX_WEBSOCKETS) return;
+    const endpoint = webSocketEndpoint(rawUrl);
+    if (endpoint === undefined) return;
+
+    socketOrdinal += 1;
+    const state: WebSocketState = {
+      socketId: `ws:${socketOrdinal}`,
+      socketCreatedAt: Date.now(),
+      socketHost: endpoint.socketHost,
+      socketPath: endpoint.socketPath,
+      messageCount: 0,
+    };
+    socketStates.set(socket, state);
+
+    socket.addEventListener("open", () => {
+      if (activeEpisode() !== undefined) post("WEBSOCKET_PRESENT", webSocketDetails(socket, state));
+    });
+    socket.addEventListener("message", () => {
+      if (activeEpisode() === undefined) return;
+      const now = Date.now();
+      state.messageCount += 1;
+      state.firstMessageAt ??= now;
+      state.lastMessageAt = now;
+      snapshotWebSocket(socket, state);
+    });
+    socket.addEventListener("close", () => {
+      if (activeEpisode() !== undefined) {
+        snapshotWebSocket(socket, state, true);
+        post("WEBSOCKET_CLOSE", webSocketDetails(socket, state));
+      }
+      socketStates.delete(socket);
+    });
+    socket.addEventListener("error", () => {
+      if (activeEpisode() !== undefined) post("WEBSOCKET_ERROR", webSocketDetails(socket, state));
+    });
+  }
+
+  if (typeof window.WebSocket === "function") {
+    const OriginalWebSocket = window.WebSocket;
+    window.WebSocket = new Proxy(OriginalWebSocket, {
+      construct(target, args, newTarget) {
+        const socket = Reflect.construct(target, args, newTarget) as WebSocket;
+        registerWebSocket(socket, args[0]);
+        return socket;
+      },
+    });
+  }
+
   const monitoredFetch: typeof window.fetch = async (...args) => {
     const startedAt = Date.now();
     const currentEpisodeId = episodeId;
@@ -209,6 +343,10 @@
       startedAt - currentEpisodeStartedAt <= MAX_EPISODE_MS &&
       ((method === "POST" && isConversationRequestPath(path)) ||
         (method === "GET" && lifecycleKind !== undefined));
+
+    if (eligible && method === "POST" && path === "/backend-api/f/conversation/prepare") {
+      snapshotAllWebSockets(true);
+    }
 
     let response: Response;
     try {
