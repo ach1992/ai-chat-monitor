@@ -66,6 +66,9 @@ namespace GuardianContentAgent {
   let outboundQueue: Promise<void> = Promise.resolve();
   let lastKeyboardFocusIntentAt: number | undefined;
   let monitoringEnabled = false;
+  let awaitingHiddenServerCompletion = false;
+  let serverCompletedAssistantId: string | undefined;
+  let serverCompletedUserId: string | undefined;
 
   function nextSequence(): number { sequence += 1; return sequence; }
 
@@ -121,15 +124,24 @@ namespace GuardianContentAgent {
     };
   }
 
-  function armHiddenResponseBridge(): void {
+  function postHiddenResponseControl(enabled: boolean): void {
     const conversationId = adapter.currentConversationId();
     window.postMessage({
       channel: HIDDEN_RESPONSE_CHANNEL,
       type: "control",
       protocolVersion: 1,
-      enabled: monitoringEnabled && conversationId !== undefined,
+      enabled: enabled && conversationId !== undefined,
       ...(conversationId === undefined ? {} : { conversationId }),
     }, location.origin);
+  }
+
+  function armHiddenResponseBridge(): void {
+    const conversationId = adapter.currentConversationId();
+    const enabled = monitoringEnabled && conversationId !== undefined;
+    awaitingHiddenServerCompletion = enabled;
+    serverCompletedAssistantId = undefined;
+    serverCompletedUserId = undefined;
+    postHiddenResponseControl(enabled);
   }
 
   async function forwardServerCompletion(evidence: ServerCompletionEvidence): Promise<void> {
@@ -139,7 +151,7 @@ namespace GuardianContentAgent {
     if (observation.latestUser?.domMessageId !== evidence.parentUserMessageId) return;
     if (observation.latestAssistant?.domMessageId !== evidence.assistantMessageId) return;
 
-    await send({
+    const response = await send({
       type: "content:server-completion",
       protocolVersion: GuardianContent.PROTOCOL_VERSION,
       agentInstanceId,
@@ -155,6 +167,11 @@ namespace GuardianContentAgent {
       ...(evidence.semanticDecision === undefined ? {} : { semanticDecision: evidence.semanticDecision }),
       assistantTextLength: evidence.assistantTextLength,
     });
+    if (response?.type !== "background:agent-ack" || !response.accepted) return;
+
+    awaitingHiddenServerCompletion = false;
+    serverCompletedAssistantId = evidence.assistantMessageId;
+    serverCompletedUserId = evidence.parentUserMessageId;
   }
 
   window.addEventListener("message", (event) => {
@@ -197,6 +214,10 @@ namespace GuardianContentAgent {
     pageEpoch += 1;
     lastRouteKey = nextRouteKey;
     observationGeneration += 1;
+    awaitingHiddenServerCompletion = false;
+    serverCompletedAssistantId = undefined;
+    serverCompletedUserId = undefined;
+    postHiddenResponseControl(false);
     if (observationTimer !== undefined) {
       clearTimeout(observationTimer);
       observationTimer = undefined;
@@ -230,6 +251,22 @@ namespace GuardianContentAgent {
     const observedEpoch = pageEpoch;
     const observation = await adapter.observe();
     if (expectedGeneration !== observationGeneration || observedEpoch !== pageEpoch || observation.routeKey !== lastRouteKey) return;
+
+    const sameServerCompletedResponse = serverCompletedAssistantId !== undefined &&
+      serverCompletedUserId !== undefined &&
+      observation.latestAssistant?.domMessageId === serverCompletedAssistantId &&
+      observation.latestUser?.domMessageId === serverCompletedUserId;
+    if (sameServerCompletedResponse) return;
+
+    const hiddenPartialIdle = awaitingHiddenServerCompletion &&
+      document.visibilityState === "hidden" &&
+      observation.generation === "IDLE" &&
+      observation.confidence === "HIGH" &&
+      observation.blocking.reasons.length === 0 &&
+      !observation.actions.retryAvailable &&
+      !observation.latestAssistant?.normalizedText.includes("AI_CHAT_MONITOR_STATUS=");
+    if (hiddenPartialIdle) return;
+
     await send({
       type: "content:observation",
       protocolVersion: GuardianContent.PROTOCOL_VERSION,
@@ -257,8 +294,7 @@ namespace GuardianContentAgent {
   }
 
   function emitUserInteraction(interaction: InteractionKind): void {
-    if (interaction === "MANUAL_SEND") armHiddenResponseBridge();
-    void send({
+    const request = {
       type: "content:user-interaction",
       protocolVersion: GuardianContent.PROTOCOL_VERSION,
       agentInstanceId,
@@ -266,7 +302,16 @@ namespace GuardianContentAgent {
       sequence: nextSequence(),
       interaction,
       sentAt: Date.now(),
-    });
+    };
+    if (interaction === "MANUAL_SEND") {
+      void send(request).then(() => armHiddenResponseBridge());
+    } else {
+      if (interaction === "STOP_GENERATION" || interaction === "EDIT_TURN" || interaction === "BLOCKING_INTERACTION") {
+        awaitingHiddenServerCompletion = false;
+        postHiddenResponseControl(false);
+      }
+      void send(request);
+    }
     scheduleObservation(0);
   }
 
@@ -338,6 +383,13 @@ namespace GuardianContentAgent {
     else if (adapter.isEditTurnTarget(event.target)) emitUserInteraction("EDIT_TURN");
     else if (adapter.isBlockingInteractionTarget(event.target)) emitUserInteraction("BLOCKING_INTERACTION");
   }, true);
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible" || !awaitingHiddenServerCompletion) return;
+    awaitingHiddenServerCompletion = false;
+    postHiddenResponseControl(false);
+    scheduleObservation(0);
+  });
 
   window.addEventListener("popstate", checkRoute);
   window.addEventListener("hashchange", checkRoute);

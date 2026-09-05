@@ -3,6 +3,7 @@ import {
   isContentHello,
   isContentNavigation,
   isContentObservation,
+  isContentServerCompletion,
   isContentUserInteraction,
   isPanelHistoryClear,
   isPanelMonitoringDefaultsUpdate,
@@ -18,6 +19,7 @@ import {
   type ContentHello,
   type ContentNavigation,
   type ContentObservation,
+  type ContentServerCompletion,
   type ContentUserInteraction,
   type GuardianResponse,
   type HistoryClearResponse,
@@ -39,6 +41,7 @@ import {
   SessionRegistry,
   type SessionMutationResult,
   type SessionRegistryState,
+  type SessionView,
 } from "../core/session-registry.js";
 import { isPanelMonitoringChatsReset, type MonitoringChatsResetResponse } from "../monitoring/reset-protocol.js";
 import { MonitoringService } from "../monitoring/service.js";
@@ -137,14 +140,16 @@ async function mutateTabLifecycle(tabId: number, kind: "invalidate" | "remove"):
   });
 }
 
-function acceptedAck(tabId: number, documentId: string, result: Extract<SessionMutationResult, { accepted: true }>): ContentAgentAck {
+async function acceptedAck(tabId: number, documentId: string, session: SessionView): Promise<ContentAgentAck> {
+  const status = await monitoring.status(tabId);
   return {
     type: "background:agent-ack",
     protocolVersion: PROTOCOL_VERSION,
     accepted: true,
     tabId,
     documentId,
-    controlEligibility: result.session.controlEligibility,
+    controlEligibility: session.controlEligibility,
+    monitoringEnabled: status.policy?.enabled === true,
   };
 }
 
@@ -167,7 +172,7 @@ async function handleContentHello(message: ContentHello, sender: chrome.runtime.
     }));
     if (!result.accepted) return staleEvent(result.reason);
     await monitoring.handleSession(result.session);
-    return acceptedAck(identity.tabId, identity.documentId, result);
+    return acceptedAck(identity.tabId, identity.documentId, result.session);
   } catch {
     return protocolError("STORAGE_FAILURE", "Unable to persist content-agent registration.");
   }
@@ -188,7 +193,7 @@ async function handleNavigation(message: ContentNavigation, sender: chrome.runti
     }));
     if (!result.accepted) return staleEvent(result.reason);
     await monitoring.handleSession(result.session);
-    return acceptedAck(identity.tabId, identity.documentId, result);
+    return acceptedAck(identity.tabId, identity.documentId, result.session);
   } catch {
     return protocolError("STORAGE_FAILURE", "Unable to persist navigation state.");
   }
@@ -208,7 +213,7 @@ async function handleObservation(message: ContentObservation, sender: chrome.run
     }));
     if (!result.accepted) return staleEvent(result.reason);
     await monitoring.handleSession(result.session);
-    return acceptedAck(identity.tabId, identity.documentId, result);
+    return acceptedAck(identity.tabId, identity.documentId, result.session);
   } catch {
     return protocolError("STORAGE_FAILURE", "Unable to persist observation state.");
   }
@@ -227,9 +232,36 @@ async function handleInteraction(message: ContentUserInteraction, sender: chrome
     }));
     if (!result.accepted) return staleEvent(result.reason);
     await monitoring.handleSession(result.session);
-    return acceptedAck(identity.tabId, identity.documentId, result);
+    return acceptedAck(identity.tabId, identity.documentId, result.session);
   } catch {
     return protocolError("STORAGE_FAILURE", "Unable to persist user-interaction state.");
+  }
+}
+
+async function handleServerCompletion(message: ContentServerCompletion, sender: chrome.runtime.MessageSender): Promise<GuardianResponse> {
+  const identity = senderIdentity(sender);
+  if (identity === undefined) return protocolError("INVALID_SENDER", "Server completion has no exact tab/document identity.");
+  try {
+    await registryReady;
+    await mutationQueue;
+    const session = registry.getTab(identity.tabId);
+    if (session === undefined) return staleEvent("NO_SESSION");
+    if (session.documentId !== identity.documentId) return staleEvent("STALE_DOCUMENT");
+    if (session.agentInstanceId !== message.agentInstanceId) return staleEvent("STALE_AGENT");
+    if (session.pageEpoch !== message.pageEpoch) return staleEvent("STALE_EPOCH");
+    if (message.sequence <= session.lastSequence) return staleEvent("STALE_SEQUENCE");
+    if (session.conversationId !== message.conversationId) return staleEvent("IDENTITY_MISMATCH");
+
+    const accepted = await monitoring.handleServerCompletion(session, {
+      assistantMessageId: message.assistantMessageId,
+      parentUserMessageId: message.parentUserMessageId,
+      markerHealth: message.markerHealth,
+      ...(message.semanticDecision === undefined ? {} : { semanticDecision: message.semanticDecision }),
+    });
+    if (!accepted) return staleEvent("IDENTITY_MISMATCH");
+    return acceptedAck(identity.tabId, identity.documentId, session);
+  } catch {
+    return protocolError("STORAGE_FAILURE", "Unable to apply exact server completion evidence.");
   }
 }
 
@@ -457,6 +489,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (isContentNavigation(message)) { void handleNavigation(message, sender).then(sendResponse); return true; }
   if (isContentObservation(message)) { void handleObservation(message, sender).then(sendResponse); return true; }
   if (isContentUserInteraction(message)) { void handleInteraction(message, sender).then(sendResponse); return true; }
+  if (isContentServerCompletion(message)) { void handleServerCompletion(message, sender).then(sendResponse); return true; }
   if (isPanelStatusRequest(message)) { void handlePanelStatusRequest(message.tabId, sender).then(sendResponse); return true; }
   if (isPanelOverviewRequest(message)) { void handleOverview(sender).then(sendResponse); return true; }
   if (isPanelMonitoringPolicyUpdate(message)) { void handleMonitoringPolicyUpdate(message, sender).then(sendResponse); return true; }

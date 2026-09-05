@@ -76,6 +76,19 @@ interface LastAssistantIdentity {
   domMessageId?: string;
 }
 
+export interface ServerCompletionEvidence {
+  assistantMessageId: string;
+  parentUserMessageId: string;
+  markerHealth: ConversationStatusMarkerResult["health"];
+  semanticDecision?: ConversationProtocolDecision;
+}
+
+interface ServerCompletedResponse {
+  assistantMessageId: string;
+  parentUserMessageId: string;
+  runtime: MonitoringRuntimeStatus;
+}
+
 export interface MonitoringServiceStatus {
   policy?: ResolvedMonitoringPolicy;
   runtime?: MonitoringRuntimeStatus;
@@ -188,6 +201,7 @@ export class MonitoringService {
   readonly #runtime = new Map<number, MonitoringRuntimeStatus>();
   readonly #generation = new Map<string, GenerationProgress>();
   readonly #lastAssistant = new Map<string, LastAssistantIdentity>();
+  readonly #serverCompleted = new Map<string, ServerCompletedResponse>();
   readonly #ready: Promise<void>;
   #cache: ResolutionCacheState = { version: 1, entries: [] };
   #providerMutationQueue: Promise<void> = Promise.resolve();
@@ -257,6 +271,21 @@ export class MonitoringService {
       return;
     }
 
+    const completed = this.#serverCompleted.get(conversationId);
+    const sameCompletedResponse = completed !== undefined &&
+      observation.latestAssistant?.domMessageId === completed.assistantMessageId &&
+      observation.latestUser?.domMessageId === completed.parentUserMessageId;
+    if (sameCompletedResponse && eventForPageState(state) === undefined) {
+      this.#runtime.set(session.tabId, {
+        ...structuredClone(completed.runtime),
+        generation: observation.generation,
+        pageState: state,
+        blockingReasons: [...observation.blocking.reasons],
+        updatedAt: Date.now(),
+      });
+      return;
+    }
+
     if (observation.generation === "GENERATING") {
       await this.#handleGenerating(session, policy, state);
       return;
@@ -320,6 +349,50 @@ export class MonitoringService {
     await this.#emitEvent(session, policy, runtime, eventType);
   }
 
+  async handleServerCompletion(session: SessionView, evidence: ServerCompletionEvidence): Promise<boolean> {
+    await this.#ready;
+    const conversationId = session.conversationId;
+    const observation = session.observation;
+    if (conversationId === undefined || observation === undefined || observation.confidence !== "HIGH") return false;
+
+    const policy = this.#policies.resolve(conversationId);
+    if (!policy.enabled) return false;
+    if (observation.latestUser?.domMessageId !== evidence.parentUserMessageId) return false;
+    if (observation.latestAssistant?.domMessageId !== evidence.assistantMessageId) return false;
+    if (eventForPageState(pageState(observation)) !== undefined) return false;
+    if (evidence.markerHealth === "DETECTED" && evidence.semanticDecision === undefined) return false;
+    if (evidence.markerHealth !== "DETECTED" && evidence.semanticDecision !== undefined) return false;
+
+    const eventType = evidence.markerHealth === "DETECTED"
+      ? (eventForDecision(evidence.semanticDecision) ?? "RESPONSE_COMPLETE")
+      : evidence.markerHealth === "MISSING"
+        ? "RESPONSE_COMPLETE"
+        : "SEMANTIC_UNKNOWN";
+    const runtime: MonitoringRuntimeStatus = {
+      tabId: session.tabId,
+      conversationId,
+      enabled: true,
+      generation: "IDLE",
+      pageState: "IDLE",
+      blockingReasons: [],
+      ...(evidence.semanticDecision === undefined ? {} : { semanticDecision: evidence.semanticDecision }),
+      semanticSource: evidence.markerHealth === "DETECTED" ? "STATUS_MARKER" : "UNKNOWN",
+      markerHealth: evidence.markerHealth,
+      lastEvent: eventType,
+      updatedAt: Date.now(),
+    };
+
+    this.#generation.delete(conversationId);
+    this.#serverCompleted.set(conversationId, {
+      assistantMessageId: evidence.assistantMessageId,
+      parentUserMessageId: evidence.parentUserMessageId,
+      runtime: structuredClone(runtime),
+    });
+    this.#runtime.set(session.tabId, runtime);
+    await this.#emitEvent(session, policy, runtime, eventType, evidence.assistantMessageId);
+    return true;
+  }
+
   async updateChat(tabId: number, expectedConversationId: string, patch: ChatMonitoringPolicyPatch): Promise<ResolvedMonitoringPolicy> {
     await this.#ready;
     const session = this.#getSession(tabId);
@@ -340,6 +413,7 @@ export class MonitoringService {
     const state = await this.#policies.clearChats();
     this.#generation.clear();
     this.#lastAssistant.clear();
+    this.#serverCompleted.clear();
     this.#cache = { version: 1, entries: [] };
     try { await this.#cacheStorage.set(CACHE_KEY, this.#cache); } catch { /* cache reset is best effort */ }
 
@@ -587,10 +661,11 @@ export class MonitoringService {
     policy: ResolvedMonitoringPolicy,
     runtime: MonitoringRuntimeStatus,
     type: MonitoringEventType,
+    eventIdentity?: string,
   ): Promise<void> {
     const conversationId = runtime.conversationId;
     if (conversationId === undefined) return;
-    const assistantIdentity = runtime.assistantFingerprint ?? session.observation?.latestAssistant?.domMessageId ?? session.routeKey;
+    const assistantIdentity = eventIdentity ?? runtime.assistantFingerprint ?? session.observation?.latestAssistant?.domMessageId ?? session.routeKey;
     const id = `monitor:${conversationId}:${assistantIdentity}:${type}`.slice(0, 500);
     const presentation = eventPresentation(type);
     const event: MonitoringEvent = {
