@@ -199,7 +199,12 @@ async function mutateTabLifecycle(tabId: number, kind: "invalidate" | "remove"):
   });
 }
 
-function acceptedAck(tabId: number, documentId: string, result: Extract<SessionMutationResult, { accepted: true }>): ContentAgentAck {
+function acceptedAck(
+  tabId: number,
+  documentId: string,
+  result: Extract<SessionMutationResult, { accepted: true }>,
+  monitoringEnabled: boolean,
+): ContentAgentAck {
   return {
     type: "background:agent-ack",
     protocolVersion: PROTOCOL_VERSION,
@@ -207,7 +212,29 @@ function acceptedAck(tabId: number, documentId: string, result: Extract<SessionM
     tabId,
     documentId,
     controlEligibility: result.session.controlEligibility,
+    monitoringEnabled,
   };
+}
+
+async function acceptedAckForSession(
+  tabId: number,
+  documentId: string,
+  result: Extract<SessionMutationResult, { accepted: true }>,
+): Promise<ContentAgentAck> {
+  const status = await monitoring.status(tabId);
+  return acceptedAck(tabId, documentId, result, status.policy?.enabled === true);
+}
+
+async function syncContentMonitoringState(tabId: number, documentId: string, enabled: boolean): Promise<void> {
+  try {
+    await chrome.tabs.sendMessage(tabId, {
+      type: "background:monitoring-state",
+      protocolVersion: PROTOCOL_VERSION,
+      enabled,
+    }, { documentId });
+  } catch {
+    // Navigation/removal races are expected; the next exact agent ack resynchronizes state.
+  }
 }
 
 function staleEvent(reason: string): ProtocolErrorResponse {
@@ -230,7 +257,7 @@ async function handleContentHello(message: ContentHello, sender: chrome.runtime.
     if (!result.accepted) return staleEvent(result.reason);
     await monitoring.handleSession(result.session);
     await syncTabDiscardProtection(identity.tabId).catch(() => undefined);
-    return acceptedAck(identity.tabId, identity.documentId, result);
+    return acceptedAckForSession(identity.tabId, identity.documentId, result);
   } catch {
     return protocolError("STORAGE_FAILURE", "Unable to persist content-agent registration.");
   }
@@ -252,7 +279,7 @@ async function handleNavigation(message: ContentNavigation, sender: chrome.runti
     if (!result.accepted) return staleEvent(result.reason);
     await monitoring.handleSession(result.session);
     await syncTabDiscardProtection(identity.tabId).catch(() => undefined);
-    return acceptedAck(identity.tabId, identity.documentId, result);
+    return acceptedAckForSession(identity.tabId, identity.documentId, result);
   } catch {
     return protocolError("STORAGE_FAILURE", "Unable to persist navigation state.");
   }
@@ -275,7 +302,7 @@ async function handleObservation(message: ContentObservation, sender: chrome.run
     }));
     if (!result.accepted) return staleEvent(result.reason);
     await monitoring.handleSession(result.session);
-    return acceptedAck(identity.tabId, identity.documentId, result);
+    return acceptedAckForSession(identity.tabId, identity.documentId, result);
   } catch {
     return protocolError("STORAGE_FAILURE", "Unable to persist observation state.");
   }
@@ -294,7 +321,7 @@ async function handleInteraction(message: ContentUserInteraction, sender: chrome
       sentAt: message.sentAt,
     }));
     if (!result.accepted) return staleEvent(result.reason);
-    return acceptedAck(identity.tabId, identity.documentId, result);
+    return acceptedAckForSession(identity.tabId, identity.documentId, result);
   } catch {
     return protocolError("STORAGE_FAILURE", "Unable to persist user-interaction state.");
   }
@@ -415,6 +442,7 @@ async function handleMonitoringPolicyUpdate(message: PanelMonitoringPolicyUpdate
     }
     const policy = await monitoring.updateChat(message.tabId, message.conversationId, message.patch);
     await syncTabDiscardProtection(message.tabId).catch(() => undefined);
+    await syncContentMonitoringState(message.tabId, current.documentId, policy.enabled);
     const status = await monitoring.status(message.tabId);
     const response = monitoringPolicyResponse(message.tabId);
     response.policy = policy;
@@ -440,9 +468,13 @@ async function handleMonitoringChatsReset(sender: chrome.runtime.MessageSender):
   try {
     await registryReady;
     await mutationQueue;
-    const tabIds = registry.list().map((session) => session.tabId);
+    const sessions = registry.list();
+    const tabIds = sessions.map((session) => session.tabId);
     const result = await monitoring.resetChats();
-    await Promise.allSettled(tabIds.map((tabId) => tabLifecycle.release(tabId)));
+    await Promise.allSettled([
+      ...sessions.map((session) => syncContentMonitoringState(session.tabId, session.documentId, false)),
+      ...tabIds.map((tabId) => tabLifecycle.release(tabId)),
+    ]);
     return {
       type: "background:monitoring-chats-reset",
       protocolVersion: PROTOCOL_VERSION,

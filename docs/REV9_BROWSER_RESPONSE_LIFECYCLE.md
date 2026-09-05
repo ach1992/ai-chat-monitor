@@ -1,5 +1,7 @@
 # Revision 9 — Browser response lifecycle correlation
 
+> **Superseded by Revision 10.** Owner validation of the integrated Revision 9 artifact disproved `webRequest.onCompleted` as reliable assistant-response completion authority in the real ChatGPT runtime. This document remains historical evidence only; current completion semantics are defined in `REV10_PAGE_STREAM_TERMINAL.md`.
+
 Status: **unreleased integration candidate** under Issue #83. This document records the evidence model for Revision 9; it is not a claim that the real owner environment is fixed until the exact integrated artifact passes live validation.
 
 ## Owner evidence that changed the model

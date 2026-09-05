@@ -559,6 +559,47 @@ test("worker restore retains only last visibility metadata while invalidating ob
   assert.equal(restored.getTab(36)?.lastObservationVisibility, "visible");
 });
 
+test("hidden terminal stream evidence marks semantic completion without transcript persistence", () => {
+  const registry = new SessionRegistry();
+  register(registry, 38, "terminal-stream", 100);
+  registry.markBackgrounded(38, 2000);
+
+  const hidden = registry.applyObservation({
+    tabId: 38,
+    documentId: "doc-38",
+    agentInstanceId: "agent-38",
+    pageEpoch: 1,
+    sequence: 2,
+    observation: {
+      ...observation("terminal-stream", "/c/terminal-stream", "IDLE"),
+      visibility: "hidden",
+      observedAt: 2600,
+      latestAssistant: {
+        normalizedText: "partial",
+        textLength: 7,
+        fingerprint: "2".repeat(64),
+        domMessageId: "assistant-partial",
+      },
+      responseTerminalStatus: {
+        serial: 1,
+        source: "CHATGPT_RESPONSE_STREAM",
+        visibility: "hidden",
+        completedAt: 2550,
+        decision: "COMPLETE",
+      },
+    },
+    markerHealth: "MISSING",
+    sentAt: 2601,
+  });
+
+  assert.equal(hidden.accepted, true);
+  const diagnostic = registry.getTab(38)?.hiddenDiagnostic;
+  assert.equal(diagnostic?.hiddenMarkerHealth, "DETECTED");
+  assert.equal(diagnostic?.firstMarkerDetectedAt, 2550);
+  assert.equal(diagnostic?.transportCompletedAt, undefined);
+  assert.equal(JSON.stringify(diagnostic).includes("partial"), false);
+});
+
 test("hidden transport completion survives stale DOM and preserves activation timing boundaries", () => {
   const registry = new SessionRegistry();
   register(registry, 37, "transport", 100);

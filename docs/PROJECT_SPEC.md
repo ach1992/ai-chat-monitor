@@ -6,7 +6,7 @@ Current published stable baseline: **v3.0.2**
 
 Current development source: **v3.0.3 candidate, unreleased**
 
-v3 establishes the AI Chat Monitor product identity and sole `AI_CHAT_MONITOR_STATUS` protocol while preserving the read-only monitoring/notification boundary established by v2. The current v3.0.3 candidate includes Issue #83 Revision 9 browser-response lifecycle correlation. No v3.0.3 release is authorized until the exact integrated candidate passes owner live validation.
+v3 establishes the AI Chat Monitor product identity and sole `AI_CHAT_MONITOR_STATUS` protocol while preserving the read-only monitoring/notification boundary established by v2. The current v3.0.3 candidate includes Issue #83 Revision 10 page-stream terminal authority. No v3.0.3 release is authorized until the exact integrated candidate passes owner live validation.
 
 ## Product goal
 
@@ -31,7 +31,7 @@ This invariant applies even when semantic state is `CONTINUE`.
 ## Supported environment
 
 - Chromium Manifest V3 extension.
-- Chrome/Chromium 114+ baseline because Side Panel and document-scoped request identity are required.
+- Chrome/Chromium 114+ baseline because the Manifest V3 Side Panel and MAIN-world content-script execution model are required.
 - Supported ChatGPT origins:
   - `https://chatgpt.com/*`
   - `https://chat.openai.com/*`
@@ -87,37 +87,35 @@ A canonical terminal marker on the current hidden assistant is explicit completi
 
 ## Response episode and completion authority
 
-A trusted `MANUAL_SEND` immediately opens a new response episode against the previous assistant identity. This prevents the prior completed assistant/marker from being reprocessed as the new response.
+A trusted user Send opens a response episode against the previous assistant identity in both extension worlds: the MAIN-world observer sees the trusted Enter/Send event in capture phase before ChatGPT starts its request, while the isolated content agent records the corresponding monitoring response episode. This prevents the prior completed assistant/marker from being reprocessed as the new response and removes the asynchronous arm race.
 
-Revision 9 removes two previously attempted hidden completion assumptions:
+Owner validation has disproved three previously attempted standalone hidden-completion signals:
 
-1. generic content `PerformanceResourceTiming` / resource-end timing is not completion authority;
-2. hidden adapter `IDLE` / missing Stop is not completion authority while a response is pending.
+1. generic content `PerformanceResourceTiming` / resource-end timing;
+2. hidden adapter `IDLE` / missing Stop while a response is pending;
+3. Revision 9 browser `webRequest.onCompleted` for a same-endpoint SSE request.
 
-For a hidden response, completion authority is limited to:
+Revision 10 therefore derives the response outcome from the actual page response stream. For an armed supported ChatGPT conversation `POST`, the packaged MAIN-world observer delegates the original `fetch` unchanged, consumes a cloned `text/event-stream` response locally, and waits for the real `data: [DONE]` terminator.
 
-- an exact canonical terminal status on the current assistant turn; or
-- successful completion of the exact current ChatGPT SSE response observed at browser level.
+At `[DONE]`, the mutually exclusive outcome is:
 
-No stable-text timeout or elapsed-time heuristic is allowed to fabricate completion because a hidden renderer may pause mid-response.
+- if exactly one canonical supported `AI_CHAT_MONITOR_STATUS={...}` is present in the bounded terminal stream tail, emit only that semantic decision;
+- otherwise emit only generic `RESPONSE_COMPLETE`;
+- if the stream ends without `[DONE]`, emit no completion outcome.
 
-## Browser response lifecycle correlation
+A valid terminal status therefore suppresses generic response-finished notification for that response. Late DOM/foreground marker reconciliation is deduplicated against the already delivered response episode. No stable-text timeout or elapsed-time heuristic may fabricate completion because a hidden renderer can pause mid-response.
 
-The service worker uses non-blocking `chrome.webRequest` on the existing ChatGPT hosts. A request may acquire response-completion authority only when it is:
+## MAIN-world response-stream observation
 
-- on a supported exact ChatGPT conversation-response path;
-- `xmlhttprequest` in the top frame with document identity;
-- `POST`;
-- successful (`2xx`);
-- returned as `Content-Type: text/event-stream`.
+`src/content/main-stream-observer.ts` is a packaged `document_start` content script in Chrome's MAIN world on only the supported ChatGPT origins. It is disabled by default; trusted extension policy state enables it only for the selected monitored conversation. It observes trusted Enter/Send user input in capture phase and passively wraps `window.fetch`.
 
-The request is correlated by request ID, tab ID, document ID, and timestamps. Bounded in-flight identity is stored in `chrome.storage.session` so service-worker restart cannot confuse an unrelated request with the current response.
+For an enabled monitored conversation, the original fetch receives the exact original arguments and the original `Response` object is returned unchanged to ChatGPT. Only an armed `POST` to a supported exact conversation endpoint with `Content-Type: text/event-stream` is cloned for observation. The clone is consumed locally while retaining at most a 16 KiB rolling in-memory tail; only the final 4 KiB is used for terminal-marker matching.
 
-Matching `onCompleted` may release the hidden response hold. Matching `onErrorOccurred` retires the request without completion. Mismatched/terminal request records are removed rather than left as stale completion authority.
+The rolling tail is transient page memory. It is not written to extension storage/history/logs, Telegram, provider payloads, or developer infrastructure. The observer does not inspect request bodies, cookies, Authorization headers, or credential headers and cannot modify, redirect, cancel, retry, replay, or rewrite the request/response. Only the response episode timestamp and one minimal outcome (terminal decision or generic response complete) cross to the isolated extension runtime.
 
-The network observer does not read request bodies, response bodies, cookies, or Authorization headers. `webRequestBlocking` is not requested.
+Revision 10 removes the Revision 9 `webRequest` permission and browser response-transport runtime.
 
-See `docs/REV9_BROWSER_RESPONSE_LIFECYCLE.md`.
+See `docs/REV10_PAGE_STREAM_TERMINAL.md`.
 
 ## Semantic resolution order
 
@@ -131,7 +129,7 @@ After the current response has legitimate completion/stability authority:
 
 Provider fallback is advisory, bounded, secret-redacted, cached/deduplicated by response identity, and cannot cause page mutation.
 
-For verified hidden SSE completion, semantic diagnostics may still be retained. If no semantic event was actually delivered for that episode, one generic `RESPONSE_COMPLETE` fallback may be delivered. A non-delivered diagnostic entry does not count as a second user notification.
+For a completed page response stream, a valid terminal status produces only its semantic event; only the absence of a valid terminal status permits generic `RESPONSE_COMPLETE`. Late DOM/provider reconciliation cannot create a second user notification for the same delivered response episode.
 
 ## Monitoring events
 
@@ -187,9 +185,9 @@ Migration from v1 policy:
 - legacy continuation/send timing/write-journal/self-check state and any pending send authority are discarded/deprecated;
 - service-worker restart never restores automatic-send authority.
 
-Durable trusted storage may contain monitoring policy/history, provider credentials, and Telegram configuration. Session/ephemeral state may contain bounded semantic cache, lifecycle/hidden diagnostics, and current request correlation metadata.
+Durable trusted storage may contain monitoring policy/history, provider credentials, and Telegram configuration. Session/ephemeral state may contain bounded semantic cache and lifecycle/hidden diagnostics.
 
-Full transcripts are not intentionally stored in monitoring history. Network payloads and credential headers are not persisted for response correlation.
+Full transcripts are not intentionally stored in monitoring history. The Revision 10 MAIN-world observer keeps only a bounded rolling response tail transiently in page memory and does not persist it.
 
 ## Privacy and security
 
@@ -198,8 +196,8 @@ Full transcripts are not intentionally stored in monitoring history. Network pay
 - Provider input is bounded/minimized and secret-redacted.
 - Provider API keys and Telegram bot tokens stay in trusted extension storage.
 - Telegram receives bounded monitoring metadata by default.
-- `webRequest` is non-blocking and restricted to the supported ChatGPT host scope for response lifecycle correlation.
-- Request bodies, response bodies, cookies, and Authorization headers are outside the Revision 9 network-correlation data model.
+- `webRequest` and `webRequestBlocking` are not required by Revision 10.
+- The MAIN-world response observer delegates the original fetch unchanged, retains only a bounded rolling SSE tail in memory, and does not inspect request bodies, cookies, Authorization headers, or credential headers.
 - Broad optional HTTPS host permission is used only for user-configured HTTPS provider origins.
 - Notification failure cannot change semantic state or create browser-control authority.
 
@@ -221,15 +219,16 @@ Every future candidate must retain:
 - deterministic package generation;
 - ZIP layout/provenance verification;
 - exact candidate SHA in build metadata;
-- static regression enforcing the absence of ChatGPT write/control and `webRequestBlocking` paths.
+- static regression enforcing the absence of ChatGPT write/control paths and required `webRequest`/`webRequestBlocking` authority.
 
-Revision 9's browser regression must additionally prove:
+Revision 10's browser regression must additionally prove:
 
-1. same-endpoint non-SSE traffic cannot complete a response;
-2. a hidden partial assistant with no Stop remains `GENERATING` while the current response is pending;
-3. no response notification is delivered while the verified SSE remains open;
-4. matching SSE completion can complete/deliver while the tab remains hidden;
-5. only one user notification delivery occurs for the modeled response episode.
+1. the monitored tab remains hidden and runnable while final assistant DOM stays stale/partial;
+2. no completion/semantic notification is delivered before the actual response stream outcome;
+3. a response with no valid terminal status delivers exactly one `RESPONSE_COMPLETE` only after `data: [DONE]`;
+4. a response with a valid terminal status delivers only the matching semantic event and never generic `RESPONSE_COMPLETE`;
+5. late DOM terminal-marker catch-up and subsequent foreground activation do not duplicate user delivery.
+
 
 A test artifact is not a public release. Any version publication remains a separate action after exact candidate validation/review/integration and the required owner gate.
 
@@ -253,9 +252,11 @@ Subsequent work corrected stale Stop handling for exact markers, restored tab-sc
 
 ### Issue #83 Revision 9
 
-Owner diagnostics finally showed the monitored tab remained runnable and assistant DOM changed while hidden UI reported `IDLE` with no Stop. They also showed the prior ResourceTiming completion arriving about 57 seconds before the first assistant change. Revision 9 therefore moves hidden completion authority to exact terminal marker or positively identified browser SSE lifecycle and conservatively holds partial hidden responses as generating.
+Owner diagnostics showed the monitored tab remained runnable and assistant DOM changed while hidden UI reported `IDLE` with no Stop. They also showed the prior ResourceTiming completion arriving about 57 seconds before the first assistant change. Revision 9 replaced those signals with non-blocking browser `webRequest` SSE lifecycle correlation and passed synthetic Chromium/CI evidence, but owner validation of integrated `main@920937ad36b336b4e9c352f74047c600c40373a8` disproved that completion authority as well: generic response-finished delivery remained background-only/early and inactive-tab semantic completion still depended on foreground reconciliation. Revision 9 is retained as historical evidence, not current authority.
 
-Pre-documentation candidate `36c040a948a920c3a3aa55009bd1db48f4dbdcbb` passed CI `33927680435`, 161/161 tests, extension identity, both hidden/background Chromium regressions, packaging, and artifact verification. Documentation changes after that candidate require fresh exact-head CI. Owner validation of the exact integrated artifact remains mandatory; Issue #83 stays open until that outcome passes.
+### Issue #83 Revision 10
+
+Revision 10 moves response outcome authority to the actual user-initiated page response stream. A packaged MAIN-world observer arms synchronously from trusted Enter/Send, delegates ChatGPT's original fetch unchanged, reads only a cloned bounded rolling SSE tail locally, and resolves the response only at real `data: [DONE]`. A valid terminal `AI_CHAT_MONITOR_STATUS` suppresses generic response completion; without a valid marker, `[DONE]` produces one generic `RESPONSE_COMPLETE`. Late DOM/foreground catch-up is deduplicated against that episode. Revision 10 removes the Revision 9 `webRequest` permission/runtime. Owner validation of the exact integrated artifact remains mandatory; Issue #83 stays open until that outcome passes.
 
 ## Historical v1 note
 

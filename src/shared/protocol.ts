@@ -130,6 +130,7 @@ export interface ContentAgentAck {
   tabId: number;
   documentId: string;
   controlEligibility?: ControlEligibility;
+  monitoringEnabled?: boolean;
 }
 
 export interface TabLifecycleStatus {

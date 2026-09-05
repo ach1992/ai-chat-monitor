@@ -1,6 +1,6 @@
 namespace GuardianContentAgent {
   type RuntimeResponse =
-    | { type: "background:agent-ack"; protocolVersion: 2; accepted: boolean }
+    | { type: "background:agent-ack"; protocolVersion: 2; accepted: boolean; monitoringEnabled?: boolean }
     | { type: "background:error"; protocolVersion: 2; code: string; message: string };
 
   type InteractionKind =
@@ -21,26 +21,44 @@ namespace GuardianContentAgent {
     protocolVersion: 2;
   }
 
-  interface ResponseStreamStartedMessage {
-    type: "background:response-stream-started";
+  interface MonitoringStateMessage {
+    type: "background:monitoring-state";
     protocolVersion: 2;
-    requestId: string;
-    startedAt: number;
+    enabled: boolean;
   }
 
-  interface ResponseStreamCompletedMessage {
-    type: "background:response-stream-completed";
-    protocolVersion: 2;
-    requestId: string;
-    startedAt: number;
+  type TerminalDecision =
+    | "CONTINUE"
+    | "HOLD_APPROVAL"
+    | "HOLD_DECISION"
+    | "HOLD_HUMAN_OPERATION"
+    | "COMPLETE"
+    | "PLATFORM_ERROR"
+    | "RATE_LIMIT"
+    | "UNSURE";
+
+  interface PageStreamArmedMessage {
+    channel: "AI_CHAT_MONITOR_PAGE_STREAM_V1";
+    type: "stream-armed";
+    protocolVersion: 1;
+    episodeStartedAt: number;
+  }
+
+  interface PageStreamTerminalMessage {
+    channel: "AI_CHAT_MONITOR_PAGE_STREAM_V1";
+    type: "terminal-status";
+    protocolVersion: 1;
+    episodeStartedAt: number;
     completedAt: number;
+    decision: TerminalDecision;
   }
 
-  interface ResponseStreamAbortedMessage {
-    type: "background:response-stream-aborted";
-    protocolVersion: 2;
-    requestId: string;
-    startedAt: number;
+  interface PageStreamResponseCompleteMessage {
+    channel: "AI_CHAT_MONITOR_PAGE_STREAM_V1";
+    type: "response-complete";
+    protocolVersion: 1;
+    episodeStartedAt: number;
+    completedAt: number;
   }
 
   interface ResponseCompletionEvidence {
@@ -50,13 +68,17 @@ namespace GuardianContentAgent {
     completedAt: number;
   }
 
-  interface ActiveResponseStream {
-    requestId: string;
-    startedAt: number;
+  interface ResponseTerminalStatusEvidence {
+    serial: number;
+    source: "CHATGPT_RESPONSE_STREAM";
+    visibility: "visible" | "hidden";
+    completedAt: number;
+    decision: TerminalDecision;
   }
 
   const FOCUS_INTENT_WINDOW_MS = 1_500;
   const PERIODIC_OBSERVATION_MS = 15_000;
+  const PAGE_STREAM_CHANNEL = "AI_CHAT_MONITOR_PAGE_STREAM_V1";
   const STATUS_PREFIX = "AI_CHAT_MONITOR_STATUS=";
   const TERMINAL_STATUS_LINE = /^AI_CHAT_MONITOR_STATUS=\{"decision":"(?:CONTINUE|HOLD_APPROVAL|HOLD_DECISION|HOLD_HUMAN_OPERATION|COMPLETE|PLATFORM_ERROR|RATE_LIMIT|UNSURE)"\}$/;
   const adapter = new GuardianContent.BrowserChatGPTAdapter(document, location);
@@ -71,16 +93,41 @@ namespace GuardianContentAgent {
   let reconnectInFlight: Promise<boolean> | undefined;
   let lastKeyboardFocusIntentAt: number | undefined;
   let responseCompletionSerial = 0;
+  let responseTerminalSerial = 0;
   let pendingResponseCompletion: ResponseCompletionEvidence | undefined;
-  let activeResponseStream: ActiveResponseStream | undefined;
+  let pendingResponseTerminalStatus: ResponseTerminalStatusEvidence | undefined;
+  let monitoringEnabled = false;
   let responsePending = false;
+  let activePageStreamEpisodeStartedAt: number | undefined;
 
   function nextSequence(): number { sequence += 1; return sequence; }
+
+  function setMonitoringEnabled(enabled: boolean): void {
+    monitoringEnabled = enabled;
+    window.postMessage({
+      channel: PAGE_STREAM_CHANNEL,
+      type: "monitoring-state",
+      protocolVersion: 1,
+      enabled,
+    }, location.origin);
+    if (enabled) return;
+
+    responsePending = false;
+    activePageStreamEpisodeStartedAt = undefined;
+    pendingResponseCompletion = undefined;
+    pendingResponseTerminalStatus = undefined;
+    window.postMessage({ channel: PAGE_STREAM_CHANNEL, type: "disarm", protocolVersion: 1 }, location.origin);
+  }
 
   async function send(message: Record<string, unknown>): Promise<RuntimeResponse | undefined> {
     let response: RuntimeResponse | undefined;
     const operation = outboundQueue.then(async () => {
-      try { response = await chrome.runtime.sendMessage<RuntimeResponse>(message); } catch { response = undefined; }
+      try {
+        response = await chrome.runtime.sendMessage<RuntimeResponse>(message);
+        if (response?.type === "background:agent-ack" && response.accepted && typeof response.monitoringEnabled === "boolean") {
+          setMonitoringEnabled(response.monitoringEnabled);
+        }
+      } catch { response = undefined; }
     });
     outboundQueue = operation.catch(() => undefined);
     await operation;
@@ -99,36 +146,51 @@ namespace GuardianContentAgent {
     return isRecord(value) && value.type === "panel:agent-reconnect" && value.protocolVersion === GuardianContent.PROTOCOL_VERSION;
   }
 
-  function validStreamIdentity(
-    value: Record<string, unknown>,
-  ): value is Record<string, unknown> & { requestId: string; startedAt: number } {
+  function isMonitoringStateMessage(value: unknown): value is MonitoringStateMessage {
+    return isRecord(value) &&
+      value.type === "background:monitoring-state" &&
+      value.protocolVersion === GuardianContent.PROTOCOL_VERSION &&
+      typeof value.enabled === "boolean";
+  }
+
+  function isTerminalDecision(value: unknown): value is TerminalDecision {
     return (
-      typeof value.requestId === "string" && value.requestId.length > 0 &&
-      typeof value.startedAt === "number" && Number.isFinite(value.startedAt) && value.startedAt > 0
+      value === "CONTINUE" ||
+      value === "HOLD_APPROVAL" ||
+      value === "HOLD_DECISION" ||
+      value === "HOLD_HUMAN_OPERATION" ||
+      value === "COMPLETE" ||
+      value === "PLATFORM_ERROR" ||
+      value === "RATE_LIMIT" ||
+      value === "UNSURE"
     );
   }
 
-  function isResponseStreamStartedMessage(value: unknown): value is ResponseStreamStartedMessage {
+  function isPageStreamArmedMessage(value: unknown): value is PageStreamArmedMessage {
     return isRecord(value) &&
-      value.type === "background:response-stream-started" &&
-      value.protocolVersion === GuardianContent.PROTOCOL_VERSION &&
-      validStreamIdentity(value);
+      value.channel === PAGE_STREAM_CHANNEL &&
+      value.type === "stream-armed" &&
+      value.protocolVersion === 1 &&
+      typeof value.episodeStartedAt === "number" && Number.isFinite(value.episodeStartedAt) && value.episodeStartedAt > 0;
   }
 
-  function isResponseStreamCompletedMessage(value: unknown): value is ResponseStreamCompletedMessage {
+  function isPageStreamTerminalMessage(value: unknown): value is PageStreamTerminalMessage {
     return isRecord(value) &&
-      value.type === "background:response-stream-completed" &&
-      value.protocolVersion === GuardianContent.PROTOCOL_VERSION &&
-      validStreamIdentity(value) &&
-      typeof value.completedAt === "number" && Number.isFinite(value.completedAt) &&
-      value.completedAt >= value.startedAt;
+      value.channel === PAGE_STREAM_CHANNEL &&
+      value.type === "terminal-status" &&
+      value.protocolVersion === 1 &&
+      isTerminalDecision(value.decision) &&
+      typeof value.episodeStartedAt === "number" && Number.isFinite(value.episodeStartedAt) && value.episodeStartedAt > 0 &&
+      typeof value.completedAt === "number" && Number.isFinite(value.completedAt) && value.completedAt >= value.episodeStartedAt;
   }
 
-  function isResponseStreamAbortedMessage(value: unknown): value is ResponseStreamAbortedMessage {
+  function isPageStreamResponseCompleteMessage(value: unknown): value is PageStreamResponseCompleteMessage {
     return isRecord(value) &&
-      value.type === "background:response-stream-aborted" &&
-      value.protocolVersion === GuardianContent.PROTOCOL_VERSION &&
-      validStreamIdentity(value);
+      value.channel === PAGE_STREAM_CHANNEL &&
+      value.type === "response-complete" &&
+      value.protocolVersion === 1 &&
+      typeof value.episodeStartedAt === "number" && Number.isFinite(value.episodeStartedAt) && value.episodeStartedAt > 0 &&
+      typeof value.completedAt === "number" && Number.isFinite(value.completedAt) && value.completedAt >= value.episodeStartedAt;
   }
 
   function hasCanonicalTerminalStatus(value: string): boolean {
@@ -185,8 +247,10 @@ namespace GuardianContentAgent {
     lastRouteKey = nextRouteKey;
     observationGeneration += 1;
     pendingResponseCompletion = undefined;
-    activeResponseStream = undefined;
+    pendingResponseTerminalStatus = undefined;
     responsePending = false;
+    activePageStreamEpisodeStartedAt = undefined;
+    window.postMessage({ channel: PAGE_STREAM_CHANNEL, type: "disarm", protocolVersion: 1 }, location.origin);
     if (observationTimer !== undefined) {
       clearTimeout(observationTimer);
       observationTimer = undefined;
@@ -224,9 +288,12 @@ namespace GuardianContentAgent {
       ? { ...sampled, generation: "GENERATING" as const }
       : sampled;
     const completion = pendingResponseCompletion;
-    const observation = completion === undefined
-      ? held
-      : { ...held, responseCompletion: structuredClone(completion) };
+    const terminalStatus = pendingResponseTerminalStatus;
+    const observation = terminalStatus !== undefined
+      ? { ...held, responseTerminalStatus: structuredClone(terminalStatus) }
+      : completion !== undefined
+        ? { ...held, responseCompletion: structuredClone(completion) }
+        : held;
     const response = await send({
       type: "content:observation",
       protocolVersion: GuardianContent.PROTOCOL_VERSION,
@@ -237,6 +304,9 @@ namespace GuardianContentAgent {
       sentAt: Date.now(),
     });
     if (response?.type === "background:agent-ack" && response.accepted) {
+      if (terminalStatus !== undefined && pendingResponseTerminalStatus?.serial === terminalStatus.serial) {
+        pendingResponseTerminalStatus = undefined;
+      }
       if (completion !== undefined && pendingResponseCompletion?.serial === completion.serial) {
         pendingResponseCompletion = undefined;
       }
@@ -291,14 +361,18 @@ namespace GuardianContentAgent {
   }
 
   function emitUserInteraction(interaction: InteractionKind): void {
-    if (interaction === "MANUAL_SEND") {
+    const sentAt = Date.now();
+    if (interaction === "MANUAL_SEND" && monitoringEnabled) {
       responsePending = true;
-      activeResponseStream = undefined;
+      activePageStreamEpisodeStartedAt = undefined;
       pendingResponseCompletion = undefined;
+      pendingResponseTerminalStatus = undefined;
     } else if (interaction === "STOP_GENERATION") {
       responsePending = false;
-      activeResponseStream = undefined;
+      activePageStreamEpisodeStartedAt = undefined;
       pendingResponseCompletion = undefined;
+      pendingResponseTerminalStatus = undefined;
+      window.postMessage({ channel: PAGE_STREAM_CHANNEL, type: "disarm", protocolVersion: 1 }, location.origin);
     }
     void send({
       type: "content:user-interaction",
@@ -307,7 +381,7 @@ namespace GuardianContentAgent {
       pageEpoch,
       sequence: nextSequence(),
       interaction,
-      sentAt: Date.now(),
+      sentAt,
     });
     scheduleObservation(0);
   }
@@ -318,7 +392,55 @@ namespace GuardianContentAgent {
     return intentAt !== undefined && now >= intentAt && now - intentAt <= FOCUS_INTENT_WINDOW_MS;
   }
 
+  window.addEventListener("message", (event) => {
+    if (event.source !== window || event.origin !== location.origin) return;
+    if (isPageStreamArmedMessage(event.data)) {
+      if (monitoringEnabled && responsePending) activePageStreamEpisodeStartedAt = event.data.episodeStartedAt;
+      return;
+    }
+    if (!monitoringEnabled || !responsePending) return;
+    const episodeStartedAt = activePageStreamEpisodeStartedAt;
+    if (episodeStartedAt === undefined) return;
+
+    if (isPageStreamTerminalMessage(event.data)) {
+      if (event.data.episodeStartedAt !== episodeStartedAt) return;
+      responseTerminalSerial += 1;
+      pendingResponseTerminalStatus = {
+        serial: responseTerminalSerial,
+        source: "CHATGPT_RESPONSE_STREAM",
+        visibility: document.visibilityState === "hidden" ? "hidden" : "visible",
+        completedAt: event.data.completedAt,
+        decision: event.data.decision,
+      };
+      pendingResponseCompletion = undefined;
+      responsePending = false;
+      activePageStreamEpisodeStartedAt = undefined;
+      scheduleObservation(0);
+      return;
+    }
+
+    if (isPageStreamResponseCompleteMessage(event.data)) {
+      if (event.data.episodeStartedAt !== episodeStartedAt) return;
+      responseCompletionSerial += 1;
+      pendingResponseCompletion = {
+        serial: responseCompletionSerial,
+        transport: "CHATGPT_CONVERSATION_STREAM",
+        visibility: document.visibilityState === "hidden" ? "hidden" : "visible",
+        completedAt: event.data.completedAt,
+      };
+      pendingResponseTerminalStatus = undefined;
+      responsePending = false;
+      activePageStreamEpisodeStartedAt = undefined;
+      scheduleObservation(0);
+    }
+  });
+
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (isMonitoringStateMessage(message)) {
+      setMonitoringEnabled(message.enabled);
+      sendResponse({ type: "content:monitoring-state-ack", protocolVersion: GuardianContent.PROTOCOL_VERSION });
+      return false;
+    }
     if (isPanelAgentProbeMessage(message)) {
       sendResponse(agentProbeResponse());
       return false;
@@ -339,41 +461,6 @@ namespace GuardianContentAgent {
         });
       });
       return true;
-    }
-    if (isResponseStreamStartedMessage(message)) {
-      if (activeResponseStream === undefined || message.startedAt >= activeResponseStream.startedAt) {
-        activeResponseStream = { requestId: message.requestId, startedAt: message.startedAt };
-        responsePending = true;
-        pendingResponseCompletion = undefined;
-        scheduleObservation(0);
-      }
-      sendResponse({ type: "content:response-stream-ack", protocolVersion: GuardianContent.PROTOCOL_VERSION });
-      return false;
-    }
-    if (isResponseStreamCompletedMessage(message)) {
-      if (activeResponseStream !== undefined && activeResponseStream.requestId !== message.requestId) return false;
-      responseCompletionSerial += 1;
-      pendingResponseCompletion = {
-        serial: responseCompletionSerial,
-        transport: "CHATGPT_CONVERSATION_STREAM",
-        visibility: document.visibilityState === "hidden" ? "hidden" : "visible",
-        completedAt: message.completedAt,
-      };
-      activeResponseStream = undefined;
-      responsePending = false;
-      scheduleObservation(0);
-      sendResponse({ type: "content:response-stream-ack", protocolVersion: GuardianContent.PROTOCOL_VERSION });
-      return false;
-    }
-    if (isResponseStreamAbortedMessage(message)) {
-      if (activeResponseStream?.requestId === message.requestId) {
-        activeResponseStream = undefined;
-        responsePending = false;
-        pendingResponseCompletion = undefined;
-        scheduleObservation(0);
-      }
-      sendResponse({ type: "content:response-stream-ack", protocolVersion: GuardianContent.PROTOCOL_VERSION });
-      return false;
     }
     return false;
   });

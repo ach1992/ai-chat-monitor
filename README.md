@@ -127,7 +127,7 @@ The breaking product-contract change began at `v2.0.0`; `v2.0.1` is a compatible
 
 ## Requirements
 
-- Chrome/Chromium 114+ or a compatible Chromium browser with Manifest V3 Side Panel and `webRequest` support.
+- Chrome/Chromium 114+ or a compatible Chromium browser with Manifest V3 Side Panel support.
 - Node.js 22+ for development/building.
 - An API key only when optional provider fallback is configured.
 - A Telegram bot token/destination only when Telegram alerts are configured.
@@ -150,7 +150,7 @@ npm run package
 - `artifacts/SHA256SUMS.txt`
 - `artifacts/build-info.json`
 
-The CI workflow validates the exact candidate SHA, downloads a pinned Chrome for Testing build, proves the unpacked AI Chat Monitor service worker actually loaded, runs the real hidden/background-tab regressions, verifies the ZIP layout/provenance, and uploads the `artifacts/` directory as a GitHub Actions artifact. Revision 9's browser regression deliberately keeps the monitored tab hidden without a Stop control, rejects a same-endpoint non-SSE request as completion evidence, keeps a changing partial assistant unresolved while an SSE is open, and accepts only the matching SSE completion. Branded Google Chrome builds no longer honor the command-line unpacked-extension flags used by these automated smoke tests, so local smoke runs should point `CHROME_BIN` at Chrome for Testing or Chromium.
+The CI workflow validates the exact candidate SHA, downloads a pinned Chrome for Testing build, proves the unpacked AI Chat Monitor service worker actually loaded, runs the real hidden/background-tab regressions, verifies the ZIP layout/provenance, and uploads the `artifacts/` directory as a GitHub Actions artifact. Revision 10's browser regression models two consecutive hidden responses with stale DOM: without a terminal status the notification is emitted only after the actual page response stream reaches `data: [DONE]`; with a terminal `AI_CHAT_MONITOR_STATUS`, that semantic decision outranks generic response completion and no duplicate is allowed after late DOM/foreground catch-up. Branded Google Chrome builds no longer honor the command-line unpacked-extension flags used by these automated smoke tests, so local smoke runs should point `CHROME_BIN` at Chrome for Testing or Chromium.
 
 ## Load an unpacked build
 
@@ -165,7 +165,7 @@ The CI workflow validates the exact candidate SHA, downloads a pinned Chrome for
 
 ### Updating an existing unpacked installation
 
-To preserve extension/storage identity, replace the files in the same unpacked folder, then use **Reload** in `chrome://extensions`. Do not remove/re-add the extension unless you intentionally want a fresh extension identity/storage state. Revision 9 adds the required non-blocking `webRequest` permission; if Chromium asks you to approve the updated permission for the unpacked extension, approve it before testing the candidate.
+To preserve extension/storage identity, replace the files in the same unpacked folder, then use **Reload** in `chrome://extensions`. Do not remove/re-add the extension unless you intentionally want a fresh extension identity/storage state. Revision 10 removes the Revision 9 `webRequest` permission; it does not add a new required permission.
 
 ## Optional AI providers
 
@@ -194,8 +194,8 @@ Saved bot tokens are not rendered back by the Side Panel.
 
 ## Privacy and permissions
 
-- Persistent page/network access is limited to supported ChatGPT origins.
-- Required non-blocking `webRequest` is used only to correlate a narrowly filtered successful ChatGPT `POST` SSE response with its completion while background UI signals are unreliable. AI Chat Monitor does not use `webRequestBlocking` and does not read request bodies, response bodies, cookies, or Authorization headers through this path.
+- Persistent ChatGPT access is limited to supported ChatGPT origins.
+- A packaged MAIN-world observer remains disabled by default and is enabled only for the selected monitored conversation. For that monitored chat, it passively delegates the page's original `fetch` unchanged and, only for a user-initiated supported ChatGPT conversation response, consumes a cloned SSE response locally. It keeps only a bounded rolling in-memory tail to recognize either a canonical terminal status or `data: [DONE]`; the full response is not persisted or sent elsewhere by this observer.
 - Broad optional HTTPS host permission exists only so a user can configure an arbitrary HTTPS OpenAI-compatible provider; AI Chat Monitor requests the selected origin at runtime.
 - Provider API keys and Telegram bot tokens remain in trusted extension storage.
 - Monitoring history stores bounded metadata/fingerprints/diagnostics, not full chat transcripts or credentials.
@@ -211,7 +211,8 @@ See [PRIVACY.md](PRIVACY.md) for the complete current policy.
 - [Conversation status protocol](docs/CONVERSATION_STATUS_PROTOCOL.md)
 - [Revision 7 background monitoring](docs/REV7_BACKGROUND_MONITORING.md)
 - [Revision 8 response-episode correlation](docs/REV8_RESPONSE_EPISODE.md)
-- [Revision 9 browser response lifecycle](docs/REV9_BROWSER_RESPONSE_LIFECYCLE.md)
+- [Revision 9 browser response lifecycle — superseded completion authority](docs/REV9_BROWSER_RESPONSE_LIFECYCLE.md)
+- [Revision 10 page-stream terminal authority](docs/REV10_PAGE_STREAM_TERMINAL.md)
 - [Privacy policy](PRIVACY.md)
 - [Chrome Web Store listing copy](docs/CHROME_WEB_STORE_LISTING.md)
 - [Store readiness](docs/STORE_READINESS.md)

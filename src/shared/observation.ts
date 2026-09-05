@@ -48,6 +48,24 @@ export interface ResponseCompletionEvidence {
   completedAt: number;
 }
 
+export type TerminalStatusDecision =
+  | "CONTINUE"
+  | "HOLD_APPROVAL"
+  | "HOLD_DECISION"
+  | "HOLD_HUMAN_OPERATION"
+  | "COMPLETE"
+  | "PLATFORM_ERROR"
+  | "RATE_LIMIT"
+  | "UNSURE";
+
+export interface ResponseTerminalStatusEvidence {
+  serial: number;
+  source: "CHATGPT_RESPONSE_STREAM";
+  visibility: "visible" | "hidden";
+  completedAt: number;
+  decision: TerminalStatusDecision;
+}
+
 export interface PageObservation {
   conversationId?: string;
   routeKey: string;
@@ -56,6 +74,7 @@ export interface PageObservation {
   generation: GenerationState;
   stopControlPresent?: boolean;
   responseCompletion?: ResponseCompletionEvidence;
+  responseTerminalStatus?: ResponseTerminalStatusEvidence;
   latestUser?: UserTurnSnapshot;
   latestAssistant?: AssistantResponseSnapshot;
   composer: ComposerSnapshot;
@@ -116,6 +135,30 @@ function isResponseCompletion(value: unknown): boolean {
   );
 }
 
+function isTerminalStatusDecision(value: unknown): value is TerminalStatusDecision {
+  return (
+    value === "CONTINUE" ||
+    value === "HOLD_APPROVAL" ||
+    value === "HOLD_DECISION" ||
+    value === "HOLD_HUMAN_OPERATION" ||
+    value === "COMPLETE" ||
+    value === "PLATFORM_ERROR" ||
+    value === "RATE_LIMIT" ||
+    value === "UNSURE"
+  );
+}
+
+function isResponseTerminalStatus(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.serial === "number" && Number.isInteger(value.serial) && value.serial >= 1 &&
+    value.source === "CHATGPT_RESPONSE_STREAM" &&
+    (value.visibility === "visible" || value.visibility === "hidden") &&
+    typeof value.completedAt === "number" && Number.isFinite(value.completedAt) && value.completedAt > 0 &&
+    isTerminalStatusDecision(value.decision)
+  );
+}
+
 export function isPageObservation(value: unknown): value is PageObservation {
   if (!isRecord(value)) return false;
   if (
@@ -127,6 +170,7 @@ export function isPageObservation(value: unknown): value is PageObservation {
     !isGenerationState(value.generation) ||
     (value.stopControlPresent !== undefined && typeof value.stopControlPresent !== "boolean") ||
     (value.responseCompletion !== undefined && !isResponseCompletion(value.responseCompletion)) ||
+    (value.responseTerminalStatus !== undefined && !isResponseTerminalStatus(value.responseTerminalStatus)) ||
     (value.confidence !== "HIGH" && value.confidence !== "LOW") ||
     !Number.isFinite(value.observedAt)
   ) {

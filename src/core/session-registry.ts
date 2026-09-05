@@ -410,6 +410,23 @@ export class SessionRegistry {
       };
     }
 
+    const responseTerminalStatus = event.observation.responseTerminalStatus;
+    if (responseTerminalStatus?.visibility === "hidden") {
+      const assistant = session.observation?.latestAssistant;
+      const prior = hiddenDiagnostic ?? {
+        backgroundedAt: responseTerminalStatus.completedAt,
+        ...(assistant?.fingerprint === undefined ? {} : { baselineAssistantFingerprint: assistant.fingerprint }),
+        ...(assistant?.textLength === undefined ? {} : { baselineAssistantTextLength: assistant.textLength }),
+        hiddenObservationCount: 0,
+        assistantChanged: false,
+      };
+      hiddenDiagnostic = {
+        ...prior,
+        ...(prior.firstMarkerDetectedAt === undefined ? { firstMarkerDetectedAt: responseTerminalStatus.completedAt } : {}),
+        hiddenMarkerHealth: "DETECTED",
+      };
+    }
+
     const responseCompletion = event.observation.responseCompletion;
     if (responseCompletion?.visibility === "hidden") {
       const assistant = session.observation?.latestAssistant;
