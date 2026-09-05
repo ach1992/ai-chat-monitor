@@ -5,6 +5,7 @@
   const MAX_STATUS_CHARS = 80;
   const MAX_TEXT_CHARS = 262_144;
   const MAX_PARENT_HOPS = 24;
+  const READBACK_RETRY_DELAYS_MS = [0, 250, 750, 1_500, 3_000, 6_000] as const;
 
   type MarkerHealth = "DETECTED" | "MISSING" | "MALFORMED";
   type SemanticDecision =
@@ -40,7 +41,9 @@
   const originalFetch = window.fetch.bind(window);
   let enabled = false;
   let armedConversationId: string | undefined;
-  let readbackStarted = false;
+  let readbackGeneration = 0;
+  let readbackInProgress = false;
+  let readbackCompleted = false;
 
   function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
@@ -254,53 +257,82 @@
     }, location.origin);
   }
 
-  async function readCanonicalConversation(conversationId: string): Promise<void> {
+  async function readCanonicalConversation(conversationId: string): Promise<boolean> {
     try {
       const response = await originalFetch(`/backend-api/conversations/${encodeURIComponent(conversationId)}`, {
         method: "GET",
         credentials: "same-origin",
         cache: "no-store",
       });
-      if (!response.ok) return;
+      if (!response.ok) return false;
       const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
-      if (!contentType.includes("application/json")) return;
+      if (!contentType.includes("application/json")) return false;
       const payload: unknown = await response.json();
       const evidence = extractCurrentAssistant(payload, conversationId);
-      if (evidence !== undefined) postEvidence(evidence);
+      if (evidence === undefined) return false;
+      postEvidence(evidence);
+      return true;
     } catch {
-      // Fail closed: hidden completion evidence is optional unless it is exact and readable.
+      // Fail closed: retry only by re-reading canonical state; elapsed time is never completion authority.
+      return false;
+    }
+  }
+
+  function delay(ms: number): Promise<void> {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+
+  async function runCanonicalReadback(conversationId: string, generation: number): Promise<void> {
+    readbackInProgress = true;
+    try {
+      for (const retryDelay of READBACK_RETRY_DELAYS_MS) {
+        if (retryDelay > 0) await delay(retryDelay);
+        if (!enabled || armedConversationId !== conversationId || generation !== readbackGeneration) return;
+        if (await readCanonicalConversation(conversationId)) {
+          if (generation === readbackGeneration && armedConversationId === conversationId) readbackCompleted = true;
+          return;
+        }
+      }
+    } finally {
+      if (generation === readbackGeneration) readbackInProgress = false;
     }
   }
 
   window.addEventListener("message", (event) => {
     if (event.source !== window || event.origin !== location.origin || !isControlMessage(event.data)) return;
     enabled = event.data.enabled;
+    readbackGeneration += 1;
+    readbackInProgress = false;
+    readbackCompleted = false;
     if (!enabled) {
       armedConversationId = undefined;
-      readbackStarted = false;
       return;
     }
     const conversationId = boundedId(event.data.conversationId, MAX_CONVERSATION_ID_CHARS) ?? currentConversationId();
     if (conversationId === undefined) return;
     armedConversationId = conversationId;
-    readbackStarted = false;
   });
 
   const monitoredFetch: typeof window.fetch = async (...args) => {
     const method = requestMethod(args[0], args[1]);
     const path = requestPath(args[0]);
     const conversationIdAtStart = armedConversationId;
-    const shouldReadback = enabled &&
-      !readbackStarted &&
+    const prepareCandidate = enabled &&
       conversationIdAtStart !== undefined &&
-      document.visibilityState === "hidden" &&
       method === "POST" &&
       path === "/backend-api/f/conversation/prepare";
 
     const response = await originalFetch(...args);
-    if (shouldReadback && armedConversationId === conversationIdAtStart && response.ok) {
-      readbackStarted = true;
-      void readCanonicalConversation(conversationIdAtStart);
+    const shouldReadback = prepareCandidate &&
+      enabled &&
+      !readbackInProgress &&
+      !readbackCompleted &&
+      armedConversationId === conversationIdAtStart &&
+      document.visibilityState === "hidden" &&
+      response.ok;
+    if (shouldReadback) {
+      const generation = ++readbackGeneration;
+      void runCanonicalReadback(conversationIdAtStart, generation);
     }
     return response;
   };
