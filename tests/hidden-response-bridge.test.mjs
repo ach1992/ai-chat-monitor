@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 
 async function flushAsyncWork() {
-  for (let index = 0; index < 12; index += 1) await new Promise((resolve) => setImmediate(resolve));
+  for (let index = 0; index < 24; index += 1) await new Promise((resolve) => setImmediate(resolve));
 }
 
 function canonicalPayload({ text, status = "finished_successfully", endTurn = true } = {}) {
@@ -37,15 +37,19 @@ function canonicalPayload({ text, status = "finished_successfully", endTurn = tr
   };
 }
 
-async function loadBridge(payload, visibilityState = "hidden") {
+async function loadBridge(payloadOrPayloads, visibilityState = "hidden") {
   const source = await readFile(new URL("../dist/content/hidden-response-bridge.js", import.meta.url), "utf8");
   const listeners = new Map();
   const posted = [];
   const calls = [];
+  const payloads = (Array.isArray(payloadOrPayloads) ? payloadOrPayloads : [payloadOrPayloads]).map((payload) => structuredClone(payload));
+  let canonicalReadIndex = 0;
   const originalFetch = async (input, init) => {
     const url = String(input);
     calls.push({ url, init: structuredClone(init ?? {}) });
     if (url.includes("/backend-api/conversations/")) {
+      const payload = payloads[Math.min(canonicalReadIndex, payloads.length - 1)];
+      canonicalReadIndex += 1;
       return new Response(JSON.stringify(payload), {
         status: 200,
         headers: { "content-type": "application/json" },
@@ -70,6 +74,10 @@ async function loadBridge(payload, visibilityState = "hidden") {
       listeners.set(type, list);
     },
     postMessage(data) { posted.push(structuredClone(data)); },
+    setTimeout(callback) {
+      queueMicrotask(callback);
+      return 1;
+    },
   };
   const context = {
     window,
@@ -79,6 +87,7 @@ async function loadBridge(payload, visibilityState = "hidden") {
     Response,
     URL,
     Set,
+    Promise,
     structuredClone,
   };
   vm.createContext(context);
@@ -116,7 +125,7 @@ async function loadBridge(payload, visibilityState = "hidden") {
   };
 }
 
-test("hidden prepare triggers one canonical readback and emits only exact sanitized semantic completion evidence", async () => {
+test("hidden prepare triggers canonical readback and emits only exact sanitized semantic completion evidence", async () => {
   const secret = "TOP_SECRET_TRANSCRIPT_TEXT";
   const bridge = await loadBridge(canonicalPayload({
     text: `answer ${secret}\n\nAI_CHAT_MONITOR_STATUS={"decision":"COMPLETE"}`,
@@ -142,6 +151,34 @@ test("hidden prepare triggers one canonical readback and emits only exact saniti
     assistantTextLength: `answer ${secret}\n\nAI_CHAT_MONITOR_STATUS={"decision":"COMPLETE"}`.length,
   }]);
   assert.equal(JSON.stringify(bridge.posted).includes(secret), false, "raw canonical assistant text is never emitted");
+});
+
+test("canonical readback retries stale state and emits only after exact finished end-turn evidence exists", async () => {
+  const bridge = await loadBridge([
+    canonicalPayload({
+      text: "partial",
+      status: "in_progress",
+      endTurn: false,
+    }),
+    canonicalPayload({
+      text: 'final answer\n\nAI_CHAT_MONITOR_STATUS={"decision":"COMPLETE"}',
+    }),
+  ]);
+  bridge.enable();
+  await bridge.prepare();
+
+  const readbacks = bridge.calls.filter((call) => call.url.includes("/backend-api/conversations/conv-1"));
+  assert.equal(readbacks.length, 2, "pre-final canonical state is re-read rather than permanently latched");
+  assert.deepEqual(bridge.evidence(), [{
+    conversationId: "conv-1",
+    assistantMessageId: "assistant-1",
+    parentUserMessageId: "user-1",
+    messageStatus: "finished_successfully",
+    endTurn: true,
+    markerHealth: "DETECTED",
+    semanticDecision: "COMPLETE",
+    assistantTextLength: 'final answer\n\nAI_CHAT_MONITOR_STATUS={"decision":"COMPLETE"}'.length,
+  }]);
 });
 
 test("canonical finished assistant with no marker produces completion evidence without fabricated semantics", async () => {
@@ -176,5 +213,10 @@ test("canonical readback fails closed unless hidden, armed, finished successfull
   }));
   unfinished.enable();
   await unfinished.prepare();
+  assert.equal(
+    unfinished.calls.filter((call) => call.url.includes("/backend-api/conversations/conv-1")).length,
+    6,
+    "bounded retries exhaust without fabricating completion",
+  );
   assert.deepEqual(unfinished.evidence(), []);
 });
