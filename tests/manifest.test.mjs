@@ -19,14 +19,22 @@ test("manifest is MV3 with bounded monitoring and local notification permissions
   assert.match(manifest.description, /without sending chat messages/i);
 });
 
-test("content scripts are constrained to ChatGPT hosts and contain no send-verification runtime", () => {
-  assert.deepEqual(manifest.content_scripts[0].matches, [
-    "https://chatgpt.com/*",
-    "https://chat.openai.com/*",
-  ]);
-  assert.deepEqual(manifest.content_scripts[0].js, [
-    "content/adapter.js",
-    "content/index.js",
-  ]);
-  assert.equal(manifest.content_scripts[0].js.some((file) => /send|guarded/i.test(file)), false);
+test("diagnostic MAIN-world observer and ordinary content agent stay host-scoped without new permissions", () => {
+  assert.equal(manifest.content_scripts.length, 2);
+  const mainDiagnostic = manifest.content_scripts[0];
+  const isolatedAgent = manifest.content_scripts[1];
+  const supportedHosts = ["https://chatgpt.com/*", "https://chat.openai.com/*"];
+
+  assert.deepEqual(mainDiagnostic.matches, supportedHosts);
+  assert.deepEqual(mainDiagnostic.js, ["content/main-stream-diagnostic.js"]);
+  assert.equal(mainDiagnostic.run_at, "document_start");
+  assert.equal(mainDiagnostic.world, "MAIN");
+
+  assert.deepEqual(isolatedAgent.matches, supportedHosts);
+  assert.deepEqual(isolatedAgent.js, ["content/adapter.js", "content/index.js"]);
+  assert.equal(isolatedAgent.run_at, "document_idle");
+  assert.equal(isolatedAgent.world, undefined);
+
+  const scripts = manifest.content_scripts.flatMap((entry) => entry.js ?? []);
+  assert.equal(scripts.some((file) => /send-verification|guarded/i.test(file)), false);
 });

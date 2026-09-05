@@ -21,8 +21,51 @@ namespace GuardianContentAgent {
     protocolVersion: 2;
   }
 
+  interface NetworkDiagnosticControlMessage {
+    type: "diagnostic:network-control";
+    protocolVersion: 1;
+    enabled: boolean;
+  }
+
+  interface NetworkDiagnosticReadMessage {
+    type: "diagnostic:network-read";
+    protocolVersion: 1;
+  }
+
+  interface PageNetworkDiagnosticEvent {
+    kind: "EPISODE_ARMED" | "FETCH_RESPONSE" | "FETCH_ERROR" | "STREAM_SNAPSHOT" | "STREAM_DONE" | "STREAM_END" | "STREAM_ERROR";
+    at: number;
+    visibility?: string;
+    episodeId?: string;
+    episodeStartedAt?: number;
+    streamId?: string;
+    requestOrdinal?: number;
+    requestStartedAt?: number;
+    responseAt?: number;
+    method?: string;
+    path?: string;
+    status?: number;
+    contentType?: string;
+    chunkCount?: number;
+    byteCount?: number;
+    eventCount?: number;
+    firstChunkAt?: number;
+    lastChunkAt?: number;
+    assistantMessageIds?: string[];
+    parentMessageIds?: string[];
+    conversationIds?: string[];
+    assistantTextLength?: number;
+    doneSeen?: boolean;
+    markerDecision?: string;
+    endedAt?: number;
+    endReason?: string;
+    errorName?: string;
+  }
+
   const FOCUS_INTENT_WINDOW_MS = 1_500;
   const PERIODIC_OBSERVATION_MS = 15_000;
+  const NETWORK_DIAGNOSTIC_CHANNEL = "AI_CHAT_MONITOR_NETWORK_DIAGNOSTIC_V1";
+  const MAX_NETWORK_DIAGNOSTIC_EVENTS = 96;
   const adapter = new GuardianContent.BrowserChatGPTAdapter(document, location);
   const agentInstanceId = crypto.randomUUID();
   let pageEpoch = 1;
@@ -32,6 +75,7 @@ namespace GuardianContentAgent {
   let observationGeneration = 0;
   let outboundQueue: Promise<void> = Promise.resolve();
   let lastKeyboardFocusIntentAt: number | undefined;
+  let networkDiagnosticEvents: PageNetworkDiagnosticEvent[] = [];
 
   function nextSequence(): number { sequence += 1; return sequence; }
 
@@ -56,6 +100,107 @@ namespace GuardianContentAgent {
   function isPanelAgentReconnectMessage(value: unknown): value is PanelAgentReconnectMessage {
     return isRecord(value) && value.type === "panel:agent-reconnect" && value.protocolVersion === GuardianContent.PROTOCOL_VERSION;
   }
+
+  function isNetworkDiagnosticControlMessage(value: unknown): value is NetworkDiagnosticControlMessage {
+    return isRecord(value) &&
+      value.type === "diagnostic:network-control" &&
+      value.protocolVersion === 1 &&
+      typeof value.enabled === "boolean";
+  }
+
+  function isNetworkDiagnosticReadMessage(value: unknown): value is NetworkDiagnosticReadMessage {
+    return isRecord(value) && value.type === "diagnostic:network-read" && value.protocolVersion === 1;
+  }
+
+  function boundedString(value: unknown, max: number): string | undefined {
+    return typeof value === "string" && value.length > 0 ? value.slice(0, max) : undefined;
+  }
+
+  function finiteNumber(value: unknown): number | undefined {
+    return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  }
+
+  function boundedStringArray(value: unknown): string[] | undefined {
+    if (!Array.isArray(value) || value.length > 8) return undefined;
+    const result: string[] = [];
+    for (const entry of value) {
+      const normalized = boundedString(entry, 200);
+      if (normalized === undefined) return undefined;
+      result.push(normalized);
+    }
+    return result;
+  }
+
+  function sanitizeNetworkDiagnosticEvent(value: unknown): PageNetworkDiagnosticEvent | undefined {
+    if (!isRecord(value)) return undefined;
+    const kind = value.kind;
+    if (kind !== "EPISODE_ARMED" &&
+      kind !== "FETCH_RESPONSE" &&
+      kind !== "FETCH_ERROR" &&
+      kind !== "STREAM_SNAPSHOT" &&
+      kind !== "STREAM_DONE" &&
+      kind !== "STREAM_END" &&
+      kind !== "STREAM_ERROR") return undefined;
+    const at = finiteNumber(value.at);
+    if (at === undefined) return undefined;
+
+    const result: PageNetworkDiagnosticEvent = { kind, at };
+    const visibility = boundedString(value.visibility, 32);
+    const episodeId = boundedString(value.episodeId, 100);
+    const streamId = boundedString(value.streamId, 220);
+    const method = boundedString(value.method, 16);
+    const path = boundedString(value.path, 240);
+    const contentType = boundedString(value.contentType, 160);
+    const markerDecision = boundedString(value.markerDecision, 40);
+    const endReason = boundedString(value.endReason, 20);
+    const errorName = boundedString(value.errorName, 80);
+    const assistantMessageIds = boundedStringArray(value.assistantMessageIds);
+    const parentMessageIds = boundedStringArray(value.parentMessageIds);
+    const conversationIds = boundedStringArray(value.conversationIds);
+
+    if (visibility !== undefined) result.visibility = visibility;
+    if (episodeId !== undefined) result.episodeId = episodeId;
+    if (streamId !== undefined) result.streamId = streamId;
+    if (method !== undefined) result.method = method;
+    if (path !== undefined) result.path = path;
+    if (contentType !== undefined) result.contentType = contentType;
+    if (markerDecision !== undefined) result.markerDecision = markerDecision;
+    if (endReason !== undefined) result.endReason = endReason;
+    if (errorName !== undefined) result.errorName = errorName;
+    if (assistantMessageIds !== undefined) result.assistantMessageIds = assistantMessageIds;
+    if (parentMessageIds !== undefined) result.parentMessageIds = parentMessageIds;
+    if (conversationIds !== undefined) result.conversationIds = conversationIds;
+
+    for (const key of [
+      "episodeStartedAt",
+      "requestOrdinal",
+      "requestStartedAt",
+      "responseAt",
+      "status",
+      "chunkCount",
+      "byteCount",
+      "eventCount",
+      "firstChunkAt",
+      "lastChunkAt",
+      "assistantTextLength",
+      "endedAt",
+    ] as const) {
+      const numberValue = finiteNumber(value[key]);
+      if (numberValue !== undefined) result[key] = numberValue;
+    }
+    if (typeof value.doneSeen === "boolean") result.doneSeen = value.doneSeen;
+    return result;
+  }
+
+  window.addEventListener("message", (event) => {
+    if (event.source !== window || event.origin !== location.origin || !isRecord(event.data)) return;
+    if (event.data.channel !== NETWORK_DIAGNOSTIC_CHANNEL ||
+      event.data.type !== "network-diagnostic" ||
+      event.data.protocolVersion !== 1) return;
+    const sanitized = sanitizeNetworkDiagnosticEvent(event.data.event);
+    if (sanitized === undefined) return;
+    networkDiagnosticEvents = [...networkDiagnosticEvents, sanitized].slice(-MAX_NETWORK_DIAGNOSTIC_EVENTS);
+  });
 
   function agentProbeResponse(): Record<string, unknown> {
     const conversationId = adapter.currentConversationId();
@@ -167,6 +312,32 @@ namespace GuardianContentAgent {
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (isNetworkDiagnosticControlMessage(message)) {
+      if (message.enabled) networkDiagnosticEvents = [];
+      window.postMessage({
+        channel: NETWORK_DIAGNOSTIC_CHANNEL,
+        type: "control",
+        protocolVersion: 1,
+        enabled: message.enabled,
+      }, location.origin);
+      sendResponse({
+        type: "content:network-diagnostic-control",
+        protocolVersion: 1,
+        enabled: message.enabled,
+      });
+      return false;
+    }
+    if (isNetworkDiagnosticReadMessage(message)) {
+      const conversationId = adapter.currentConversationId();
+      sendResponse({
+        type: "content:network-diagnostic",
+        protocolVersion: 1,
+        routeKey: adapter.currentRouteKey(),
+        ...(conversationId === undefined ? {} : { conversationId }),
+        events: structuredClone(networkDiagnosticEvents),
+      });
+      return false;
+    }
     if (isPanelAgentProbeMessage(message)) {
       sendResponse(agentProbeResponse());
       return false;

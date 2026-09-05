@@ -32,8 +32,20 @@ test("content and background runtime expose no ChatGPT write command or composer
   assert.doesNotMatch(content, /dispatchEvent\s*\(\s*new\s+InputEvent/);
 
   const scripts = manifest.content_scripts.flatMap((entry) => entry.js ?? []);
-  assert.deepEqual(scripts, ["content/adapter.js", "content/index.js"]);
+  assert.deepEqual(scripts, ["content/main-stream-diagnostic.js", "content/adapter.js", "content/index.js"]);
   assert.equal(scripts.some((path) => /send-verification|guarded/i.test(path)), false);
+});
+
+test("MAIN-world diagnostic remains read-only and cannot become completion authority", async () => {
+  const diagnostic = await readFile(new URL("../dist/content/main-stream-diagnostic.js", import.meta.url), "utf8");
+
+  assert.match(diagnostic, /response\.clone\s*\(\s*\)/);
+  assert.match(diagnostic, /window\.fetch\s*=\s*monitoredFetch/);
+  assert.doesNotMatch(diagnostic, /chrome\./);
+  assert.doesNotMatch(diagnostic, /localStorage|sessionStorage/);
+  assert.doesNotMatch(diagnostic, /args\s*\[\s*1\s*\]\s*\.\s*body|init\s*\.\s*body|request\s*\.\s*body/i);
+  assert.doesNotMatch(diagnostic, /authorization|cookie/i);
+  assert.doesNotMatch(diagnostic, /TASK_COMPLETE|RESPONSE_COMPLETE|SEMANTIC_UNKNOWN/);
 });
 
 test("the extension may observe ChatGPT controls but never exposes an inbound mutation action", async () => {
