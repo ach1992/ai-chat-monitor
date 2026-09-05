@@ -41,40 +41,11 @@ export interface PageActionSnapshot {
   continueGeneratingAvailable: boolean;
 }
 
-export interface ResponseCompletionEvidence {
-  serial: number;
-  transport: "CHATGPT_CONVERSATION_STREAM";
-  visibility: "visible" | "hidden";
-  completedAt: number;
-}
-
-export type TerminalStatusDecision =
-  | "CONTINUE"
-  | "HOLD_APPROVAL"
-  | "HOLD_DECISION"
-  | "HOLD_HUMAN_OPERATION"
-  | "COMPLETE"
-  | "PLATFORM_ERROR"
-  | "RATE_LIMIT"
-  | "UNSURE";
-
-export interface ResponseTerminalStatusEvidence {
-  serial: number;
-  source: "CHATGPT_RESPONSE_STREAM";
-  visibility: "visible" | "hidden";
-  completedAt: number;
-  decision: TerminalStatusDecision;
-}
-
 export interface PageObservation {
   conversationId?: string;
   routeKey: string;
   pageTitle?: string;
-  visibility?: "visible" | "hidden";
   generation: GenerationState;
-  stopControlPresent?: boolean;
-  responseCompletion?: ResponseCompletionEvidence;
-  responseTerminalStatus?: ResponseTerminalStatusEvidence;
   latestUser?: UserTurnSnapshot;
   latestAssistant?: AssistantResponseSnapshot;
   composer: ComposerSnapshot;
@@ -90,10 +61,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isGenerationState(value: unknown): value is GenerationState {
   return value === "IDLE" || value === "GENERATING" || value === "UNKNOWN";
-}
-
-function isOptionalVisibility(value: unknown): boolean {
-  return value === undefined || value === "visible" || value === "hidden";
 }
 
 function isBlockingReason(value: unknown): value is BlockingReason {
@@ -125,52 +92,14 @@ function isTurnSnapshot(value: unknown): boolean {
   );
 }
 
-function isResponseCompletion(value: unknown): boolean {
-  if (!isRecord(value)) return false;
-  return (
-    typeof value.serial === "number" && Number.isInteger(value.serial) && value.serial >= 1 &&
-    value.transport === "CHATGPT_CONVERSATION_STREAM" &&
-    (value.visibility === "visible" || value.visibility === "hidden") &&
-    typeof value.completedAt === "number" && Number.isFinite(value.completedAt) && value.completedAt > 0
-  );
-}
-
-function isTerminalStatusDecision(value: unknown): value is TerminalStatusDecision {
-  return (
-    value === "CONTINUE" ||
-    value === "HOLD_APPROVAL" ||
-    value === "HOLD_DECISION" ||
-    value === "HOLD_HUMAN_OPERATION" ||
-    value === "COMPLETE" ||
-    value === "PLATFORM_ERROR" ||
-    value === "RATE_LIMIT" ||
-    value === "UNSURE"
-  );
-}
-
-function isResponseTerminalStatus(value: unknown): boolean {
-  if (!isRecord(value)) return false;
-  return (
-    typeof value.serial === "number" && Number.isInteger(value.serial) && value.serial >= 1 &&
-    value.source === "CHATGPT_RESPONSE_STREAM" &&
-    (value.visibility === "visible" || value.visibility === "hidden") &&
-    typeof value.completedAt === "number" && Number.isFinite(value.completedAt) && value.completedAt > 0 &&
-    isTerminalStatusDecision(value.decision)
-  );
-}
-
 export function isPageObservation(value: unknown): value is PageObservation {
   if (!isRecord(value)) return false;
   if (
     !isOptionalString(value.conversationId) ||
     typeof value.routeKey !== "string" ||
     value.routeKey.length === 0 ||
-    !isOptionalVisibility(value.visibility) ||
     (value.pageTitle !== undefined && (typeof value.pageTitle !== "string" || value.pageTitle.length > 300)) ||
     !isGenerationState(value.generation) ||
-    (value.stopControlPresent !== undefined && typeof value.stopControlPresent !== "boolean") ||
-    (value.responseCompletion !== undefined && !isResponseCompletion(value.responseCompletion)) ||
-    (value.responseTerminalStatus !== undefined && !isResponseTerminalStatus(value.responseTerminalStatus)) ||
     (value.confidence !== "HIGH" && value.confidence !== "LOW") ||
     !Number.isFinite(value.observedAt)
   ) {

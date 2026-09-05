@@ -19,7 +19,6 @@ declare namespace chrome {
     const lastError: { message?: string } | undefined;
 
     function getURL(path: string): string;
-    function getManifest(): { version: string };
     function sendMessage<TResponse = unknown>(message: unknown): Promise<TResponse>;
   }
 
@@ -30,22 +29,15 @@ declare namespace chrome {
       active?: boolean;
       title?: string;
       url?: string;
-      autoDiscardable?: boolean;
-      discarded?: boolean;
-      frozen?: boolean;
     }
 
     interface TabChangeInfo {
       status?: "loading" | "complete";
       url?: string;
-      discarded?: boolean;
-      frozen?: boolean;
-      autoDiscardable?: boolean;
     }
 
     interface ActiveInfo {
       tabId: number;
-      windowId: number;
     }
 
     interface RemovedEvent {
@@ -80,7 +72,7 @@ declare namespace chrome {
 
     function update(
       tabId: number,
-      updateProperties: { active?: boolean; autoDiscardable?: boolean },
+      updateProperties: { active?: boolean },
     ): Promise<Tab>;
 
     function reload(tabId: number): Promise<void>;

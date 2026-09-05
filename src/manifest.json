@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AI Chat Monitor",
-  "version": "3.0.3",
+  "version": "3.0.0",
   "description": "Monitors selected ChatGPT conversations and notifies you about completion, attention, and platform states without sending chat messages.",
   "minimum_chrome_version": "114",
   "permissions": ["storage", "sidePanel", "notifications", "offscreen", "clipboardWrite"],
@@ -30,12 +30,6 @@
     "default_path": "sidepanel/index.html"
   },
   "content_scripts": [
-    {
-      "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
-      "js": ["content/main-stream-observer.js"],
-      "run_at": "document_start",
-      "world": "MAIN"
-    },
     {
       "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
       "js": ["content/adapter.js", "content/index.js"],

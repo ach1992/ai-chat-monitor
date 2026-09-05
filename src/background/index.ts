@@ -34,18 +34,14 @@ import {
   type PanelStatusResponse,
   type ProtocolErrorResponse,
   type ProviderSettingsResponse,
-  type TabLifecycleStatus,
 } from "../shared/protocol.js";
 import {
   SessionRegistry,
   type SessionMutationResult,
   type SessionRegistryState,
 } from "../core/session-registry.js";
-import { inspectConversationStatusMarker } from "../classification/conversation-protocol.js";
-import { toHiddenMonitoringDiagnosticView } from "./hidden-diagnostics.js";
 import { isPanelMonitoringChatsReset, type MonitoringChatsResetResponse } from "../monitoring/reset-protocol.js";
 import { MonitoringService } from "../monitoring/service.js";
-import { MonitoredTabLifecycle, type MonitoredTabLifecycleState } from "./tab-lifecycle.js";
 import { ProviderConfigurationError, redactProviderProfile } from "../providers/settings.js";
 import { testProviderClassifierReadiness } from "../providers/readiness.js";
 import { ProviderFailure, type ProviderSettingsState } from "../providers/types.js";
@@ -55,25 +51,12 @@ import {
 } from "../storage/index.js";
 
 const REGISTRY_KEY = "runtime";
-const TAB_LIFECYCLE_KEY = "runtime";
 const registryStorage = createEphemeralStorage<SessionRegistryState>("session-registry");
-const tabLifecycleStorage = createEphemeralStorage<MonitoredTabLifecycleState>("tab-lifecycle");
 let registry = new SessionRegistry();
 let mutationQueue: Promise<void> = Promise.resolve();
-const activeTabByWindow = new Map<number, number>();
 
 const durableStorageReady = restrictDurableStorageToTrustedContexts();
 const monitoring = new MonitoringService((tabId) => registry.getTab(tabId), durableStorageReady);
-const tabLifecycle = new MonitoredTabLifecycle(
-  {
-    get: (tabId) => chrome.tabs.get(tabId),
-    update: (tabId, properties) => chrome.tabs.update(tabId, properties),
-  },
-  {
-    load: () => tabLifecycleStorage.get(TAB_LIFECYCLE_KEY),
-    save: (state) => tabLifecycleStorage.set(TAB_LIFECYCLE_KEY, state),
-  },
-);
 const registryReady = Promise.all([
   durableStorageReady,
   registryStorage.get(REGISTRY_KEY),
@@ -101,37 +84,6 @@ async function refreshRestoredContentAgents(): Promise<void> {
 }
 
 void refreshRestoredContentAgents();
-
-async function syncTabDiscardProtection(tabId: number): Promise<void> {
-  const status = await monitoring.status(tabId);
-  if (status.policy?.enabled === true) await tabLifecycle.protect(tabId);
-  else await tabLifecycle.release(tabId);
-}
-
-function lifecycleStatus(tab: chrome.tabs.Tab): TabLifecycleStatus {
-  const discarded = tab.discarded === true;
-  const frozen = tab.frozen === true;
-  return {
-    autoDiscardable: tab.autoDiscardable !== false,
-    discarded,
-    frozen,
-    runnable: !discarded && !frozen,
-  };
-}
-
-async function readTabLifecycle(tabId: number): Promise<TabLifecycleStatus | undefined> {
-  try { return lifecycleStatus(await chrome.tabs.get(tabId)); } catch { return undefined; }
-}
-
-function supportedChatGptUrl(rawUrl: string | undefined): boolean {
-  if (rawUrl === undefined) return false;
-  try {
-    const url = new URL(rawUrl);
-    return url.protocol === "https:" && (url.hostname === "chatgpt.com" || url.hostname === "chat.openai.com");
-  } catch {
-    return false;
-  }
-}
 
 function protocolError(code: ProtocolErrorResponse["code"], message: string): ProtocolErrorResponse {
   return { type: "background:error", protocolVersion: PROTOCOL_VERSION, code, message };
@@ -170,20 +122,6 @@ async function mutateRegistry(operation: (current: SessionRegistry) => SessionMu
   });
 }
 
-async function mutateRegistryMetadata(operation: (current: SessionRegistry) => boolean): Promise<void> {
-  await registryReady;
-  await enqueueMutation(async () => {
-    const previous = registry.exportState();
-    if (!operation(registry)) return;
-    try {
-      await registryStorage.set(REGISTRY_KEY, registry.exportState());
-    } catch (error) {
-      registry = SessionRegistry.fromState(previous);
-      throw error;
-    }
-  });
-}
-
 async function mutateTabLifecycle(tabId: number, kind: "invalidate" | "remove"): Promise<void> {
   await registryReady;
   await enqueueMutation(async () => {
@@ -199,12 +137,7 @@ async function mutateTabLifecycle(tabId: number, kind: "invalidate" | "remove"):
   });
 }
 
-function acceptedAck(
-  tabId: number,
-  documentId: string,
-  result: Extract<SessionMutationResult, { accepted: true }>,
-  monitoringEnabled: boolean,
-): ContentAgentAck {
+function acceptedAck(tabId: number, documentId: string, result: Extract<SessionMutationResult, { accepted: true }>): ContentAgentAck {
   return {
     type: "background:agent-ack",
     protocolVersion: PROTOCOL_VERSION,
@@ -212,29 +145,7 @@ function acceptedAck(
     tabId,
     documentId,
     controlEligibility: result.session.controlEligibility,
-    monitoringEnabled,
   };
-}
-
-async function acceptedAckForSession(
-  tabId: number,
-  documentId: string,
-  result: Extract<SessionMutationResult, { accepted: true }>,
-): Promise<ContentAgentAck> {
-  const status = await monitoring.status(tabId);
-  return acceptedAck(tabId, documentId, result, status.policy?.enabled === true);
-}
-
-async function syncContentMonitoringState(tabId: number, documentId: string, enabled: boolean): Promise<void> {
-  try {
-    await chrome.tabs.sendMessage(tabId, {
-      type: "background:monitoring-state",
-      protocolVersion: PROTOCOL_VERSION,
-      enabled,
-    }, { documentId });
-  } catch {
-    // Navigation/removal races are expected; the next exact agent ack resynchronizes state.
-  }
 }
 
 function staleEvent(reason: string): ProtocolErrorResponse {
@@ -256,8 +167,7 @@ async function handleContentHello(message: ContentHello, sender: chrome.runtime.
     }));
     if (!result.accepted) return staleEvent(result.reason);
     await monitoring.handleSession(result.session);
-    await syncTabDiscardProtection(identity.tabId).catch(() => undefined);
-    return acceptedAckForSession(identity.tabId, identity.documentId, result);
+    return acceptedAck(identity.tabId, identity.documentId, result);
   } catch {
     return protocolError("STORAGE_FAILURE", "Unable to persist content-agent registration.");
   }
@@ -278,8 +188,7 @@ async function handleNavigation(message: ContentNavigation, sender: chrome.runti
     }));
     if (!result.accepted) return staleEvent(result.reason);
     await monitoring.handleSession(result.session);
-    await syncTabDiscardProtection(identity.tabId).catch(() => undefined);
-    return acceptedAckForSession(identity.tabId, identity.documentId, result);
+    return acceptedAck(identity.tabId, identity.documentId, result);
   } catch {
     return protocolError("STORAGE_FAILURE", "Unable to persist navigation state.");
   }
@@ -295,14 +204,11 @@ async function handleObservation(message: ContentObservation, sender: chrome.run
       pageEpoch: message.pageEpoch,
       sequence: message.sequence,
       observation: message.observation,
-      ...(message.observation.visibility === "hidden"
-        ? { markerHealth: inspectConversationStatusMarker(message.observation.latestAssistant?.normalizedText ?? "").health }
-        : {}),
       sentAt: message.sentAt,
     }));
     if (!result.accepted) return staleEvent(result.reason);
     await monitoring.handleSession(result.session);
-    return acceptedAckForSession(identity.tabId, identity.documentId, result);
+    return acceptedAck(identity.tabId, identity.documentId, result);
   } catch {
     return protocolError("STORAGE_FAILURE", "Unable to persist observation state.");
   }
@@ -317,11 +223,11 @@ async function handleInteraction(message: ContentUserInteraction, sender: chrome
       agentInstanceId: message.agentInstanceId,
       pageEpoch: message.pageEpoch,
       sequence: message.sequence,
-      interaction: message.interaction,
       sentAt: message.sentAt,
     }));
     if (!result.accepted) return staleEvent(result.reason);
-    return acceptedAckForSession(identity.tabId, identity.documentId, result);
+    await monitoring.handleSession(result.session);
+    return acceptedAck(identity.tabId, identity.documentId, result);
   } catch {
     return protocolError("STORAGE_FAILURE", "Unable to persist user-interaction state.");
   }
@@ -335,8 +241,6 @@ async function handlePanelStatusRequest(tabId: number, sender: chrome.runtime.Me
     await monitoring.ready();
     const session = registry.getTab(tabId);
     const status = await monitoring.status(tabId);
-    const tabLifecycle = await readTabLifecycle(tabId);
-    const hiddenDiagnostic = toHiddenMonitoringDiagnosticView(session?.hiddenDiagnostic);
     const response: PanelStatusResponse = {
       type: "background:status",
       protocolVersion: PROTOCOL_VERSION,
@@ -350,8 +254,6 @@ async function handlePanelStatusRequest(tabId: number, sender: chrome.runtime.Me
       }),
       ...(status.policy === undefined ? {} : { monitoringPolicy: status.policy }),
       ...(status.runtime === undefined ? {} : { monitoringRuntime: status.runtime }),
-      ...(tabLifecycle === undefined ? {} : { tabLifecycle }),
-      ...(hiddenDiagnostic === undefined ? {} : { hiddenDiagnostic }),
     };
     return response;
   } catch {
@@ -380,22 +282,17 @@ async function handleOverview(sender: chrome.runtime.MessageSender): Promise<Gua
       const overrides = policyState.chats.find((chat) => chat.conversationId === session.conversationId);
       if (overrides?.enabled !== true) continue;
       const status = await monitoring.status(session.tabId);
-      const tabLifecycle = await readTabLifecycle(session.tabId);
-      const hiddenDiagnostic = toHiddenMonitoringDiagnosticView(session.hiddenDiagnostic);
       chats.push({
         tabId: session.tabId,
         conversationId: session.conversationId,
         routeKey: session.routeKey,
         controlEligibility: session.controlEligibility,
         lastSeenAt: session.lastSeenAt,
-        ...(session.observation?.observedAt === undefined ? {} : { lastObservationAt: session.observation.observedAt }),
         ...(session.observation?.pageTitle === undefined ? {} : { pageTitle: session.observation.pageTitle }),
-        ...(session.observation === undefined ? {} : { visibility: session.observation.visibility, generation: session.observation.generation }),
+        ...(session.observation === undefined ? {} : { generation: session.observation.generation }),
         overrides: structuredClone(overrides),
         ...(status.policy === undefined ? {} : { policy: status.policy }),
         ...(status.runtime === undefined ? {} : { runtime: status.runtime }),
-        ...(tabLifecycle === undefined ? {} : { tabLifecycle }),
-        ...(hiddenDiagnostic === undefined ? {} : { hiddenDiagnostic }),
       });
     }
     const response: PanelOverviewResponse = {
@@ -441,8 +338,6 @@ async function handleMonitoringPolicyUpdate(message: PanelMonitoringPolicyUpdate
       return protocolError("INVALID_MESSAGE", "Tab conversation identity changed before the monitoring update.");
     }
     const policy = await monitoring.updateChat(message.tabId, message.conversationId, message.patch);
-    await syncTabDiscardProtection(message.tabId).catch(() => undefined);
-    await syncContentMonitoringState(message.tabId, current.documentId, policy.enabled);
     const status = await monitoring.status(message.tabId);
     const response = monitoringPolicyResponse(message.tabId);
     response.policy = policy;
@@ -468,13 +363,7 @@ async function handleMonitoringChatsReset(sender: chrome.runtime.MessageSender):
   try {
     await registryReady;
     await mutationQueue;
-    const sessions = registry.list();
-    const tabIds = sessions.map((session) => session.tabId);
     const result = await monitoring.resetChats();
-    await Promise.allSettled([
-      ...sessions.map((session) => syncContentMonitoringState(session.tabId, session.documentId, false)),
-      ...tabIds.map((tabId) => tabLifecycle.release(tabId)),
-    ]);
     return {
       type: "background:monitoring-chats-reset",
       protocolVersion: PROTOCOL_VERSION,
@@ -594,57 +483,15 @@ chrome.notifications.onClicked.addListener((notificationId) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  for (const [windowId, activeTabId] of activeTabByWindow) {
-    if (activeTabId === tabId) activeTabByWindow.delete(windowId);
-  }
   void mutateTabLifecycle(tabId, "remove");
-  void tabLifecycle.forget(tabId);
 });
 
-async function inferVisiblePreviousTab(windowId: number, nextTabId: number): Promise<number | undefined> {
-  await registryReady;
-  const candidates = registry.list()
-    .filter((session) =>
-      session.tabId !== nextTabId &&
-      (session.observation?.visibility === "visible" || session.lastObservationVisibility === "visible"),
-    )
-    .sort((left, right) => right.lastSeenAt - left.lastSeenAt);
-  for (const session of candidates) {
-    try {
-      const tab = await chrome.tabs.get(session.tabId);
-      if (tab.windowId === windowId) return session.tabId;
-    } catch {
-      // A closed/unavailable candidate cannot establish the prior active tab.
-    }
-  }
-  return undefined;
-}
-
-async function recordActiveTabTransition({ tabId, windowId }: chrome.tabs.ActiveInfo): Promise<void> {
-  const at = Date.now();
-  let previousTabId = activeTabByWindow.get(windowId);
-  if (previousTabId === undefined || previousTabId === tabId) {
-    previousTabId = await inferVisiblePreviousTab(windowId, tabId);
-  }
-  activeTabByWindow.set(windowId, tabId);
-  if (previousTabId !== undefined && previousTabId !== tabId) {
-    await mutateRegistryMetadata((current) => current.markBackgrounded(previousTabId, at)).catch(() => undefined);
-  }
-  await mutateRegistryMetadata((current) => current.markForegrounded(tabId, at)).catch(() => undefined);
-}
-
-chrome.tabs.onActivated.addListener((activeInfo) => { void recordActiveTabTransition(activeInfo); });
-
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo.url !== undefined && !supportedChatGptUrl(changeInfo.url)) {
-    void tabLifecycle.release(tabId).catch(() => undefined);
-  }
-  if (changeInfo.discarded === true || changeInfo.frozen === true) return;
   if (changeInfo.status === "loading") {
     void mutateTabLifecycle(tabId, "invalidate");
     return;
   }
-  if (changeInfo.status === "complete" || changeInfo.discarded === false || changeInfo.frozen === false) {
+  if (changeInfo.status === "complete") {
     void requestContentAgentReconnect(tabId);
   }
 });

@@ -18,9 +18,7 @@ namespace GuardianContent {
     conversationId?: string;
     routeKey: string;
     pageTitle?: string;
-    visibility: "visible" | "hidden";
     generation: GenerationState;
-    stopControlPresent: boolean;
     latestUser?: {
       normalizedText: string;
       textLength: number;
@@ -42,7 +40,6 @@ namespace GuardianContent {
   const MAX_NORMALIZED_RESPONSE_CHARS = 12_000;
   const MAX_PAGE_TITLE_CHARS = 300;
   const STATUS_PREFIX = "AI_CHAT_MONITOR_STATUS=";
-  const TERMINAL_STATUS_LINE = /^AI_CHAT_MONITOR_STATUS=\{"decision":"(?:CONTINUE|HOLD_APPROVAL|HOLD_DECISION|HOLD_HUMAN_OPERATION|COMPLETE|PLATFORM_ERROR|RATE_LIMIT|UNSURE)"\}$/;
   const ASSISTANT_SELECTORS = ['[data-message-author-role="assistant"]', 'article[data-turn="assistant"]'] as const;
   const USER_SELECTORS = ['[data-message-author-role="user"]', 'article[data-turn="user"]'] as const;
   const TURN_SELECTOR = '[data-testid^="conversation-turn-"]';
@@ -137,18 +134,8 @@ namespace GuardianContent {
     return [...found];
   }
 
-  function orderedMatches(document: Document, selectors: readonly string[]): Element[] {
-    try {
-      const matches = [...document.querySelectorAll(selectors.join(","))];
-      if (matches.length > 0) return matches;
-    } catch {
-      // DOM drift must remain observational and fail closed.
-    }
-    return allMatches(document, selectors);
-  }
-
-  function assistantMatches(document: Document): Element[] { return orderedMatches(document, ASSISTANT_SELECTORS); }
-  function userMatches(document: Document): Element[] { return orderedMatches(document, USER_SELECTORS); }
+  function assistantMatches(document: Document): Element[] { return allMatches(document, ASSISTANT_SELECTORS); }
+  function userMatches(document: Document): Element[] { return allMatches(document, USER_SELECTORS); }
 
   function latestUserBeforeAssistant(document: Document, assistant: Element): Element | undefined {
     const users = userMatches(document);
@@ -182,31 +169,6 @@ namespace GuardianContent {
     return value.includes(STATUS_PREFIX);
   }
 
-  function hasCanonicalTerminalStatus(value: string): boolean {
-    const normalized = value.replace(/\r\n?/g, "\n").trimEnd();
-    let occurrences = 0;
-    let offset = 0;
-    while (offset < normalized.length) {
-      const index = normalized.indexOf(STATUS_PREFIX, offset);
-      if (index < 0) break;
-      occurrences += 1;
-      if (occurrences > 1) return false;
-      offset = index + STATUS_PREFIX.length;
-    }
-    if (occurrences !== 1) return false;
-    const terminalLine = normalized.split("\n").at(-1)?.trim() ?? "";
-    return TERMINAL_STATUS_LINE.test(terminalLine);
-  }
-
-  function recoverStructuralTerminalStatus(value: string): string | undefined {
-    const markerIndex = value.lastIndexOf(STATUS_PREFIX);
-    if (markerIndex < 0) return undefined;
-    const marker = value.slice(markerIndex).trim();
-    if (!TERMINAL_STATUS_LINE.test(marker)) return undefined;
-    const body = value.slice(0, markerIndex).trimEnd();
-    return body.length === 0 ? marker : `${body}\n${marker}`;
-  }
-
   function elementText(element: Element): string {
     if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) return element.value;
 
@@ -216,13 +178,9 @@ namespace GuardianContent {
     const structural = element.textContent ?? "";
     let selected = rendered;
 
-    // Chromium may leave layout-derived innerText stale or flatten the final line
-    // boundary in background tabs. Prefix presence alone is not enough. Recover
-    // a canonical terminal record from structural DOM text even when textContent
-    // concatenates adjacent blocks, then restore the terminal-line boundary. The
-    // parser still performs the authoritative ambiguity/code-fence validation.
-    const recoveredStructural = recoverStructuralTerminalStatus(structural);
-    if (!hasCanonicalTerminalStatus(rendered) && recoveredStructural !== undefined) selected = recoveredStructural;
+    // Chromium may leave layout-derived innerText stale in background tabs while
+    // structural DOM text already contains the completed assistant response.
+    if (!containsStatusPrefix(rendered) && containsStatusPrefix(structural)) selected = structural;
 
     const querySelectorAll = (element as ParentNode).querySelectorAll;
     if (containsStatusPrefix(selected) && typeof querySelectorAll === "function") {
@@ -352,9 +310,7 @@ namespace GuardianContent {
       const observation: PageObservation = {
         routeKey: this.currentRouteKey(),
         ...(pageTitle.length === 0 ? {} : { pageTitle }),
-        visibility: this.#document.visibilityState === "hidden" ? "hidden" : "visible",
         generation,
-        stopControlPresent: stopControl !== undefined,
         composer: {
           present: composer !== undefined,
           hasText: normalizeAssistantText(composerText).length > 0,
@@ -389,20 +345,6 @@ namespace GuardianContent {
             fingerprint: await fingerprintText(normalizedText),
             ...(domMessageId === undefined ? {} : { domMessageId }),
           };
-
-          // In hidden Chromium tabs the transient Stop control can remain stale even
-          // after the assistant DOM already contains the canonical terminal status.
-          // The terminal protocol is explicit end-of-response evidence; allow it to
-          // outrank only that hidden stale-UI signal. Visible tabs retain the normal
-          // Stop-control generation check, and malformed/code-fenced markers never
-          // satisfy hasCanonicalTerminalStatus().
-          if (
-            stopControl !== undefined &&
-            this.#document.visibilityState === "hidden" &&
-            hasCanonicalTerminalStatus(normalizedText)
-          ) {
-            observation.generation = "IDLE";
-          }
         }
       }
 

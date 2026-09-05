@@ -1,6 +1,6 @@
 {
   "name": "ai-chat-monitor",
-  "version": "3.0.3",
+  "version": "3.0.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -14,8 +14,7 @@
     "lint": "node scripts/lint.mjs",
     "test": "npm run build && node --test tests/*.test.mjs",
     "validate": "npm run typecheck && npm run lint && npm test",
-    "smoke:extension": "node scripts/smoke-extension.mjs",
-    "smoke:background": "node scripts/background-tab-smoke.mjs && node scripts/background-stale-dom-smoke.mjs"
+    "smoke:extension": "node scripts/smoke-extension.mjs"
   },
   "devDependencies": {
     "typescript": "5.8.3"

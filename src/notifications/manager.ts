@@ -14,7 +14,6 @@ import {
 import type {
   GuardianNotification,
   NotificationChannel,
-  NotificationDeliveryReport,
   RedactedTelegramSettings,
   TelegramHealth,
   TelegramSettingsMutation,
@@ -165,16 +164,6 @@ export async function browserNotification(notification: GuardianNotification): P
   );
 }
 
-export class NotificationDeliveryError extends Error {
-  readonly report: NotificationDeliveryReport;
-
-  constructor(report: NotificationDeliveryReport) {
-    super("One or more notification channels failed; monitoring state was not changed.");
-    this.name = "NotificationDeliveryError";
-    this.report = structuredClone(report);
-  }
-}
-
 export class NotificationManager {
   readonly #settings: TelegramSettingsAccess;
   readonly #telegram: TelegramTransport;
@@ -198,63 +187,33 @@ export class NotificationManager {
     return redactTelegramSettings(await this.#settings.update(mutation));
   }
 
-  async deliver(notification: GuardianNotification): Promise<NotificationDeliveryReport> {
-    const report: NotificationDeliveryReport = {
-      browser: "NOT_REQUESTED",
-      sound: "NOT_REQUESTED",
-      telegram: "NOT_REQUESTED",
-    };
+  async deliver(notification: GuardianNotification): Promise<void> {
     let failed = false;
 
     if (notification.browserEnabled) {
-      try {
-        await this.#browser.send(notification);
-        report.browser = "DELIVERED";
-        report.browserAt = this.#now();
-      } catch {
-        report.browser = "FAILED";
-        report.browserAt = this.#now();
-        failed = true;
-      }
+      try { await this.#browser.send(notification); } catch { failed = true; }
     }
 
     if (notification.soundEnabled === true && this.#sound !== undefined) {
-      try {
-        await this.#sound.send(notification);
-        report.sound = "DELIVERED";
-        report.soundAt = this.#now();
-      } catch {
-        report.sound = "FAILED";
-        report.soundAt = this.#now();
-        failed = true;
-      }
+      try { await this.#sound.send(notification); } catch { failed = true; }
     }
 
     let settings: TelegramSettingsState | undefined;
-    try { settings = await this.#settings.load(); } catch {
-      report.telegram = "FAILED";
-      report.telegramAt = this.#now();
-      failed = true;
-    }
+    try { settings = await this.#settings.load(); } catch { failed = true; }
 
     if (settings !== undefined && telegramSelected(settings, notification) && configured(settings)) {
       const identity = configurationIdentity(settings);
       try {
         await this.#telegram.send(settings.botToken, settings.destination, telegramNotificationText(notification));
-        report.telegram = "DELIVERED";
-        report.telegramAt = this.#now();
         await this.#saveHealth({ status: "HEALTHY", checkedAt: this.#now() }, identity);
       } catch (error) {
-        report.telegram = "FAILED";
-        report.telegramAt = this.#now();
         failed = true;
         const code = error instanceof TelegramDeliveryError ? error.code : "API_ERROR";
         await this.#saveHealth({ status: "ERROR", checkedAt: this.#now(), code }, identity);
       }
     }
 
-    if (failed) throw new NotificationDeliveryError(report);
-    return structuredClone(report);
+    if (failed) throw new Error("One or more notification channels failed; monitoring state was not changed.");
   }
 
   async testTelegram(mutation?: TelegramSettingsMutation): Promise<RedactedTelegramSettings> {

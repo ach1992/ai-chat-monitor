@@ -45,17 +45,14 @@ class FakeTextAreaElement extends FakeElement { constructor(options = {}) { supe
 class FakeInputElement extends FakeElement { constructor(options = {}) { super(options); this.value = options.value ?? ""; } }
 
 class FakeDocument {
-  constructor({ assistant, composer, stop, visibilityState = "hidden" }) {
+  constructor({ assistant, composer }) {
     this.assistant = assistant;
     this.composer = composer;
-    this.stop = stop;
-    this.visibilityState = visibilityState;
     this.activeElement = null;
     this.title = "Background chat";
   }
   querySelector(selector) {
     if (selector === "#prompt-textarea") return this.composer;
-    if (selector === 'button[data-testid="stop-button"]') return this.stop ?? null;
     return null;
   }
   querySelectorAll(selector) {
@@ -85,7 +82,7 @@ async function loadAdapter() {
   return context.GuardianContent;
 }
 
-function makeDom(structuralStatus, { code = false, stop = false, visibilityState = "hidden" } = {}) {
+function makeDom(structuralStatus, { code = false } = {}) {
   const turn = new FakeElement({ attrs: { "data-testid": "conversation-turn-assistant-bg" } });
   const assistant = new FakeElement({
     textContent: `Finished.\n${structuralStatus}`,
@@ -95,12 +92,7 @@ function makeDom(structuralStatus, { code = false, stop = false, visibilityState
     ...(code ? { codeText: structuralStatus } : {}),
   });
   assistant.parent = turn;
-  return new FakeDocument({
-    assistant,
-    composer: new FakeTextAreaElement({ value: "" }),
-    ...(stop ? { stop: new FakeElement({ attrs: { "data-testid": "stop-button" } }) } : {}),
-    visibilityState,
-  });
+  return new FakeDocument({ assistant, composer: new FakeTextAreaElement({ value: "" }) });
 }
 
 test("background-safe structural reading recovers canonical terminal status", async () => {
@@ -109,68 +101,6 @@ test("background-safe structural reading recovers canonical terminal status", as
   const result = await adapter.observe(123);
   assert.equal(result.latestAssistant.normalizedText, `Finished.\n${CANONICAL_STATUS}`);
   assert.equal(result.latestAssistant.domMessageId, "assistant-bg");
-});
-
-
-test("canonical terminal status outranks a stale Stop control only while hidden", async () => {
-  const GuardianContent = await loadAdapter();
-  const hiddenAdapter = new GuardianContent.BrowserChatGPTAdapter(
-    makeDom(CANONICAL_STATUS, { stop: true, visibilityState: "hidden" }),
-    { pathname: "/c/chat-bg" },
-  );
-  const visibleAdapter = new GuardianContent.BrowserChatGPTAdapter(
-    makeDom(CANONICAL_STATUS, { stop: true, visibilityState: "visible" }),
-    { pathname: "/c/chat-bg" },
-  );
-
-  const hiddenResult = await hiddenAdapter.observe(123);
-  const visibleResult = await visibleAdapter.observe(123);
-  assert.equal(hiddenResult.generation, "IDLE");
-  assert.equal(hiddenResult.stopControlPresent, true);
-  assert.equal(visibleResult.generation, "GENERATING");
-  assert.equal(visibleResult.stopControlPresent, true);
-});
-
-
-test("malformed or code-rendered status never overrides a hidden Stop control", async () => {
-  const GuardianContent = await loadAdapter();
-  const malformed = new GuardianContent.BrowserChatGPTAdapter(
-    makeDom('AI_CHAT_MONITOR_STATUS={"decision":"NOT_A_REAL_STATE"}', { stop: true }),
-    { pathname: "/c/chat-bg" },
-  );
-  const codeRendered = new GuardianContent.BrowserChatGPTAdapter(
-    makeDom(CANONICAL_STATUS, { stop: true, code: true }),
-    { pathname: "/c/chat-bg" },
-  );
-  const duplicate = new GuardianContent.BrowserChatGPTAdapter(
-    makeDom(`${CANONICAL_STATUS}\n${CANONICAL_STATUS}`, { stop: true }),
-    { pathname: "/c/chat-bg" },
-  );
-
-  assert.equal((await malformed.observe(123)).generation, "GENERATING");
-  assert.equal((await codeRendered.observe(123)).generation, "GENERATING");
-  assert.equal((await duplicate.observe(123)).generation, "GENERATING");
-});
-
-
-
-test("background structural reading replaces a flattened rendered status prefix", async () => {
-  const GuardianContent = await loadAdapter();
-  const document = makeDom(CANONICAL_STATUS);
-  document.assistant.innerText = `Finished. ${CANONICAL_STATUS}`;
-  const adapter = new GuardianContent.BrowserChatGPTAdapter(document, { pathname: "/c/chat-bg" });
-  const result = await adapter.observe(123);
-  assert.equal(result.latestAssistant.normalizedText, `Finished.\n${CANONICAL_STATUS}`);
-});
-
-test("background structural recovery restores a terminal line when textContent concatenates blocks", async () => {
-  const GuardianContent = await loadAdapter();
-  const document = makeDom(CANONICAL_STATUS);
-  document.assistant.textContent = `Finished.${CANONICAL_STATUS}`;
-  document.assistant.innerText = `Finished. ${CANONICAL_STATUS}`;
-  const adapter = new GuardianContent.BrowserChatGPTAdapter(document, { pathname: "/c/chat-bg" });
-  const result = await adapter.observe(123);
-  assert.equal(result.latestAssistant.normalizedText, `Finished.\n${CANONICAL_STATUS}`);
 });
 
 test("retired marker does not trigger background structural recovery", async () => {

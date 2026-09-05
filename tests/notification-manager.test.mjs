@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { NotificationDeliveryError, NotificationManager, browserNotification, telegramNotificationText } from "../dist/notifications/manager.js";
+import { NotificationManager, browserNotification, telegramNotificationText } from "../dist/notifications/manager.js";
 import { TelegramDeliveryError } from "../dist/notifications/telegram.js";
 
 const TOKEN = "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ_abc123";
@@ -144,15 +144,7 @@ test("browser, sound, and inherited Telegram can coexist for one monitoring even
     now: () => 42,
   });
 
-  const report = await manager.deliver(notification({ soundEnabled: true }));
-  assert.deepEqual(report, {
-    browser: "DELIVERED",
-    sound: "DELIVERED",
-    telegram: "DELIVERED",
-    browserAt: 42,
-    soundAt: 42,
-    telegramAt: 42,
-  });
+  await manager.deliver(notification({ soundEnabled: true }));
   assert.equal(browser.length, 1);
   assert.equal(sound.length, 1);
   assert.equal(telegram.length, 1);
@@ -185,46 +177,9 @@ test("notification channel failure is isolated from monitoring state", async () 
     now: () => 99,
   });
 
-  await assert.rejects(
-    () => manager.deliver(notification()),
-    (error) => {
-      assert.equal(error instanceof NotificationDeliveryError, true);
-      assert.deepEqual(error.report, {
-        browser: "DELIVERED",
-        sound: "NOT_REQUESTED",
-        telegram: "FAILED",
-        browserAt: 99,
-        telegramAt: 99,
-      });
-      return true;
-    },
-  );
+  await assert.rejects(() => manager.deliver(notification()), /monitoring state was not changed/);
   assert.equal(browserCalls, 1);
   assert.deepEqual(settings.snapshot().health, { status: "ERROR", checkedAt: 99, code: "RATE_LIMIT" });
-});
-
-test("Browser channel failure is reported without losing other channel outcomes", async () => {
-  const settings = settingsAccess(state({ enabled: false }));
-  const manager = new NotificationManager({
-    settings,
-    browser: { async send() { throw new Error("browser unavailable"); } },
-    telegram: { async send() { throw new Error("Telegram must not be used"); } },
-    now: () => 77,
-  });
-
-  await assert.rejects(
-    () => manager.deliver(notification()),
-    (error) => {
-      assert.equal(error instanceof NotificationDeliveryError, true);
-      assert.deepEqual(error.report, {
-        browser: "FAILED",
-        sound: "NOT_REQUESTED",
-        telegram: "NOT_REQUESTED",
-        browserAt: 77,
-      });
-      return true;
-    },
-  );
 });
 
 test("Telegram Test delivery remains explicit and never uses Browser or chat content", async () => {
